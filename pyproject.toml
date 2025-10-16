@@ -1,0 +1,24 @@
+[project]
+name = "transversal-star-compilation"
+version = "0.1.0"
+description = "A Python project for simulating rotation performance in quantum systems."
+authors = [
+    { name = "Wan-Hsuan Lin", email = "wanhsuanlin@g.ucla.edu" }
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.24.4",
+    "scipy>=1.10.1",
+    "stim>=1.15.0",
+]
+
+[tool.setuptools]
+packages = ["src"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=24.0",
+    "mypy>=1.0"
+]
