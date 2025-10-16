@@ -353,7 +353,6 @@ class SurfaceCodeResourceState:
 
         # Sample Hamming weight
         hamming_weight = np.random.choice(self.d + 1, p=probs)
-        hamming_weight = 1
         # Generate random bit string with sampled Hamming weight
         bit_string = np.zeros(self.d, dtype=int)
         if hamming_weight > 0:
