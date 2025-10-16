@@ -78,15 +78,10 @@ class SurfaceCodeResourceState:
         # search for root in [-pi/2, pi/2]
         sol = fsolve(
             f,
-            bracket=[-np.pi / 2, np.pi / 2],
-            method="brentq",
             x0=self.theta ** (1 / self.k),
+            factor=5,
         )
-
-        if sol.converged:
-            self.physical_theta = sol
-        else:
-            self.physical_theta = self.theta ** (1 / self.k)
+        self.physical_theta = sol.item()
 
     def setup_surface_code(self):
         """Setup the rotated surface code geometry and stabilizer structure."""
