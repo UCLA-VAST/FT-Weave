@@ -76,12 +76,17 @@ class SurfaceCodeResourceState:
             return s**self.k / (s ** (2 * self.k) + c ** (2 * self.k)) - target
 
         # search for root in [-pi/2, pi/2]
-        sol = root_scalar(f, bracket=[-np.pi / 2, np.pi / 2], method="brentq")
+        sol = root_scalar(
+            f,
+            bracket=[-np.pi / 2, np.pi / 2],
+            method="brentq",
+            x0=self.theta ** (1 / self.k),
+        )
 
         if sol.converged:
-            return sol.root
+            self.physical_theta = sol
         else:
-            raise ValueError("No root found for given a and d.")
+            self.physical_theta = self.theta ** (1 / self.k)
 
     def setup_surface_code(self):
         """Setup the rotated surface code geometry and stabilizer structure."""
