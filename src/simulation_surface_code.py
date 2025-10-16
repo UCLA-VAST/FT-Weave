@@ -4,7 +4,7 @@ from typing import Tuple, Dict
 from dataclasses import dataclass
 from scipy.special import comb
 import math
-from scipy.optimize import fsolve
+from scipy.optimize import minimize
 
 
 @dataclass
@@ -26,7 +26,12 @@ class SurfaceCodeResourceState:
     """
 
     def __init__(
-        self, code_distance: int, theta: float, p_ph: float, pauli_weight: int = 2
+        self,
+        code_distance: int,
+        theta: float,
+        physical_theta: float,
+        p_ph: float,
+        pauli_weight: int = 2,
     ):
         """
         Initialize the surface code resource state preparation.
@@ -34,55 +39,25 @@ class SurfaceCodeResourceState:
         Args:
             code_distance: Code distance d
             theta: Target rotation angle θ*
+            physical_theta: physical rotation angle
             p_ph: Physical error rate
             pauli_weight: Weight m of multi-Pauli rotation (default: d)
         """
         self.d = code_distance
         self.theta = theta
+        self.physical_theta = physical_theta
         self.rotation_weight = pauli_weight if pauli_weight else code_distance
         self.k = math.ceil(code_distance / pauli_weight)
         self.p_ph = p_ph
 
-        self.physical_theta = 0
-        self.set_physical_rotation()
+        tmp = self.compute_theta_n(0)
+        assert np.isclose(self.theta, tmp)
 
         # Setup surface code layout
         self.setup_surface_code()
 
         # Define stabilizers for postselection regime
         self.setup_postselection_stabilizers()
-
-    def set_physical_rotation(self):
-        """
-        Numerically solve for b given sin(a) = sin(b)^k / (sin(b)^(2k) + cos(b)^(2k)).
-
-        Parameters
-        ----------
-        a : float
-            Angle a in radians.
-        d : float
-            Exponent parameter.
-        guess : float, optional
-            Initial guess for b in radians.
-
-        Returns
-        -------
-        b : float
-            Numerical solution for b in radians (principal value in [-pi/2, pi/2]).
-        """
-        target = np.sin(self.theta)
-
-        def f(physical_theta):
-            s, c = np.sin(physical_theta), np.cos(physical_theta)
-            return s**self.k / (s ** (2 * self.k) + c ** (2 * self.k)) - target
-
-        # search for root in [-pi/2, pi/2]
-        sol = fsolve(
-            f,
-            x0=self.theta ** (1 / self.k),
-            factor=5,
-        )
-        self.physical_theta = sol.item()
 
     def setup_surface_code(self):
         """Setup the rotated surface code geometry and stabilizer structure."""
@@ -177,11 +152,11 @@ class SurfaceCodeResourceState:
         print(f"  Q_z (logical Z support): {self.Q_z} qubits")
 
     def compute_u_coefficients(self, n: int) -> complex:
-        """Compute u_n = i^n * sin^n(θ) * cos^(m-n)(θ) for weight-m rotation."""
+        """Compute u_n = i^n * sin^n(θ) * cos^(n)(k-θ) for weight-m rotation."""
         return (
             (1j) ** n
             * np.sin(self.physical_theta) ** n
-            * np.cos(self.physical_theta) ** (self.d - n)
+            * np.cos(self.physical_theta) ** (self.k - n)
         )
 
     def compute_sampling_probability(self, n: int) -> float:
@@ -195,16 +170,12 @@ class SurfaceCodeResourceState:
 
     def compute_theta_n(self, n: int) -> float:
         """Compute θ_n as per Eq. (C5) in the paper."""
-        k = self.k
-        u_k = self.compute_u_coefficients(k)
-        u_kn = self.compute_u_coefficients(k - n)
+        u_n = self.compute_u_coefficients(n)
+        u_kn = self.compute_u_coefficients(self.k - n)
 
-        denominator = np.sqrt(np.abs(u_k) ** 2 + np.abs(u_kn) ** 2)
-        if denominator < 1e-15:
-            return 0.0
-
+        denominator = np.sqrt(np.abs(u_n) ** 2 + np.abs(u_kn) ** 2)
         arg = np.abs(u_kn) / denominator
-        return np.arcsin(min(1.0, arg))
+        return np.arcsin(arg)
 
     def create_initialization_circuit(self) -> stim.Circuit:
         """
@@ -270,10 +241,9 @@ class SurfaceCodeResourceState:
         circuit.append("H", x_stabilizer_indices)
         circuit.append("DEPOLARIZE1", x_stabilizer_indices, self.p_ph)
 
-        circuit.append(
-            "X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph
-        )
         circuit.append("MR", x_stabilizer_indices + z_stabilizer_indices)
+
+        # Measurements of interest for the detector are the x stabilizer
 
         return circuit
 
@@ -292,7 +262,14 @@ class SurfaceCodeResourceState:
         circuit: stim.Circuit = self.create_initialization_circuit()
 
         # Line 2: Measure stabilizer set S to generate |+⟩_L
+        n_measurement = len(self.z_stabilizers) + len(self.x_stabilizers)
+
         circuit = self.measure_stabilizers(circuit)
+        for i in range(
+            1 + len(self.z_stabilizers),
+            n_measurement + 1,
+        ):
+            circuit.append("DETECTOR", [stim.target_rec(-i)])
 
         # Line 6: Apply transversal multi-Pauli rotation on Q_z
         # We simulate this by applying Z^b based on sampled bit string
@@ -301,17 +278,36 @@ class SurfaceCodeResourceState:
             for i, qubit in enumerate(self.Q_z[: len(bit_string)])
             if bit_string[i] == 1
         ]
-        circuit.append("Z", z_qubit)
+        if z_qubit:
+            circuit.append("Z_ERROR", z_qubit, 1)
 
         # Physical rotation gate (this introduces the non-Clifford component)
         # In practice, this would be R_z(θ) gate
         # We model errors on this operation
         circuit.append("DEPOLARIZE1", self.Q_z, self.p_ph)
-
         # Lines 7-11: Measure stabilizers twice for postselection
         for _ in range(2):
-            # for _ in range(2):
             circuit = self.measure_stabilizers(circuit)
+            for i in self.S_PS_x:
+                cur_index = i - n_measurement
+                circuit.append(
+                    "DETECTOR",
+                    [
+                        stim.target_rec(cur_index),
+                        stim.target_rec(cur_index - n_measurement),
+                    ],
+                )
+            for i in self.S_PS_z:
+                cur_index = i - n_measurement
+                circuit.append(
+                    "DETECTOR",
+                    [
+                        stim.target_rec(cur_index),
+                        stim.target_rec(cur_index - n_measurement),
+                    ],
+                )
+
+        # print(repr(circuit))
         return circuit
 
     def check_postselection(self, measurements: np.ndarray) -> Tuple[bool, str]:
@@ -327,15 +323,16 @@ class SurfaceCodeResourceState:
             (passed, failure_reason)
         """
         n_measurements = len(self.x_stabilizers) + len(self.z_stabilizers)
+        if not np.all(measurements[: len(self.x_stabilizers)] == 0):
+            return False, "init_syndrome"
 
-        # Line 3: Check if first round has unexpected syndromes 
         # Lines 9-10: Check two rounds of postselection measurements
-        # Only check S_PS_x, S_PS_z stabilizers 
-        for round_num in range(3):
-            start_idx = round_num * n_measurements
+        # Only check S_PS_x, S_PS_z stabilizers
+        for round_num in range(2):
+            start_idx = round_num * n_measurements + len(self.x_stabilizers)
             end_idx = start_idx + n_measurements
             round_measurements = measurements[start_idx:end_idx]
-
+            print(round_measurements)
             if not np.all(round_measurements[self.S_PS_x + self.S_PS_z] == 0):
                 return False, f"round_{round_num+1}_syndrome"
 
@@ -356,7 +353,7 @@ class SurfaceCodeResourceState:
 
         # Sample Hamming weight
         hamming_weight = np.random.choice(self.d + 1, p=probs)
-
+        hamming_weight = 1
         # Generate random bit string with sampled Hamming weight
         bit_string = np.zeros(self.d, dtype=int)
         if hamming_weight > 0:
@@ -379,9 +376,9 @@ class SurfaceCodeResourceState:
         circuit = self.create_full_protocol_circuit(bit_string)
         # print(repr(circuit))
         # Run simulation
-        sampler = circuit.compile_sampler()
+        sampler = circuit.compile_detector_sampler()
         measurements = sampler.sample(shots=1)[0]
-
+        # print(measurements)
         # Check postselection
         passed, failure_reason = self.check_postselection(measurements)
 
@@ -401,9 +398,9 @@ class SurfaceCodeResourceState:
         samples_per_weight = {n: 0 for n in range(self.k + 1)}
         passes_per_weight = {n: 0 for n in range(self.k + 1)}
         failure_counts = {
+            "init_syndrome": 0,
             "round_1_syndrome": 0,
             "round_2_syndrome": 0,
-            "round_3_syndrome": 0,
             "success": 0,
         }
 
@@ -438,7 +435,14 @@ class SurfaceCodeResourceState:
                 # Compute infidelity contribution
                 theta_n = self.compute_theta_n(n)
                 F_n = np.sin(theta_n - self.theta) ** 2
-
+                # print(n)
+                # print(
+                #     np.sin(self.physical_theta) ** (2 * self.k)
+                #     + np.cos(self.physical_theta) ** (2 * self.k)
+                # )
+                # print(q_sample_n)
+                # print(q_pass_n)
+                # print(F_n)
                 total_infidelity += q_sample_n * q_pass_n * F_n
 
         # Success rate
@@ -473,7 +477,11 @@ class SurfaceCodeResourceState:
 if __name__ == "__main__":
     # Parameters for T gate preparation (π/8 rotation)
     code_distance = 3  # Use d=5 for rotated surface code
-    theta = np.pi / 8  # T gate angle
+
+    physical_theta = 0.001
+    k = math.ceil(code_distance / 2)
+    p_ideal = np.sin(physical_theta) ** (2 * k) + np.cos(physical_theta) ** (2 * k)
+    theta = np.arcsin(np.sin(physical_theta) ** (k) / np.sqrt(p_ideal))
     # p_ph = 0.001  # Physical error rate
     p_ph = 0.00  # Physical error rate
 
@@ -482,7 +490,12 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # Create simulator
-    sim = SurfaceCodeResourceState(code_distance=code_distance, theta=theta, p_ph=p_ph)
+    sim = SurfaceCodeResourceState(
+        code_distance=code_distance,
+        theta=theta,
+        physical_theta=physical_theta,
+        p_ph=p_ph,
+    )
 
     # Run simulation
     result = sim.run_simulation(n_shots=1)
