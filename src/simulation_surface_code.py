@@ -4,7 +4,7 @@ from typing import Tuple, Dict
 from dataclasses import dataclass
 from scipy.special import comb
 import math
-from scipy.optimize import root_scalar
+from scipy.optimize import fsolve
 
 
 @dataclass
@@ -76,7 +76,7 @@ class SurfaceCodeResourceState:
             return s**self.k / (s ** (2 * self.k) + c ** (2 * self.k)) - target
 
         # search for root in [-pi/2, pi/2]
-        sol = root_scalar(
+        sol = fsolve(
             f,
             bracket=[-np.pi / 2, np.pi / 2],
             method="brentq",
