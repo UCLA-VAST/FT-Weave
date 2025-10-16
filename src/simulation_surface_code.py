@@ -12,6 +12,7 @@ class SimulationResult:
     """Container for simulation results"""
 
     infidelity: float
+    physical_angle: float
     success_rate: float
     samples_per_weight: Dict[int, int]
     passes_per_weight: Dict[int, int]
@@ -180,7 +181,7 @@ class SurfaceCodeResourceState:
         return (
             (1j) ** n
             * np.sin(self.physical_theta) ** n
-            * np.cos(self.physical_theta) ** (self.k - n)
+            * np.cos(self.physical_theta) ** (self.d - n)
         )
 
     def compute_sampling_probability(self, n: int) -> float:
@@ -327,17 +328,11 @@ class SurfaceCodeResourceState:
         """
         n_measurements = len(self.x_stabilizers) + len(self.z_stabilizers)
 
-        # Line 3: Check if first round has unexpected syndromes (all stabilizers)
-        # print(f"measurements: {measurements.shape}")
-        # print(f"measurements: {measurements}")
-        first_round = measurements[:n_measurements]
-        if not np.all(first_round == 0):
-            return False, "initial_syndrome"
-
+        # Line 3: Check if first round has unexpected syndromes 
         # Lines 9-10: Check two rounds of postselection measurements
-        # Only check S_PS_x, S_PS_z stabilizers (first 3 rows)
-        for round_num in range(2):
-            start_idx = n_measurements + round_num * n_measurements
+        # Only check S_PS_x, S_PS_z stabilizers 
+        for round_num in range(3):
+            start_idx = round_num * n_measurements
             end_idx = start_idx + n_measurements
             round_measurements = measurements[start_idx:end_idx]
 
@@ -350,7 +345,7 @@ class SurfaceCodeResourceState:
         """Sample bit string with correct probability distribution."""
         # Compute sampling probabilities for each Hamming weight
         probs = []
-        for n in range(self.k + 1):
+        for n in range(self.d + 1):
             probs.append(self.compute_sampling_probability(n))
 
         probs = np.array(probs)
@@ -360,12 +355,12 @@ class SurfaceCodeResourceState:
             probs = probs / np.sum(probs)
 
         # Sample Hamming weight
-        hamming_weight = np.random.choice(self.k + 1, p=probs)
+        hamming_weight = np.random.choice(self.d + 1, p=probs)
 
         # Generate random bit string with sampled Hamming weight
-        bit_string = np.zeros(self.k, dtype=int)
+        bit_string = np.zeros(self.d, dtype=int)
         if hamming_weight > 0:
-            positions = np.random.choice(self.k, size=hamming_weight, replace=False)
+            positions = np.random.choice(self.d, size=hamming_weight, replace=False)
             bit_string[positions] = 1
 
         return bit_string, hamming_weight
@@ -379,7 +374,7 @@ class SurfaceCodeResourceState:
         """
         # Sample bit string for syndrome subspace
         bit_string, n = self.sample_bit_string()
-        print(f"n: {n}, bit string: {bit_string}")
+        # print(f"n: {n}, bit string: {bit_string}")
         # Create and simulate circuit
         circuit = self.create_full_protocol_circuit(bit_string)
         # print(repr(circuit))
@@ -406,9 +401,9 @@ class SurfaceCodeResourceState:
         samples_per_weight = {n: 0 for n in range(self.k + 1)}
         passes_per_weight = {n: 0 for n in range(self.k + 1)}
         failure_counts = {
-            "initial_syndrome": 0,
             "round_1_syndrome": 0,
             "round_2_syndrome": 0,
+            "round_3_syndrome": 0,
             "success": 0,
         }
 
@@ -467,6 +462,7 @@ class SurfaceCodeResourceState:
 
         return SimulationResult(
             infidelity=infidelity,
+            physical_angle=self.physical_theta,
             success_rate=p_suc,
             samples_per_weight=samples_per_weight,
             passes_per_weight=passes_per_weight,

@@ -11,7 +11,7 @@ def simulate(code_distance: int, theta: float, p_ph: float, k: int) -> Simulatio
     )
 
     # Run simulation
-    result = simulator.run_simulation(n_shots=1)
+    result = simulator.run_simulation(n_shots=100_000)
 
     return result
 
@@ -37,12 +37,13 @@ def run_and_save_csv(
                 # Derived quantities
                 fidelity = 1 - result.infidelity
                 success_rate = result.success_rate
-                # Example: compute space-time volume as total passes
-                space_time = sum(result.passes_per_weight.values())
+                physical_angle = result.physical_angle
+                space_time = 0
 
                 writer.writerow(
                     {
                         "angle": theta,
+                        "physical angle": physical_angle,
                         "distance": d,
                         "fidelity": fidelity,
                         "success rate": success_rate,
@@ -56,4 +57,5 @@ def run_and_save_csv(
 # Example usage
 if __name__ == "__main__":
     angles = [math.pi / (2**i) for i in range(2, 11)]
-    run_and_save_csv(distances=[3, 5, 7], angles=[0.05, 0.1, 0.15], p_ph=0.001, k=2)
+    angles = [math.pi / (2**i) for i in range(8, 11)]
+    run_and_save_csv(distances=[3, 5, 7], angles=angles, p_ph=0.001, k=2)
