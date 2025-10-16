@@ -5,10 +5,10 @@ import math
 import numpy as np
 
 
-def simulate(code_distance: int, theta: float, p_ph: float, k: int) -> SimulationResult:
+def simulate(code_distance: int, angle: float, physical_angle: float, p_ph: float, k: int) -> SimulationResult:
     # Create simulator
     simulator = SurfaceCodeResourceState(
-        code_distance=code_distance, theta=theta, p_ph=p_ph
+        code_distance=code_distance, theta=angle, physical_theta=physical_angle, p_ph=p_ph
     )
 
     # Run simulation
@@ -24,14 +24,14 @@ def run_and_save_csv(
     csv_filename: str = "simulation_results.csv",
 ):
     # CSV Header
-    fieldnames = ["angle", "distance", "fidelity", "success rate", "space time"]
+    fieldnames = ["angle", "physical angle", "distance", "fidelity", "success rate", "space time"]
 
     with open(csv_filename, mode="w", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
         for d, physical_angle, logical_angle in distance_angles_pairs:
-            result = simulate(d, logical_angle, p_ph, k)
+            result = simulate(d, logical_angle, physical_angle, p_ph, k)
 
             # Derived quantities
             fidelity = 1 - result.infidelity
@@ -63,11 +63,9 @@ def collect_angles(
     code_distance: int, target_logical_angles: list[float]
 ) -> list[tuple[int, float, float]]:
     angle_pairs = []
-    physical_rotation_candidates = np.linspace(0, 0.1, 1000) + np.linspace(
-        0.1, 0.5, 1000
-    )
+    physical_rotation_candidates = np.linspace(0.001, 0.1, 1000) + np.linspace(0.1, 0.5, 1000)
     for angle in physical_rotation_candidates:
-        logical_angle = collect_angles(code_distance, angle)
+        logical_angle = logical_rotation(code_distance, angle)
         for target_logical_angle in target_logical_angles:
             if np.isclose(logical_angle, target_logical_angle):
                 angle_pairs.append((code_distance, angle, logical_angle))

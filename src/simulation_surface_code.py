@@ -332,7 +332,7 @@ class SurfaceCodeResourceState:
             start_idx = round_num * n_measurements + len(self.x_stabilizers)
             end_idx = start_idx + n_measurements
             round_measurements = measurements[start_idx:end_idx]
-            print(round_measurements)
+            # print(round_measurements)
             if not np.all(round_measurements[self.S_PS_x + self.S_PS_z] == 0):
                 return False, f"round_{round_num+1}_syndrome"
 
