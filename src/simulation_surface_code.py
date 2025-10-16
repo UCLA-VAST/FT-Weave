@@ -38,12 +38,12 @@ class SurfaceCodeResourceState:
         """
         self.d = code_distance
         self.theta = theta
+        self.rotation_weight = pauli_weight if pauli_weight else code_distance
+        self.k = math.ceil(code_distance / pauli_weight)
+        self.p_ph = p_ph
 
         self.physical_theta = 0
         self.set_physical_rotation()
-        self.p_ph = p_ph
-        self.rotation_weight = pauli_weight if pauli_weight else code_distance
-        self.k = math.ceil(code_distance / pauli_weight)
 
         # Setup surface code layout
         self.setup_surface_code()
