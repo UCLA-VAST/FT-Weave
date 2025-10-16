@@ -4,6 +4,7 @@ from typing import Tuple, Dict
 from dataclasses import dataclass
 from scipy.special import comb
 import math
+from scipy.optimize import root_scalar
 
 
 @dataclass
@@ -37,6 +38,9 @@ class SurfaceCodeResourceState:
         """
         self.d = code_distance
         self.theta = theta
+
+        self.physical_theta = 0
+        self.set_physical_rotation()
         self.p_ph = p_ph
         self.rotation_weight = pauli_weight if pauli_weight else code_distance
         self.k = math.ceil(code_distance / pauli_weight)
@@ -46,6 +50,38 @@ class SurfaceCodeResourceState:
 
         # Define stabilizers for postselection regime
         self.setup_postselection_stabilizers()
+
+    def set_physical_rotation(self):
+        """
+        Numerically solve for b given sin(a) = sin(b)^k / (sin(b)^(2k) + cos(b)^(2k)).
+
+        Parameters
+        ----------
+        a : float
+            Angle a in radians.
+        d : float
+            Exponent parameter.
+        guess : float, optional
+            Initial guess for b in radians.
+
+        Returns
+        -------
+        b : float
+            Numerical solution for b in radians (principal value in [-pi/2, pi/2]).
+        """
+        target = np.sin(self.theta)
+
+        def f(physical_theta):
+            s, c = np.sin(physical_theta), np.cos(physical_theta)
+            return s**self.k / (s ** (2 * self.k) + c ** (2 * self.k)) - target
+
+        # search for root in [-pi/2, pi/2]
+        sol = root_scalar(f, bracket=[-np.pi / 2, np.pi / 2], method="brentq")
+
+        if sol.converged:
+            return sol.root
+        else:
+            raise ValueError("No root found for given a and d.")
 
     def setup_surface_code(self):
         """Setup the rotated surface code geometry and stabilizer structure."""
@@ -141,7 +177,11 @@ class SurfaceCodeResourceState:
 
     def compute_u_coefficients(self, n: int) -> complex:
         """Compute u_n = i^n * sin^n(θ) * cos^(m-n)(θ) for weight-m rotation."""
-        return (1j) ** n * np.sin(self.theta) ** n * np.cos(self.theta) ** (self.k - n)
+        return (
+            (1j) ** n
+            * np.sin(self.physical_theta) ** n
+            * np.cos(self.physical_theta) ** (self.k - n)
+        )
 
     def compute_sampling_probability(self, n: int) -> float:
         """Compute q^sample_n = C(m,n) * (|u_n|^2 + |u_{m-n}|^2)."""
@@ -260,8 +300,7 @@ class SurfaceCodeResourceState:
             for i, qubit in enumerate(self.Q_z[: len(bit_string)])
             if bit_string[i] == 1
         ]
-        # circuit.append("Z", z_qubit)
-        circuit.append("Z", [0])
+        circuit.append("Z", z_qubit)
 
         # Physical rotation gate (this introduces the non-Clifford component)
         # In practice, this would be R_z(θ) gate
