@@ -51,7 +51,7 @@ class SurfaceCodeResourceState:
         self.p_ph = p_ph
 
         tmp = self.compute_theta_n(0)
-        assert np.isclose(self.theta, tmp)
+        assert np.isclose(self.theta, tmp), f"logical theta does not match input: {self.theta} <-> {tmp}"
 
         # Setup surface code layout
         self.setup_surface_code()
@@ -333,7 +333,7 @@ class SurfaceCodeResourceState:
             end_idx = start_idx + n_measurements
             round_measurements = measurements[start_idx:end_idx]
             # print(round_measurements)
-            if not np.all(round_measurements[self.S_PS_x + self.S_PS_z] == 0):
+            if not np.all(round_measurements == 0):
                 return False, f"round_{round_num+1}_syndrome"
 
         return True, "success"
@@ -420,10 +420,15 @@ class SurfaceCodeResourceState:
                 passes_per_weight[n] += 1
 
         # Compute final metrics following Eq. (C5) methodology
-        total_infidelity = 0.0
-        total_success = failure_counts["success"]
 
-        for n in range(self.k + 1):
+        # print("samples_per_weight")
+        # print(samples_per_weight)
+        # print("passes_per_weight")
+        # print(passes_per_weight)
+
+        total_infidelity = 0.0
+        p_suc = 0
+        for n in range(self.k):
             N_n_sample = samples_per_weight[n]
             N_n_pass = passes_per_weight[n]
 
@@ -442,11 +447,12 @@ class SurfaceCodeResourceState:
                 # print(q_sample_n)
                 # print(q_pass_n)
                 # print(F_n)
+                # print(q_sample_n * q_pass_n * F_n)
+                # input()
                 total_infidelity += q_sample_n * q_pass_n * F_n
 
-        # Success rate
-        p_suc = total_success / n_shots
-
+                # Success rate
+                p_suc += q_sample_n * q_pass_n
         # Normalize infidelity
         if p_suc > 0:
             infidelity = total_infidelity / p_suc
@@ -456,9 +462,10 @@ class SurfaceCodeResourceState:
         print(f"\n{'='*60}")
         print("Simulation Results:")
         print(f"{'='*60}")
-        print(f"Success rate (p_suc): {p_suc:.6f}")
-        print(f"Infidelity (1-F): {infidelity:.8f}")
-        print(f"Fidelity (F): {1-infidelity:.8f}")
+        print(f"Total infidelity: {total_infidelity:.6E}")
+        print(f"Success rate (p_suc): {p_suc:.6E}")
+        print(f"Infidelity (1-F): {infidelity:.8E}")
+        print(f"Fidelity (F): {1-infidelity:.8E}")
         print("\nFailure breakdown:")
         for reason, count in failure_counts.items():
             print(f"  {reason}: {count} ({count/n_shots*100:.2f}%)")
@@ -476,55 +483,59 @@ class SurfaceCodeResourceState:
 if __name__ == "__main__":
     # Parameters for T gate preparation (π/8 rotation)
     code_distance = 3  # Use d=5 for rotated surface code
+    m = 1
+    physical_thetas = [0.1]
+    # physical_thetas = [0.1, 0.001, 0.001]
+    for physical_theta in physical_thetas:
+        k = math.ceil(code_distance / m)
+        p_ideal = np.sin(physical_theta) ** (2 * k) + np.cos(physical_theta) ** (2 * k)
+        theta = np.arcsin(np.sin(physical_theta) ** (k) / np.sqrt(p_ideal))
+        # p_ph = 0.001  # Physical error rate
+        p_ph = 0.003  # Physical error rate
 
-    physical_theta = 0.001
-    k = math.ceil(code_distance / 2)
-    p_ideal = np.sin(physical_theta) ** (2 * k) + np.cos(physical_theta) ** (2 * k)
-    theta = np.arcsin(np.sin(physical_theta) ** (k) / np.sqrt(p_ideal))
-    # p_ph = 0.001  # Physical error rate
-    p_ph = 0.00  # Physical error rate
+        print("=" * 60)
+        print("Rotated Surface Code Resource State Preparation")
+        print(f"physical rotation:{physical_theta}, logical rotation: {theta}")
+        print("=" * 60)
 
-    print("=" * 60)
-    print("Rotated Surface Code Resource State Preparation")
-    print("=" * 60)
+        # Create simulator
+        sim = SurfaceCodeResourceState(
+            code_distance=code_distance,
+            theta=theta,
+            physical_theta=physical_theta,
+            p_ph=p_ph,
+            pauli_weight=m,
+        )
 
-    # Create simulator
-    sim = SurfaceCodeResourceState(
-        code_distance=code_distance,
-        theta=theta,
-        physical_theta=physical_theta,
-        p_ph=p_ph,
-    )
+        # Run simulation
+        result = sim.run_simulation(n_shots=10000)
 
-    # Run simulation
-    result = sim.run_simulation(n_shots=1)
+        # Detailed analysis
+        print(f"\n{'='*60}")
+        print("Detailed Statistics:")
+        print("=" * 60)
+        print("Samples per Hamming weight:")
+        for n, count in result.samples_per_weight.items():
+            if count > 0:
+                prob = sim.compute_sampling_probability(n)
+                print(f"  n={n}: {count} samples (expected prob: {prob:.4f})")
 
-    # Detailed analysis
-    print(f"\n{'='*60}")
-    print("Detailed Statistics:")
-    print("=" * 60)
-    print("Samples per Hamming weight:")
-    for n, count in result.samples_per_weight.items():
-        if count > 0:
-            prob = sim.compute_sampling_probability(n)
-            print(f"  n={n}: {count} samples (expected prob: {prob:.4f})")
+        print("\nPasses per Hamming weight:")
+        for n, count in result.passes_per_weight.items():
+            if count > 0 and result.samples_per_weight[n] > 0:
+                pass_rate = count / result.samples_per_weight[n]
+                print(f"  n={n}: {count} passes ({pass_rate*100:.2f}%)")
 
-    print("\nPasses per Hamming weight:")
-    for n, count in result.passes_per_weight.items():
-        if count > 0 and result.samples_per_weight[n] > 0:
-            pass_rate = count / result.samples_per_weight[n]
-            print(f"  n={n}: {count} passes ({pass_rate*100:.2f}%)")
+        # Compute theoretical leading order
+        print("=" * 60)
+        print("Leading Order Analysis (n=1):")
+        print("=" * 60)
+        if result.samples_per_weight[1] > 0:
+            q_sample_1 = sim.compute_sampling_probability(1)
+            q_pass_1 = result.passes_per_weight[1] / result.samples_per_weight[1]
+            theta_1 = sim.compute_theta_n(1)
 
-    # Compute theoretical leading order
-    print("=" * 60)
-    print("Leading Order Analysis (n=1):")
-    print("=" * 60)
-    if result.samples_per_weight[1] > 0:
-        q_sample_1 = sim.compute_sampling_probability(1)
-        q_pass_1 = result.passes_per_weight[1] / result.samples_per_weight[1]
-        theta_1 = sim.compute_theta_n(1)
-
-        print(f"q_sample_1 = {q_sample_1:.6f}")
-        print(f"q_pass_1 = {q_pass_1:.6f}")
-        print(f"θ_1 = {theta_1:.6f} rad")
-        print(f"sin²(θ_1 - θ*) = {np.sin(theta_1 - theta)**2:.8f}")
+            print(f"q_sample_1 = {q_sample_1:.6E}")
+            print(f"q_pass_1 = {q_pass_1:.6E}")
+            print(f"θ_1 = {theta_1:.6} rad")
+            print(f"sin²(θ_1 - θ*) = {np.sin(theta_1 - theta)**2:.8E}\n\n")
