@@ -31,7 +31,7 @@ class SurfaceCodeResourceState:
         theta: float,
         physical_theta: float,
         p_ph: float,
-        pauli_weight: int = 2,
+        pauli_weight: int,
     ):
         """
         Initialize the surface code resource state preparation.
@@ -46,7 +46,7 @@ class SurfaceCodeResourceState:
         self.d = code_distance
         self.theta = theta
         self.physical_theta = physical_theta
-        self.rotation_weight = pauli_weight if pauli_weight else code_distance
+        self.rotation_weight = pauli_weight
         self.k = math.ceil(code_distance / pauli_weight)
         self.p_ph = p_ph
 
@@ -485,6 +485,7 @@ if __name__ == "__main__":
     code_distance = 3  # Use d=5 for rotated surface code
     m = 1
     physical_thetas = [0.1]
+    physical_thetas = [0.221351] 
     # physical_thetas = [0.1, 0.001, 0.001]
     for physical_theta in physical_thetas:
         k = math.ceil(code_distance / m)
@@ -508,7 +509,7 @@ if __name__ == "__main__":
         )
 
         # Run simulation
-        result = sim.run_simulation(n_shots=10000)
+        result = sim.run_simulation(n_shots=100)
 
         # Detailed analysis
         print(f"\n{'='*60}")
