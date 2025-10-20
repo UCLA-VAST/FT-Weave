@@ -15,7 +15,7 @@ def simulate(code_distance: int, angle: float, physical_angle: float, p_ph: floa
     )
 
     # Run simulation
-    result = simulator.run_simulation(n_shots=100_000)
+    result = simulator.run_simulation(n_shots=1000)
 
     return result
 

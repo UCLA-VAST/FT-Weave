@@ -14,7 +14,6 @@ class SimulationResult:
     infidelity: float
     physical_angle: float
     success_rate: float
-    samples_per_weight: Dict[int, int]
     passes_per_weight: Dict[int, int]
     failure_counts: Dict[str, int]
 
@@ -134,7 +133,7 @@ class SurfaceCodeResourceState:
             elif abs(row - col) == 4:
                 self.S_PS_x.append(idx)
 
-        # Filter Z-stabilizers: only first 3 rows
+        # Filter Z-stabilizers:
         for idx in range(len(self.z_stabilizers)):
             row, col = self.z_stab_coords[idx]
             if row == col or abs(row - col) == 2:
@@ -338,38 +337,36 @@ class SurfaceCodeResourceState:
 
         return True, "success"
 
-    def sample_bit_string(self) -> Tuple[np.ndarray, int]:
-        """Sample bit string with correct probability distribution."""
-        # Compute sampling probabilities for each Hamming weight
-        probs = []
-        for n in range(self.d + 1):
-            probs.append(self.compute_sampling_probability(n))
+    def precompute_sample_probability(self):
+        self.sample_probs = []
+        for n in range(math.floor(self.k // 2) + 1):
+            self.sample_probs.append(self.compute_sampling_probability(n))
 
-        probs = np.array(probs)
-        if np.sum(probs) < 1e-15:
-            probs = np.ones_like(probs) / len(probs)
+        self.sample_probs = np.array(self.sample_probs)
+        if np.sum(self.sample_probs) < 1e-15:
+            self.sample_probs = np.ones_like(self.sample_probs) / len(self.sample_probs)
         else:
-            probs = probs / np.sum(probs)
+            self.sample_probs = self.sample_probs / np.sum(self.sample_probs)
 
-        # Sample Hamming weight
-        hamming_weight = np.random.choice(self.d + 1, p=probs)
+    def sample_bit_string(self, hamming_weight: int) -> np.ndarray:
+        """Sample bit string with certain hamming weight"""
         # Generate random bit string with sampled Hamming weight
         bit_string = np.zeros(self.d, dtype=int)
         if hamming_weight > 0:
             positions = np.random.choice(self.d, size=hamming_weight, replace=False)
             bit_string[positions] = 1
 
-        return bit_string, hamming_weight
+        return bit_string
 
-    def run_single_trial(self) -> Tuple[bool, int, str]:
+    def run_single_trial(self, n: int) -> Tuple[bool, str]:
         """
         Run single trial of Algorithm 1.
 
         Returns:
-            (passed, hamming_weight, failure_reason)
+            (passed, failure_reason)
         """
         # Sample bit string for syndrome subspace
-        bit_string, n = self.sample_bit_string()
+        bit_string = self.sample_bit_string(n)
         # print(f"n: {n}, bit string: {bit_string}")
         # Create and simulate circuit
         circuit = self.create_full_protocol_circuit(bit_string)
@@ -381,7 +378,7 @@ class SurfaceCodeResourceState:
         # Check postselection
         passed, failure_reason = self.check_postselection(measurements)
 
-        return passed, n, failure_reason
+        return passed, failure_reason
 
     def run_simulation(self, n_shots: int = 10000) -> SimulationResult:
         """
@@ -398,7 +395,6 @@ class SurfaceCodeResourceState:
         print(f"physical rotation:{self.physical_theta}, logical rotation: {self.theta}")
         print("=" * 60)
         # Initialize statistics
-        samples_per_weight = {n: 0 for n in range(self.k + 1)}
         passes_per_weight = {n: 0 for n in range(self.k + 1)}
         failure_counts = {
             "init_syndrome": 0,
@@ -406,38 +402,36 @@ class SurfaceCodeResourceState:
             "round_2_syndrome": 0,
             "success": 0,
         }
-
+        self.precompute_sample_probability()
         print(
             f"Running {n_shots} shots for d={self.d}, θ={self.theta:.4f}, p_ph={self.p_ph}..."
         )
 
-        for shot in range(n_shots):
-            if (shot + 1) % 1000 == 0:
-                print(f"  Progress: {shot+1}/{n_shots}")
+        for n in range(math.floor(self.k // 2) + 1):
+            print(f"Compute pass probability of n = {n}")
+            for shot in range(n_shots):
+                if (shot + 1) % 5000 == 0:
+                    print(f"  Progress: {shot+1}/{n_shots}")
 
-            passed, n, failure_reason = self.run_single_trial()
+                passed, failure_reason = self.run_single_trial(n)
 
-            samples_per_weight[n] += 1
-            failure_counts[failure_reason] += 1
+                failure_counts[failure_reason] += 1
 
-            if passed:
-                passes_per_weight[n] += 1
+                if passed:
+                    passes_per_weight[n] += 1
 
         # Compute final metrics following Eq. (C5) methodology
 
-        # print("samples_per_weight")
-        # print(samples_per_weight)
         # print("passes_per_weight")
         # print(passes_per_weight)
         total_infidelity = 0.0
         p_suc = 0
-        for n in range(self.k):
-            N_n_sample = samples_per_weight[n]
+        for n in range(math.floor(self.k // 2) + 1):
             N_n_pass = passes_per_weight[n]
 
-            if N_n_sample > 0 and N_n_pass > 0:
-                q_sample_n = self.compute_sampling_probability(n) / 2
-                q_pass_n = N_n_pass / N_n_sample
+            if N_n_pass > 0:
+                q_sample_n = self.sample_probs[n]
+                q_pass_n = N_n_pass / n_shots
 
                 # Compute infidelity contribution
                 theta_n = self.compute_theta_n(n)
@@ -456,33 +450,30 @@ class SurfaceCodeResourceState:
         print(f"\n{'='*60}")
         print("Detailed Statistics:")
         print("=" * 60)
-        print("Samples per Hamming weight:")
-        for n, count in samples_per_weight.items():
-            if count > 0:
-                prob = self.compute_sampling_probability(n)
-                print(f"  n={n}: {count} samples (expected prob: {prob:.4f})")
+        print("Sample probability:")
+        for n, prob in enumerate(self.sample_probs):
+            prob = self.compute_sampling_probability(n)
+            print(f"  n={n}: {prob:.4f}")
 
         print("\nPasses per Hamming weight:")
         for n, count in passes_per_weight.items():
-            if count > 0 and samples_per_weight[n] > 0:
-                pass_rate = count / samples_per_weight[n]
-                theta_n = self.compute_theta_n(n)
-                F_n = np.sin(theta_n - self.theta) ** 2
-                print(f"  n={n}: {count} passes ({pass_rate*100:.2f}%), F_n={F_n:.6e}")
+            pass_rate = count / n_shots
+            theta_n = self.compute_theta_n(n)
+            F_n = np.sin(theta_n - self.theta) ** 2
+            print(f"  n={n}: {count} passes ({pass_rate*100:.2f}%), F_n={F_n:.6e}")
 
         # Compute theoretical leading order
         print("=" * 60)
         print("Leading Order Analysis (n=1):")
         print("=" * 60)
-        if samples_per_weight[1] > 0:
-            q_sample_1 = sim.compute_sampling_probability(1)
-            q_pass_1 = passes_per_weight[1] / samples_per_weight[1]
-            theta_1 = sim.compute_theta_n(1)
+        q_sample_1 = self.compute_sampling_probability(1)
+        q_pass_1 = passes_per_weight[1] / n_shots
+        theta_1 = self.compute_theta_n(1)
 
-            print(f"q_sample_1 = {q_sample_1:.6E}")
-            print(f"q_pass_1 = {q_pass_1:.6E}")
-            print(f"θ_1 = {theta_1:.6} rad")
-            print(f"sin²(θ_1 - θ*) = {np.sin(theta_1 - theta)**2:.8E}\n\n")
+        print(f"q_sample_1 = {q_sample_1:.6E}")
+        print(f"q_pass_1 = {q_pass_1:.6E}")
+        print(f"θ_1 = {theta_1:.6} rad")
+        print(f"sin²(θ_1 - θ*) = {np.sin(theta_1 - self.theta)**2:.8E}\n\n")
              
         print(f"\n{'='*60}")
         print("Simulation Results:")
@@ -499,7 +490,6 @@ class SurfaceCodeResourceState:
             infidelity=infidelity,
             physical_angle=self.physical_theta,
             success_rate=p_suc,
-            samples_per_weight=samples_per_weight,
             passes_per_weight=passes_per_weight,
             failure_counts=failure_counts,
         )
@@ -519,7 +509,7 @@ if __name__ == "__main__":
         p_ph = 0.001  # Physical error rate
 
         # Create simulator
-        sim = SurfaceCodeResourceState(
+        simulator = SurfaceCodeResourceState(
             code_distance=code_distance,
             theta=theta,
             physical_theta=physical_theta,
@@ -528,6 +518,6 @@ if __name__ == "__main__":
         )
 
         # Run simulation
-        result = sim.run_simulation(n_shots=5000)
+        result = simulator.run_simulation(n_shots=1000)
 
         
