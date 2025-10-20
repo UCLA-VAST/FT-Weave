@@ -15,7 +15,7 @@ def simulate(code_distance: int, angle: float, physical_angle: float, p_ph: floa
     )
 
     # Run simulation
-    result = simulator.run_simulation(n_shots=1000)
+    result = simulator.run_simulation(n_shots=5000)
 
     return result
 
@@ -156,7 +156,7 @@ def find_physical_angle_by_sympy(logical_angle: float, k: int) -> float | None:
 if __name__ == "__main__":
     # target_logical_angles = [math.pi / (2**i) for i in range(2, 11)]
     # clifford_levels = [4, 5, 6, 7, 8, 9, 10]
-    clifford_levels = [4, 6, 8, 10]
+    clifford_levels = [2, 3, 4, 5, 6, 7, 8, 9, 10]
     target_logical_angles = [math.pi / (2**i) for i in clifford_levels]
     pauli_weight = 1
     distance_angles_pairs = []
