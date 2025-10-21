@@ -185,13 +185,14 @@ class SurfaceCodeResourceState:
         # Initialize in |+⟩
         circuit.append("RX", range(self.n_data_qubits))
         # Single-qubit depolarizing after initialization
-        circuit.append("DEPOLARIZE1", range(self.n_data_qubits), self.p_ph)
+        circuit.append("Z_ERROR", range(self.n_data_qubits), self.p_ph)
 
         return circuit
 
     def measure_stabilizers(
         self,
         circuit: stim.Circuit,
+        reset: bool,
     ) -> stim.Circuit:
         """
         Measure a set of stabilizers (X or Z type).
@@ -211,9 +212,10 @@ class SurfaceCodeResourceState:
         z_stabilizer_indices = [
             ancilla_offset + i for i in range(len(self.z_stabilizers))
         ]
-
-        # Initialize ancilla
-        circuit.append("R", x_stabilizer_indices + z_stabilizer_indices)
+        if reset:
+            # Initialize ancilla
+            circuit.append("R", x_stabilizer_indices + z_stabilizer_indices)
+            circuit.append("X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph)
 
         # For X stabilizer: H on ancilla
         circuit.append("H", x_stabilizer_indices)
@@ -239,8 +241,9 @@ class SurfaceCodeResourceState:
         # For X stabilizer: H on ancilla
         circuit.append("H", x_stabilizer_indices)
         circuit.append("DEPOLARIZE1", x_stabilizer_indices, self.p_ph)
-
+        circuit.append("X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph)
         circuit.append("MR", x_stabilizer_indices + z_stabilizer_indices)
+        circuit.append("X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph)
 
         # Measurements of interest for the detector are the x stabilizer
 
@@ -263,7 +266,7 @@ class SurfaceCodeResourceState:
         # Line 2: Measure stabilizer set S to generate |+⟩_L
         n_measurement = len(self.z_stabilizers) + len(self.x_stabilizers)
 
-        circuit = self.measure_stabilizers(circuit)
+        circuit = self.measure_stabilizers(circuit, reset=True)
         for i in range(
             1 + len(self.z_stabilizers),
             n_measurement + 1,
@@ -286,7 +289,7 @@ class SurfaceCodeResourceState:
         circuit.append("DEPOLARIZE1", self.Q_z, self.p_ph)
         # Lines 7-11: Measure stabilizers twice for postselection
         for _ in range(2):
-            circuit = self.measure_stabilizers(circuit)
+            circuit = self.measure_stabilizers(circuit, reset=False)
             for i in self.S_PS_x:
                 cur_index = i - n_measurement
                 circuit.append(
@@ -395,7 +398,7 @@ class SurfaceCodeResourceState:
         print(f"physical rotation:{self.physical_theta}, logical rotation: {self.theta}")
         print("=" * 60)
         # Initialize statistics
-        passes_per_weight = {n: 0 for n in range(self.k + 1)}
+        passes_per_weight = {n: 0 for n in range(math.floor(self.k // 2) + 1)}
         failure_counts = {
             "init_syndrome": 0,
             "round_1_syndrome": 0,
@@ -483,6 +486,7 @@ class SurfaceCodeResourceState:
         print(f"Infidelity (1-F): {infidelity:.8E}")
         print(f"Fidelity (F): {1-infidelity:.8E}")
         print("\nFailure breakdown:")
+        n_shots *= (math.floor(self.k // 2) + 1)
         for reason, count in failure_counts.items():
             print(f"  {reason}: {count} ({count/n_shots*100:.2f}%)")
 

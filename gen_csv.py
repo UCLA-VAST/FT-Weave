@@ -160,7 +160,7 @@ if __name__ == "__main__":
     target_logical_angles = [math.pi / (2**i) for i in clifford_levels]
     pauli_weight = 1
     distance_angles_pairs = []
-    code_distances = [3, 5, 7]
+    code_distances = [7, 9, 11, 13]
     for d in code_distances:
         distance_angles_pairs += collect_angles(d, target_logical_angles, pauli_weight)
     run_and_save_csv(distance_angles_pairs=distance_angles_pairs, p_ph=0.001, pauli_weight=1)
