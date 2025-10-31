@@ -55,7 +55,7 @@ def plot_circuit_execution(
         else:
 
             # Annotate with operation and qubit
-            no_text_operations = {"RUS_succsss", "RUS_fail", "TUM_fail"}
+            no_text_operations = {"RUS_succsss", "RUS_fail", "TMR_fail"}
             if operation in no_text_operations:
                 zorder = 10
                 start_time -= 0.05
@@ -125,7 +125,7 @@ def plot_circuit_execution(
         mpatches.Patch(
             facecolor=color_map["TUM_fail"],
             edgecolor="black",
-            label="TUM:fail",
+            label="TMR:fail",
         ),
         # plt.Line2D(
         #     [0],
