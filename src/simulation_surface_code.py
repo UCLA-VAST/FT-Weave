@@ -50,7 +50,9 @@ class SurfaceCodeResourceState:
         self.p_ph = p_ph
 
         tmp = self.compute_theta_n(0)
-        assert np.isclose(self.theta, tmp), f"logical theta does not match input: {self.theta} <-> {tmp}"
+        assert np.isclose(
+            self.theta, tmp
+        ), f"logical theta does not match input: {self.theta} <-> {tmp}"
 
         # Setup surface code layout
         self.setup_surface_code()
@@ -165,6 +167,7 @@ class SurfaceCodeResourceState:
             return 0.0
         u_n = self.compute_u_coefficients(n)
         u_kn = self.compute_u_coefficients(self.k - n)
+        print(n, u_kn, u_n)
         return comb(self.k, n, exact=True) * (np.abs(u_n) ** 2 + np.abs(u_kn) ** 2)
 
     def compute_theta_n(self, n: int) -> float:
@@ -215,7 +218,9 @@ class SurfaceCodeResourceState:
         if reset:
             # Initialize ancilla
             circuit.append("R", x_stabilizer_indices + z_stabilizer_indices)
-            circuit.append("X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph)
+            circuit.append(
+                "X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph
+            )
 
         # For X stabilizer: H on ancilla
         circuit.append("H", x_stabilizer_indices)
@@ -241,9 +246,13 @@ class SurfaceCodeResourceState:
         # For X stabilizer: H on ancilla
         circuit.append("H", x_stabilizer_indices)
         circuit.append("DEPOLARIZE1", x_stabilizer_indices, self.p_ph)
-        circuit.append("X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph)
+        circuit.append(
+            "X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph
+        )
         circuit.append("MR", x_stabilizer_indices + z_stabilizer_indices)
-        circuit.append("X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph)
+        circuit.append(
+            "X_ERROR", x_stabilizer_indices + z_stabilizer_indices, self.p_ph
+        )
 
         # Measurements of interest for the detector are the x stabilizer
 
@@ -345,6 +354,7 @@ class SurfaceCodeResourceState:
         for n in range(math.floor(self.k // 2) + 1):
             self.sample_probs.append(self.compute_sampling_probability(n))
 
+        print(self.sample_probs)
         self.sample_probs = np.array(self.sample_probs)
         if np.sum(self.sample_probs) < 1e-15:
             self.sample_probs = np.ones_like(self.sample_probs) / len(self.sample_probs)
@@ -395,7 +405,9 @@ class SurfaceCodeResourceState:
         """
         print("=" * 60)
         print("Rotated Surface Code Resource State Preparation")
-        print(f"physical rotation:{self.physical_theta}, logical rotation: {self.theta}")
+        print(
+            f"physical rotation:{self.physical_theta}, logical rotation: {self.theta}"
+        )
         print("=" * 60)
         # Initialize statistics
         passes_per_weight = {n: 0 for n in range(math.floor(self.k // 2) + 1)}
@@ -409,6 +421,15 @@ class SurfaceCodeResourceState:
         print(
             f"Running {n_shots} shots for d={self.d}, θ={self.theta:.4f}, p_ph={self.p_ph}..."
         )
+
+        print(f"\n{'='*60}")
+        print("Detailed Statistics:")
+        print("=" * 60)
+        print("Sample probability:")
+        for n, prob in enumerate(self.sample_probs):
+            print(f"  n={n}: {prob:.4f}")
+
+        return None
 
         for n in range(math.floor(self.k // 2) + 1):
             print(f"Compute pass probability of n = {n}")
@@ -455,7 +476,6 @@ class SurfaceCodeResourceState:
         print("=" * 60)
         print("Sample probability:")
         for n, prob in enumerate(self.sample_probs):
-            prob = self.compute_sampling_probability(n)
             print(f"  n={n}: {prob:.4f}")
 
         print("\nPasses per Hamming weight:")
@@ -477,7 +497,7 @@ class SurfaceCodeResourceState:
         print(f"q_pass_1 = {q_pass_1:.6E}")
         print(f"θ_1 = {theta_1:.6} rad")
         print(f"sin²(θ_1 - θ*) = {np.sin(theta_1 - self.theta)**2:.8E}\n\n")
-             
+
         print(f"\n{'='*60}")
         print("Simulation Results:")
         print(f"{'='*60}")
@@ -486,7 +506,7 @@ class SurfaceCodeResourceState:
         print(f"Infidelity (1-F): {infidelity:.8E}")
         print(f"Fidelity (F): {1-infidelity:.8E}")
         print("\nFailure breakdown:")
-        n_shots *= (math.floor(self.k // 2) + 1)
+        n_shots *= math.floor(self.k // 2) + 1
         for reason, count in failure_counts.items():
             print(f"  {reason}: {count} ({count/n_shots*100:.2f}%)")
 
@@ -501,9 +521,10 @@ class SurfaceCodeResourceState:
 
 if __name__ == "__main__":
     # Parameters for T gate preparation (π/8 rotation)
-    code_distance = 5  # Use d=5 for rotated surface code
+    code_distance = 9  # Use d=5 for rotated surface code
     m = 1
-    physical_thetas = [0.304540927] # 0.003067962	
+    physical_thetas = [0.304540927]  # 0.003067962
+    physical_thetas = [0.6580324677129111]  # 0.09817477042468103
     # physical_thetas = [0.1, 0.001, 0.001]
     for physical_theta in physical_thetas:
         k = math.ceil(code_distance / m)
@@ -522,6 +543,4 @@ if __name__ == "__main__":
         )
 
         # Run simulation
-        result = simulator.run_simulation(n_shots=1000)
-
-        
+        result = simulator.run_simulation(n_shots=10)
