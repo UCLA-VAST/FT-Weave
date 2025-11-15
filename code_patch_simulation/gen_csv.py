@@ -1,17 +1,31 @@
 import csv
 from typing import List
-from src.simulation_surface_code import SimulationResult, SurfaceCodeResourceState
+from code_patch_simulation.simulation_surface_code import (
+    SimulationResult,
+    SurfaceCodeResourceState,
+)
 import math
 import numpy as np
 import sympy as sp
 from scipy.optimize import fsolve
 import pickle
-import os 
+import os
 
-def simulate(code_distance: int, angle: float, physical_angle: float, p_ph: float, pauli_weight: int) -> SimulationResult:
+
+def simulate(
+    code_distance: int,
+    angle: float,
+    physical_angle: float,
+    p_ph: float,
+    pauli_weight: int,
+) -> SimulationResult:
     # Create simulator
     simulator = SurfaceCodeResourceState(
-        code_distance=code_distance, theta=angle, physical_theta=physical_angle, p_ph=p_ph, pauli_weight=pauli_weight
+        code_distance=code_distance,
+        theta=angle,
+        physical_theta=physical_angle,
+        p_ph=p_ph,
+        pauli_weight=pauli_weight,
     )
 
     # Run simulation
@@ -27,7 +41,14 @@ def run_and_save_csv(
     csv_filename: str = "simulation_results.csv",
 ):
     # CSV Header
-    fieldnames = ["angle", "physical angle", "distance", "fidelity", "success rate", "space time"]
+    fieldnames = [
+        "angle",
+        "physical angle",
+        "distance",
+        "fidelity",
+        "success rate",
+        "space time",
+    ]
 
     with open(csv_filename, mode="w", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -73,27 +94,30 @@ def collect_angles(
             if np.isclose(logical_angle, obtain_logical_rotation):
                 angle_pairs.append((code_distance, physical_angle, logical_angle))
             else:
-                print(f"logical rotation is not close to the target rotation: {obtain_logical_rotation}, {logical_angle}")
+                print(
+                    f"logical rotation is not close to the target rotation: {obtain_logical_rotation}, {logical_angle}"
+                )
     if not angle_pairs:
         for angle in [0.1, 0.01, 0.001]:
             logical_angle = logical_rotation(angle, k)
             angle_pairs.append((code_distance, angle, logical_angle))
     return angle_pairs
 
+
 def find_physical_angle_by_sympy(logical_angle: float, k: int) -> float | None:
     # Define the variable
-    x = sp.Symbol('x', real=True)
+    x = sp.Symbol("x", real=True)
     # Define the equation
     # lhs = sp.asin(sp.sin(x)**2 / (sp.sin(x)**(2*k) + sp.cos(x)**(2*k)))
     # rhs = logical_angle
-    lhs = sp.sin(x)**k / sp.sqrt((sp.sin(x)**(2*k) + sp.cos(x)**(2*k)))
+    lhs = sp.sin(x) ** k / sp.sqrt((sp.sin(x) ** (2 * k) + sp.cos(x) ** (2 * k)))
     rhs = sp.sin(logical_angle)
 
     equation = sp.Eq(lhs, rhs)
 
     print("Equation to solve:")
     print(equation)
-    print("\n" + "="*50 + "\n")
+    print("\n" + "=" * 50 + "\n")
 
     try:
         solutions = sp.solve(equation, x)
@@ -106,7 +130,7 @@ def find_physical_angle_by_sympy(logical_angle: float, k: int) -> float | None:
         print(f"Error: {e}")
         solutions = []
 
-    print("\n" + "="*50 + "\n")
+    print("\n" + "=" * 50 + "\n")
 
     # ! numerical method does not work
     # Numerical approach - find solutions in [-pi, pi]
@@ -129,7 +153,7 @@ def find_physical_angle_by_sympy(logical_angle: float, k: int) -> float | None:
     #         sol = fsolve(equation_func, guess, full_output=True)
     #         x_sol = sol[0][0]
     #         info = sol[1]
-            
+
     #         # Check if it's a valid solution in range
     #         if -np.pi <= x_sol <= np.pi and info['fvec'][0]**2 < 1e-10:
     #             # Check if this solution is new (not already found)
@@ -152,6 +176,7 @@ def find_physical_angle_by_sympy(logical_angle: float, k: int) -> float | None:
     #         return sol
     return None
 
+
 # Example usage
 if __name__ == "__main__":
     # target_logical_angles = [math.pi / (2**i) for i in range(2, 11)]
@@ -163,4 +188,6 @@ if __name__ == "__main__":
     code_distances = [7, 9, 11, 13]
     for d in code_distances:
         distance_angles_pairs += collect_angles(d, target_logical_angles, pauli_weight)
-    run_and_save_csv(distance_angles_pairs=distance_angles_pairs, p_ph=0.001, pauli_weight=1)
+    run_and_save_csv(
+        distance_angles_pairs=distance_angles_pairs, p_ph=0.001, pauli_weight=1
+    )
