@@ -231,6 +231,53 @@ def assign_factories_for_batch(
     return factory_assignments
 
 
+# TODO2: I have finished this function. Please check it.
+def collect_injection_sequence(tmr_simulation, qubit_trackers):
+    """
+    Collect injection sequence organized by injection rounds.
+
+    Groups qubits that can be injected in parallel based on which factories
+    successfully prepared their target angles (TMR phase) and are ready for injection,
+    organized by generation level.
+
+    Args:
+        tmr_simulation: List of bool indicating TMR preparation success for each factory
+        qubit_trackers: Dict mapping qubit_id -> QubitAngleTracker
+
+    Returns:
+        injection_sequence: List of lists, where each element represents an injection round.
+                           Each injection round is a list of (qubit, factory_ids) tuples.
+                           factory_ids is a list of factory IDs that can inject for this qubit.
+    """
+    injection_sequence = []
+
+    for qubit, tracker in qubit_trackers.items():
+
+        # Get factories with target angle that successfully passed TMR
+        generation_to_factories = {}
+        max_generation = 0
+        for factory_id, angle in tracker.factories:
+            if tmr_simulation[factory_id]:
+                generation = tracker.get_generation(angle)
+                if generation not in generation_to_factories:
+                    generation_to_factories[generation] = []
+                generation_to_factories[generation].append(factory_id)
+                max_generation = max(max_generation, generation)
+
+        for i in range(max_generation + 1):
+            if i in generation_to_factories:
+                assert (
+                    len(injection_sequence) >= i
+                ), "Injection sequence not long enough"
+                if len(injection_sequence) == i:
+                    injection_sequence.append([])
+                injection_sequence[i].append((qubit, generation_to_factories[i]))
+            else:
+                break
+
+    return injection_sequence
+
+
 def phase_2_execute_tmr_preparation(
     factory_assignments,
     circuit_moment,
@@ -378,10 +425,9 @@ def phase_3_simulate_and_inject(
                         qubit,
                     )
                 )
-                continue
 
             # Simulate preparation
-            if simulate_angle_preparation(success_rate):
+            else:
                 qubit_injections += 1
                 execution_log.append(
                     (
@@ -435,20 +481,6 @@ def phase_3_simulate_and_inject(
                     )
                     removed_angles.add(theta)
                     target_theta *= 2  # Need to prepare 2θ next
-
-            else:
-                print(
-                    f"✗ Qubit {qubit}: angle {theta:.0f}° preparation failed (p={success_rate:.2f})"
-                )
-                execution_log.append(
-                    (
-                        qubit_begin_time,
-                        qubit_begin_time,
-                        factory_id,
-                        "TMR_fail",
-                        qubit,
-                    )
-                )
 
         # Update target angle for this qubit
         tracker.target_angle = target_theta
@@ -548,10 +580,18 @@ def factory_angle_execution(n_factories, target_qubits_angles):
         # the current imeplementation iterates based on qubits to find the injection path.
         # In reality, we should to a round of injection on all qubits and get the RUS results.
         # Based on the RUS results, we do the next runs of injections. Therefore, we want to
-        # change phase_3_simulate_and_inject to
-        # for angle in [theta, 2theta, 4theta, ...]:
-        #     do injection
-        #     simulate all injections based on TMR_simulation
+        # change phase_3_simulate_and_inject to the following psuedo-code:
+        #
+        # collect the maximum number of injections among all qubits
+        # qubit_factories_pair: tuple[int,list[int]:
+        # injection_sequence: list[list[qubit_factories_pair]]. A element is a list of qubits that can be
+        # injected at this injection round with the possible factories.
+        # injection_sequence = collect_injection_sequence(tmr_simulation, qubit_trackers)
+        # initialize qubits_to_inject with all qubits that need injections
+        # for batch_injection in injection_sequence:
+        #     assign_injection(qubits_to_inject, batch_injection, circuit_moment, execution_log)
+        #     rus_simulation = simulate_TMR_preparation(factory_assignments)
+        #     update_qubits_to_inject(qubits_to_inject, rus_simulation)
 
         # PHASE 3: Simulate preparation success and attempt injections
         max_injections_this_round, target_qubits_angles = phase_3_simulate_and_inject(
