@@ -12,7 +12,11 @@ from .config import (
     LOOKAHEAD_LEVEL,
     PRECISION,
 )
-from .simulation import simulate_angle_preparation, simulate_injection
+from .simulation import (
+    simulate_TMR_preparation,
+    simulate_RUS_injection,
+    simulate_injection,
+)
 
 random.seed(42)
 
@@ -278,6 +282,24 @@ def collect_injection_sequence(tmr_simulation, qubit_trackers):
     return injection_sequence
 
 
+def update_qubits_to_inject(qubits_to_inject: list[int], rus_simulation) -> list[int]:
+    """
+    Update the list of qubits to inject based on RUS simulation results.
+    Args:
+        qubits_to_inject: List of qubit IDs that need injections
+        rus_simulation: List of bool indicating RUS injection success for each qubit
+    Returns:
+        Updated list of qubit IDs that still need injections
+    """
+    qubits_to_inject_updated = []
+    for idx, success in enumerate(rus_simulation):
+        if success:
+            continue  # Injection succeeded, remove from list
+        else:
+            qubits_to_inject_updated.append(qubits_to_inject[idx])
+    return qubits_to_inject_updated
+
+
 def phase_2_execute_tmr_preparation(
     factory_assignments,
     circuit_moment,
@@ -340,24 +362,6 @@ def phase_2_execute_tmr_preparation(
     )
 
     return circuit_moment, execution_log
-
-
-def simulate_TMR_preparation(
-    factory_assignments: list[tuple[float, int, float]],
-) -> list[bool]:
-    """
-    Simulate TMR preparation success for each factory.
-
-    Args:
-        factory_assignments: List of (angle, qubit, success_rate) tuples for each factory
-
-    Returns:
-        List of boolean values indicating whether each factory's TMR preparation was successful.
-    """
-    return [
-        simulate_angle_preparation(success_rate)
-        for _, _, success_rate in factory_assignments
-    ]
 
 
 def phase_3_simulate_and_inject(
@@ -586,12 +590,25 @@ def factory_angle_execution(n_factories, target_qubits_angles):
         # qubit_factories_pair: tuple[int,list[int]:
         # injection_sequence: list[list[qubit_factories_pair]]. A element is a list of qubits that can be
         # injected at this injection round with the possible factories.
-        # injection_sequence = collect_injection_sequence(tmr_simulation, qubit_trackers)
-        # initialize qubits_to_inject with all qubits that need injections
-        # for batch_injection in injection_sequence:
-        #     assign_injection(qubits_to_inject, batch_injection, circuit_moment, execution_log)
-        #     rus_simulation = simulate_TMR_preparation(factory_assignments)
-        #     update_qubits_to_inject(qubits_to_inject, rus_simulation)
+        injection_sequence = collect_injection_sequence(tmr_simulation, qubit_trackers)
+        # if injection_sequence:
+        #     print("injection_sequence")
+        #     print(injection_sequence)
+        #     # initialize qubits_to_inject with all qubits that need injections
+        #     qubits_to_inject = [qubit for qubit, _ in injection_sequence[0]]
+        #     print("qubits_to_inject")
+        #     print(qubits_to_inject)
+        #     input()
+        #     for batch_injection in injection_sequence:
+        #         # qubit_factory_pairs: list[tuple(qubit, factory_ids)]
+        #         # TODO2: implement assign_injection
+        #         qubit_factory_pairs = assign_injection(
+        #             qubits_to_inject, batch_injection, circuit_moment, execution_log
+        #         )
+        #         rus_simulation = simulate_RUS_injection(qubit_factory_pairs)
+        #         qubits_to_inject = update_qubits_to_inject(
+        #             qubits_to_inject, rus_simulation
+        #         )
 
         # PHASE 3: Simulate preparation success and attempt injections
         max_injections_this_round, target_qubits_angles = phase_3_simulate_and_inject(
