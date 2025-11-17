@@ -30,7 +30,7 @@ def plot_circuit_execution(
         "CNOT": "#e74c3c",
         "Rz": "#e7ab3c",
         "Barrier": "#000000",
-        "RUS_succsss": "#E01414",
+        "RUS_success": "#E01414",
         "RUS_fail": "#DDA413",
         "TUM_fail": "#007E15",
     }
@@ -55,7 +55,7 @@ def plot_circuit_execution(
         else:
 
             # Annotate with operation and qubit
-            no_text_operations = {"RUS_succsss", "RUS_fail", "TMR_fail"}
+            no_text_operations = {"RUS_success", "RUS_fail", "TMR_fail"}
             if operation in no_text_operations:
                 zorder = 10
                 start_time -= 0.05
@@ -113,7 +113,7 @@ def plot_circuit_execution(
             facecolor=color_map["CNOT"], edgecolor="black", label="CNOT (Injection)"
         ),
         mpatches.Patch(
-            facecolor=color_map["RUS_succsss"],
+            facecolor=color_map["RUS_success"],
             edgecolor="black",
             label="RUS:succsss",
         ),
