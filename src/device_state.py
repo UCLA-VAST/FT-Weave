@@ -79,6 +79,9 @@ class QubitAngleTracker:
         """Check if any factories are working on this qubit."""
         return len(self.factories) > 0
 
+    def double_target_angle(self):
+        self.target_angle *= 2
+
     def __repr__(self):
         return f"QubitTracker(qubit={self.qubit_id}, target={self.target_angle}, factories={len(self.factories)})"
 

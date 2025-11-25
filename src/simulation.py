@@ -44,14 +44,24 @@ def simulate_TMR_preparation(factory_pool: FactoryPool):
             results.append(False)
 
 
-def simulate_RUS_injection(factory_pool: FactoryPool):
+def simulate_RUS_injection(
+    qubit_factory_pairs: list[tuple[int, int]], factory_pool: FactoryPool
+) -> list[bool]:
     """
     Simulate TMR preparation success for each factory.
 
     Args:
-        qubit_factory_pairs: List of (qubit, factory_ids)
+        qubit_factory_pairs: list[tuple(qubit, factory_ids)]
+        factory_pool: FactoryPool object containing Factory objects
+
+    Returns:
+        rus_simulation: List of bool indicating RUS injection success for each qubit
 
     """
-    for factory in factory_pool.get_rus_factories():
+    rus_simulation = []
+    for qubit, factory_id in qubit_factory_pairs:
         injection_result = simulate_injection()
+        factory = factory_pool.get_factory_by_id(factory_id)
         factory.set_rus_state(injection_result)
+        rus_simulation.append(injection_result)
+    return rus_simulation

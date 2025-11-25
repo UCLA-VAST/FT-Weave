@@ -1,6 +1,8 @@
 import heapq
 import random
 
+from collections import defaultdict
+
 from .config import (
     TMR_P,
     TMR_Q,
@@ -234,14 +236,21 @@ def collect_injection_sequence(
         # Get factories with target angle that successfully passed TMR
         generation_to_factories = {}
         max_generation = 0
+        removed_factory = []
         for factory_id, angle in tracker.factories:
             factory = factory_pool.get_factory_by_id(factory_id)
-            if factory is not None and factory.tmr_state:
-                generation = tracker.get_generation(angle)
-                if generation not in generation_to_factories:
-                    generation_to_factories[generation] = []
-                generation_to_factories[generation].append(factory_id)
-                max_generation = max(max_generation, generation)
+            if factory is not None:
+                if factory.tmr_state:
+                    generation = tracker.get_generation(angle)
+                    if generation not in generation_to_factories:
+                        generation_to_factories[generation] = []
+                    generation_to_factories[generation].append(factory_id)
+                    max_generation = max(max_generation, generation)
+                else:
+                    factory_pool.free_factory(factory_id)
+                    removed_factory.append((factory_id, angle))
+        for factory_id, angle in removed_factory:
+            tracker.remove_factory(factory_id, angle)
 
         for i in range(max_generation + 1):
             if i in generation_to_factories:
@@ -252,28 +261,48 @@ def collect_injection_sequence(
                     injection_sequence.append([])
                 injection_sequence[i].append((qubit, generation_to_factories[i]))
             else:
-                # todo3: keep a factory for each higher generations and free others
                 # Free up factories for this qubit that are working on higher generations
                 # If a lower generation is missing, higher-generation preparations
                 # cannot be used for injection; mark those factories idle so they
                 # can be reassigned in the next scheduling phase.
                 # Collect factories to free to avoid modifying the list while iterating.
-                # factories_to_free = [
-                #     (factory_id, angle)
-                #     for factory_id, angle in list(tracker.factories)
-                #     if tracker.get_generation(angle) > i
-                # ]
-                # for factory_id, angle in factories_to_free:
-                #     # Mark factory assignment as free
-                #     factory_pool.free_factory(factory_id)
-                #     # Remove the factory from the tracker
-                #     tracker.remove_factory(factory_id, angle)
-                break
+                factories_to_free = defaultdict(list)
+                for factory_id, angle in list(tracker.factories):
+                    factories_to_free[angle].append(factory_id)
+
+                for angle, factory_ids in factories_to_free.items():
+                    if len(factory_ids) > 1:
+                        for factory_id in factory_ids[1:]:
+                            # Mark factory assignment as free
+                            factory_pool.free_factory(factory_id)
+                            # Remove the factory from the tracker
+                            tracker.remove_factory(factory_id, angle)
 
     return injection_sequence
 
 
-def update_qubits_to_inject(qubits_to_inject: list[int], rus_simulation) -> list[int]:
+def assign_injection(
+    successful_qubits: set[int],
+    batch_injection: list[tuple[int, list[int]]],
+) -> list[tuple[int, int]]:
+    qubit_factory_pairs = []
+    for qubit, factory_ids in batch_injection:
+        if qubit in successful_qubits:
+            continue
+        # todo(f): may optimize assignment based on the location to enhance cnot parallelism
+        qubit_factory_pairs.append((qubit, factory_ids[0]))
+
+    return qubit_factory_pairs
+
+
+def update_qubit_states(
+    successful_qubits: set[int],
+    qubit_factory_pairs: list[tuple[int, int]],
+    rus_simulation: list[bool],
+    qubit_trackers: dict[int, QubitAngleTracker],
+    factory_pool: FactoryPool,
+    primary_queue,
+):
     """
     Update the list of qubits to inject based on RUS simulation results.
     Args:
@@ -283,12 +312,46 @@ def update_qubits_to_inject(qubits_to_inject: list[int], rus_simulation) -> list
         Updated list of qubit IDs that still need injections
     """
     qubits_to_inject_updated = []
-    for idx, success in enumerate(rus_simulation):
+    for (qubit, factory_id), success in zip(qubit_factory_pairs, rus_simulation):
+        tracker = qubit_trackers[qubit]
         if success:
-            continue  # Injection succeeded, remove from list
+            for factory_id, _ in tracker.factories:
+                factory_pool.free_factory(factory_id)
+            successful_qubits.add(qubit)
+            tracker.clear_all()
+            # Injection succeeded, remove from list
         else:
-            qubits_to_inject_updated.append(qubits_to_inject[idx])
+            # Free factories for removed angles
+            injected_angle = tracker.target_angle
+            removed_factories = tracker.remove_angle(injected_angle)
+            for factory_id, _ in removed_factories:
+                factory_pool.free_factory(factory_id)
+            tracker.double_target_angle()
+            new_target_angle = tracker.target_angle
+            target_success_rate = calculate_success_rate(new_target_angle)
+            target_count = tracker.get_angle_count(new_target_angle)
+
+            if target_count == 0:
+                heapq.heappush(
+                    primary_queue, (0, target_success_rate, new_target_angle, qubit)
+                )
+            qubits_to_inject_updated.append(qubit)
     return qubits_to_inject_updated
+
+
+def construct_primary_queue(
+    successful_qubits: set[int], qubit_trackers: dict[int, QubitAngleTracker]
+) -> list[int]:
+    primary_queue = []
+    for qubit, tracker in qubit_trackers.items():
+        if qubit in successful_qubits:
+            continue
+        else:
+            angle = tracker.target_angle
+            success_rate = calculate_success_rate(angle)
+            heapq.heappush(primary_queue, (0, success_rate, angle, qubit))
+
+    return primary_queue
 
 
 def phase_2_execute_tmr_preparation(
@@ -345,6 +408,27 @@ def phase_2_execute_tmr_preparation(
     )
 
     return circuit_moment, execution_log
+
+
+def phase_3_execute_rus_injection(
+    qubit_factory_pairs: list[tuple[int, int]],
+    factory_pool: FactoryPool,
+    circuit_moment: int,
+    execution_log: list,
+) -> list[bool]:
+    rus_simulation = simulate_RUS_injection(qubit_factory_pairs, factory_pool)
+    for (qubit, factory_id), injection_result in zip(
+        qubit_factory_pairs, rus_simulation
+    ):
+        write_injection_log(
+            execution_log,
+            circuit_moment,
+            factory_id,
+            "RUS_success" if injection_result else "RUS_fail",
+            qubit,
+        )
+
+    return rus_simulation
 
 
 def phase_3_simulate_and_inject(
@@ -517,6 +601,8 @@ def factory_angle_execution(n_factories, target_qubits_angles):
 
     while len(target_qubits_angles) > len(successful_qubits):
         # PHASE 1: Assign idle factories to prepare angles
+        print("primary_queue")
+        print(primary_queue)
         phase_1_assign_factories(
             qubit_trackers,
             factory_pool,
@@ -536,7 +622,6 @@ def factory_angle_execution(n_factories, target_qubits_angles):
 
         simulate_TMR_preparation(factory_pool)
 
-        # TODO2: pass TMR_simulation to phase_3_inject. In phase_3_simulate_and_inject,
         # the current imeplementation iterates based on qubits to find the injection path.
         # In reality, we should to a round of injection on all qubits and get the RUS results.
         # Based on the RUS results, we do the next runs of injections. Therefore, we want to
@@ -547,38 +632,43 @@ def factory_angle_execution(n_factories, target_qubits_angles):
         # injection_sequence: list[list[qubit_factories_pair]]. A element is a list of qubits that can be
         # injected at this injection round with the possible factories.
         injection_sequence = collect_injection_sequence(qubit_trackers, factory_pool)
-        # if injection_sequence:
-        #     print("injection_sequence")
-        #     print(injection_sequence)
-        #     # initialize qubits_to_inject with all qubits that need injections
-        #     qubits_to_inject = [qubit for qubit, _ in injection_sequence[0]]
-        #     print("qubits_to_inject")
-        #     print(qubits_to_inject)
-        #     input()
-        #     for batch_injection in injection_sequence:
-        #         # qubit_factory_pairs: list[tuple(qubit, factory_ids)]
-        #         # TODO2: implement assign_injection
-        #         qubit_factory_pairs = assign_injection(
-        #             qubits_to_inject, batch_injection, circuit_moment, execution_log
-        #         )
-        #         rus_simulation = simulate_RUS_injection(qubit_factory_pairs)
-        #         qubits_to_inject = update_qubits_to_inject(
-        #             qubits_to_inject, rus_simulation
-        #         )
+        if injection_sequence:
+            # print("injection_sequence")
+            # print(injection_sequence)
+            # input()
+            for batch_injection in injection_sequence:
+                # qubit_factory_pairs: list[tuple(qubit, factory_ids)]
+                qubit_factory_pairs = assign_injection(
+                    successful_qubits, batch_injection
+                )
+                rus_simulation = phase_3_execute_rus_injection(
+                    qubit_factory_pairs, factory_pool, circuit_moment, execution_log
+                )
+                circuit_moment += CNOT_TIME + SE_TIME
+                update_qubit_states(
+                    successful_qubits,
+                    qubit_factory_pairs,
+                    rus_simulation,
+                    qubit_trackers,
+                    factory_pool,
+                    primary_queue,
+                )
+
+        primary_queue = construct_primary_queue(successful_qubits, qubit_trackers)
 
         # PHASE 3: Simulate preparation success and attempt injections
-        max_injections_this_round, target_qubits_angles = phase_3_simulate_and_inject(
-            qubit_trackers,
-            factory_pool,
-            target_qubits_angles,
-            successful_qubits,
-            circuit_moment,
-            execution_log,
-            primary_queue,
-        )
+        # max_injections_this_round, target_qubits_angles = phase_3_simulate_and_inject(
+        #     qubit_trackers,
+        #     factory_pool,
+        #     target_qubits_angles,
+        #     successful_qubits,
+        #     circuit_moment,
+        #     execution_log,
+        #     primary_queue,
+        # )
+        # circuit_moment += len(injection_sequence) * (CNOT_TIME + SE_TIME)
 
         # Add time for injection attempts (CNOT + SE per injection)
-        circuit_moment += max_injections_this_round * (CNOT_TIME + SE_TIME)
         execution_log.append(
             (
                 circuit_moment,
