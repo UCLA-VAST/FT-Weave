@@ -15,7 +15,7 @@ from .simulation import (
     calculate_success_rate,
 )
 
-from .device_state import FactoryPool, QubitAngleTracker
+from .ds.device_state import FactoryPool, QubitAngleTracker
 
 from .util import write_execution_log, write_injection_log
 

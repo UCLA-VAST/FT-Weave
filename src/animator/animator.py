@@ -1,9 +1,10 @@
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
+from pyqtgraph.Qt import QtCore, QtWidgets
 from pyqtgraph.exporters import ImageExporter
 import numpy as np
 import bisect
 import imageio
+from src.ds.architecture import Architecture
 
 
 class Animator:
@@ -31,8 +32,8 @@ class Animator:
     def animate(
         self,
         code: dict,
+        architecture: Architecture,
         output: str,
-        scaling_factor: int = None,
         font: int = 10,
         ffmpeg: str = "ffmpeg",
     ):
@@ -44,6 +45,7 @@ class Animator:
             font (int, optional): font size in the animation. Defaults to 10.
         """
         self.code = code
+        self.architecture = architecture
         self.output = output
         self.font_size = font
 
@@ -75,7 +77,7 @@ class Animator:
         self.app.exec_()
 
         # Save video after animation completes
-        # self.save_video()
+        self.save_video()
 
     def create_schedule(self):
         """Create animation schedule"""
@@ -228,7 +230,7 @@ class Animator:
                 line = pg.InfiniteLine(
                     pos=0,
                     angle=90,
-                    pen=pg.mkPen((0, 0, 0, 0), style=QtCore.Qt.DashLine),
+                    pen=pg.mkPen((0, 0, 0, 0), style=QtCore.Qt.PenStyle.DashLine),
                     bounds=(y_min, y_max),  # Restrict vertical line to plot height
                 )
                 self.plot.addItem(line)
@@ -239,7 +241,7 @@ class Animator:
                 line = pg.InfiniteLine(
                     pos=0,
                     angle=0,
-                    pen=pg.mkPen((0, 0, 0, 0), style=QtCore.Qt.DashLine),
+                    pen=pg.mkPen((0, 0, 0, 0), style=QtCore.Qt.PenStyle.DashLine),
                     bounds=(x_min, x_max),  # Restrict horizontal line to plot width
                 )
                 self.plot.addItem(line)
@@ -411,13 +413,13 @@ class Animator:
         for col_id, col_x in zip(inst["col_id"], inst["col_x"]):
             self.aod_col_lines[aod_id][col_id].setPos(col_x)
             self.aod_col_lines[aod_id][col_id].setPen(
-                pg.mkPen((*color, alpha), style=QtCore.Qt.DashLine, width=2)
+                pg.mkPen((*color, alpha), style=QtCore.Qt.PenStyle.DashLine, width=2)
             )
 
         for row_id, row_y in zip(inst["row_id"], inst["row_y"]):
             self.aod_row_lines[aod_id][row_id].setPos(row_y)
             self.aod_row_lines[aod_id][row_id].setPen(
-                pg.mkPen((*color, alpha), style=QtCore.Qt.DashLine, width=2)
+                pg.mkPen((*color, alpha), style=QtCore.Qt.PenStyle.DashLine, width=2)
             )
 
     def update_deactivate(self, ratio: float, time: float, inst: dict, aod_id: int):
@@ -429,12 +431,12 @@ class Animator:
 
         for col_id in inst["col_id"]:
             self.aod_col_lines[aod_id][col_id].setPen(
-                pg.mkPen((*color, alpha), style=QtCore.Qt.DashLine, width=2)
+                pg.mkPen((*color, alpha), style=QtCore.Qt.PenStyle.DashLine, width=2)
             )
 
         for row_id in inst["row_id"]:
             self.aod_row_lines[aod_id][row_id].setPen(
-                pg.mkPen((*color, alpha), style=QtCore.Qt.DashLine, width=2)
+                pg.mkPen((*color, alpha), style=QtCore.Qt.PenStyle.DashLine, width=2)
             )
 
     def update_move(
@@ -501,7 +503,7 @@ class Animator:
             y_pos = interpolate(ratio, row_begin_y, row_end_y)
             self.aod_row_lines[aod_id][row_id].setPos(y_pos)
             self.aod_row_lines[aod_id][row_id].setPen(
-                pg.mkPen(color, style=QtCore.Qt.DashLine, width=2)
+                pg.mkPen(color, style=QtCore.Qt.PenStyle.DashLine, width=2)
             )
 
         for col_id, col_begin_x, col_end_x in zip(
@@ -510,7 +512,7 @@ class Animator:
             x_pos = interpolate(ratio, col_begin_x, col_end_x)
             self.aod_col_lines[aod_id][col_id].setPos(x_pos)
             self.aod_col_lines[aod_id][col_id].setPen(
-                pg.mkPen(color, style=QtCore.Qt.DashLine, width=2)
+                pg.mkPen(color, style=QtCore.Qt.PenStyle.DashLine, width=2)
             )
 
     def update_1qGate(self, inst: dict):

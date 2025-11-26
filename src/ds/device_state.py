@@ -2,7 +2,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .config import PRECISION
+from ..config import PRECISION
 
 # ============================================================================
 # DATA STRUCTURES

@@ -8,8 +8,11 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
+    "imageio>=2.35.1",
     "matplotlib>=3.7.5",
     "numpy>=1.24.4",
+    "pyqt5>=5.15.11",
+    "pyqtgraph>=0.13.3",
     "scipy>=1.10.1",
     "simpy>=4.1.1",
     "sortedcontainers>=2.4.0",

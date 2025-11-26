@@ -108,15 +108,7 @@ class Init(BaseInst):
         self.code = {
             "type": self.prompt["type"],
             "id": self.prompt["id"],
-            "init_locs": [
-                [
-                    i,
-                    self.qubit_mapping[0][i][0],
-                    self.qubit_mapping[0][i][1],
-                    self.qubit_mapping[0][i][2],
-                ]
-                for i in range(self.n_q)
-            ],
+            "init_locs": self.qubit_mapping,
         }
 
     def verify(self):

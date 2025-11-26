@@ -10,8 +10,8 @@ from copy import deepcopy
 from collections import defaultdict
 
 
-from zac.writer.inst import RearrangeJob
-from zac.writer.inst import OneQGate
+from src.writer.inst import RearrangeJob
+from src.writer.inst import OneQGate
 
 
 def rearrange_rowbyrow(job: RearrangeJob):
@@ -333,7 +333,137 @@ def coalesce_same_angle(single_qubit_gates: OneQGate):
     # )
 
 
+def rearrange_all(job: RearrangeJob):
+    """Expand a high-level rearrange job into a sequence of detailed instructions that can be executed by the hardware.
+
+    The expansion follows a row-by-row strategy, including detailed instructions:
+    - Activation of rows and columns
+    - Parking movements to avoid collisions
+    - Big movements to new positions
+    - Deactivation of rows and columns
+
+    Parameters
+    ----------
+        - job: RearrangeJob
+    """
+    inst = job.prompt
+    details = []  # all detailed instructions
+
+    # ---------------------- find out qubit locations ----------------------
+    init_coords = []  # coords of qubits, shape is same as "begin_locs"
+    row_locs = set()
+    col_locs = set()
+    for loc in inst["begin_locs"]:
+        exact_location = job.architecture.exact_SLM_location(loc[1], loc[2], loc[3])
+        init_coords.append(
+            {
+                "id": loc[0],
+                "x": exact_location[0],
+                "y": exact_location[1],
+            }
+        )
+        row_locs.add((loc[1], loc[2]))
+        col_locs.add((loc[1], loc[3]))
+    row_locs = sorted(list(row_locs))
+    col_locs = sorted(list(col_locs))
+
+    end_coords = []  # coords of qubits, shape is same as "begin_locs"
+    end_row_locs = set()
+    end_col_locs = set()
+    # these coords are going to be updated as we construct the detail insts
+
+    for loc in inst["end_locs"]:
+        exact_location = job.architecture.exact_SLM_location(loc[1], loc[2], loc[3])
+        end_coords.append(
+            {
+                "id": loc[0],
+                "x": exact_location[0],
+                "y": exact_location[1],
+            }
+        )
+        end_row_locs.add((loc[1], loc[2]))
+        end_col_locs.add((loc[1], loc[3]))
+    end_row_locs = sorted(list(end_row_locs))
+    end_col_locs = sorted(list(end_col_locs))
+
+    # -------------------- activation  -------------------------
+
+    row_ys = []
+    col_xs = []
+    for loc in row_locs:
+        row_y = job.architecture.exact_SLM_location(loc[0], loc[1], 0)[1]
+        row_ys.append(row_y)
+    for loc in col_locs:
+        col_x = job.architecture.exact_SLM_location(loc[0], 0, loc[1])[0]
+        col_xs.append(col_x)
+
+    end_row_ys = []
+    end_col_xs = []
+    for loc in end_row_locs:
+        row_y = job.architecture.exact_SLM_location(loc[0], loc[1], 0)[1]
+        end_row_ys.append(row_y)
+    for loc in end_col_locs:
+        col_x = job.architecture.exact_SLM_location(loc[0], 0, loc[1])[0]
+        end_col_xs.append(col_x)
+
+    # activate
+    row_id = [i for i in range(len(row_ys))]
+    col_id = [i for i in range(len(col_xs))]
+    activate = {
+        "type": "activate",
+        "row_id": row_id,
+        "row_y": row_ys,
+        "row_loc": row_locs,
+        "col_id": col_id,
+        "col_x": col_xs,
+        "col_loc": col_locs,
+    }
+    details.append(activate)
+    # ---------------------------------------------------------------------
+
+    # ------------------------- big move ----------------------------------
+    big_move = {
+        "type": "move:big",
+        "move_type": "big",
+        "row_id": row_id,
+        "row_y_begin": row_ys,
+        "row_y_end": end_row_ys,
+        "row_loc_begin": row_locs,
+        "row_loc_end": end_row_locs,
+        "col_id": col_id,
+        "col_x_begin": col_xs,
+        "col_x_end": end_col_xs,
+        "col_loc_begin": col_locs,
+        "col_loc_end": end_col_locs,
+        "begin_coord": [init_coords],
+        "end_coord": [end_coords],
+    }
+
+    details.append(big_move)
+    # ---------------------------------------------------------------------
+
+    # --------------------------- deactivation ----------------------------
+    details.append(
+        {
+            "type": "deactivate",
+            "row_id": row_id,
+            "col_id": col_id,
+        }
+    )
+    # ---------------------------------------------------------------------
+
+    for inst_counter, detail_inst in enumerate(details):
+        detail_inst["id"] = inst_counter
+
+    # Adding Details and Flatten Rearrange
+    job.code = job.prompt
+    job.code["insts"] = details
+    job.code["aod_qubits"] = job.code["aod_qubits"]
+    job.code["begin_locs"] = job.code["begin_locs"]
+    job.code["end_locs"] = job.code["end_locs"]
+
+
 DEFAULT_EXPANSION_STRATEGIES = {
-    "rearrangeJob": rearrange_rowbyrow,
+    "rearrangeJob": rearrange_all,
     "1qGate": coalesce_same_angle,
 }

@@ -101,7 +101,12 @@ def tfim_trotter_plaquette(
     periodic flag ignored for plaquette tiling here (open BC assumed).
     """
     N = Lx * Ly
-    circuit_instructions = []
+    circuit_instructions = [
+        {
+            "type": "init",
+            "id": 0,
+        }
+    ]
 
     dt = t / n_steps
     alpha = -J * dt  # as in the earlier derivation: exp(-i alpha Z_iZ_j)
@@ -137,7 +142,6 @@ def tfim_trotter_plaquette(
                     magic_state_locations,
                     logical_grid,
                 )
-
         # X-field layer (apply RX on every qubit)
         phi = -2.0 * h * dt  # RX(phi) = exp(-i phi/2 X) implements exp(i h dt X)
         all_qubits = [i for i in range(N)]

@@ -18,26 +18,26 @@
         "zone_id": 0,
         "slms": [
             {
-                "id": 1,
+                "id": 0,
                 "site_seperation": [12, 10],
                 "r": 40,
                 "c": 40,
                 "location": [0, 0]
             },
             {
-                "id": 2,
+                "id": 1,
                 "site_seperation": [12, 10],
                 "r": 40,
                 "c": 40,
                 "location": [2, 0]
             }],
         "offset": [0, 0],
-        "dimension": [122, 400]
+        "dimension": [400, 480]
     }],
     "aods":[
         {"id": 0, "site_seperation": 2, "r": 100, "c": 100},
         {"id": 1, "site_seperation": 2, "r": 100, "c": 100}
     ],
-    "arch_range": [[0, 0], [125, 410]],
-    "rydberg_range": [[[0, 0], [122, 400]]]
+    "arch_range": [[0, 0], [175, 150]],
+    "rydberg_range": [[[0, 0], [400, 480]]]
 }

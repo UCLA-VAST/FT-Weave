@@ -265,3 +265,38 @@ class Architecture:
         x = slm.site_seperation[0] * loc[2] + slm.location[0]
         y = slm.site_seperation[1] * loc[1] + slm.location[1]
         return (x, y)
+
+    def movement_duration(self, x1, y1, x2, y2) -> float:
+        """Estimate movement time to move between two (x, y) positions.
+
+        The implementation uses a simple kinematic approximation:
+        t = sqrt(d / a)
+        where d is the Euclidean distance between (x1, y1) and (x2, y2),
+        and `a` is a constant acceleration-like parameter.
+
+        Parameters
+        ------
+        - `x1`, `y1` : float
+            Coordinates of the start position.
+        - `x2`, `y2` : float
+            Coordinates of the target position.
+
+        Returns
+        -------
+        - float
+            Estimated time to move between the two positions using the
+            same distance units as the input coordinates. The time units
+            correspond to the units implied by the constant `a` used below.
+
+        Notes
+        -----
+        - `a` is a tuned constant (0.00275 in this code). Ensure `a` is
+          consistent with the units of the provided coordinates.
+        - This is a simple model and does not account for acceleration/deceleration
+          profiles, maximum velocity caps, or hardware-specific constraints.
+        """
+        a = 0.00275
+        d = math.dist((x1, y1), (x2, y2))
+        # d= 15
+        t = math.sqrt(d / a)
+        return t

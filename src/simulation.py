@@ -3,7 +3,7 @@ from .config import (
     INJECTION_SUCCESS_RATE,
 )
 
-from .device_state import FactoryPool
+from .ds.device_state import FactoryPool
 
 random.seed(42)
 

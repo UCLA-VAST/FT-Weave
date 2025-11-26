@@ -85,23 +85,29 @@ def cx_gate(
     assert len(mobile_logical_qubits) == len(pivot_logical_qubits)
     mobile_qubits = []
     begin_location = []
-    for qubit in mobile_logical_qubits:
+    for pivot_qubit in mobile_logical_qubits:
         physical_qubit_indices, physical_qubit_locations = (
             logical_grid.physical_indices_location_for_logical_qubit(
-                qubit, locations[qubit]
+                pivot_qubit, locations[pivot_qubit]
             )
         )
         mobile_qubits += physical_qubit_indices
         begin_location += physical_qubit_locations
 
     end_location = []
-    for qubit in mobile_logical_qubits:
+    mobile_qubit_idx = 0
+    for pivot_qubit in pivot_logical_qubits:
         physical_qubit_indices, physical_qubit_locations = (
             logical_grid.physical_indices_location_for_logical_qubit(
-                qubit, locations[qubit]
+                pivot_qubit, locations[pivot_qubit]
             )
         )
-        end_location += physical_qubit_locations
+        for loc in physical_qubit_locations:
+            # change to the right site
+            end_location.append(
+                (mobile_qubits[mobile_qubit_idx], loc[1] + 1, loc[2], loc[3])
+            )
+            mobile_qubit_idx += 1
 
     inst_idx = begin_inst_id
     rearrange_prompt = {
@@ -111,7 +117,7 @@ def cx_gate(
         "aod_qubits": mobile_qubits,
         "begin_locs": begin_location,
         "end_locs": end_location,
-        "dependency": {},
+        "dependency": {"qubit": [inst_idx - 1]},
     }
     inst_idx += 1
     rydberg_prompt = {
@@ -119,7 +125,7 @@ def cx_gate(
         "id": inst_idx,
         "zone_id": 0,
         "gates": [],
-        "dependency": {},
+        "dependency": {"qubit": [inst_idx - 1]},
     }
     inst_idx += 1
     rearrange_prompt_reverse = {
@@ -129,7 +135,7 @@ def cx_gate(
         "aod_qubits": mobile_qubits,
         "begin_locs": end_location,
         "end_locs": begin_location,
-        "dependency": {},
+        "dependency": {"qubit": [inst_idx - 1]},
     }
 
     insts = [rearrange_prompt, rydberg_prompt, rearrange_prompt_reverse]
