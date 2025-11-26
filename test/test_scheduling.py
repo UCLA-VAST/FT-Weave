@@ -28,7 +28,7 @@ def plot_circuit_execution(
         print("No execution log to plot")
         return
 
-    fig, ax = plt.subplots(figsize=(16, max(6, n_factories * 0.8)))
+    fig, ax = plt.subplots(figsize=(20, max(6, n_factories * 0.8)))
 
     # Color mapping for operations
     color_map = {

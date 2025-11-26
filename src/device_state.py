@@ -196,6 +196,7 @@ class FactoryPool:
         if factory and factory.angle is not None:
             factory.free()
             self.num_idle_factories += 1
+            self.num_busy_factories -= 1
             loc = factory.location
             self.avaliable_factories_per_row[loc[1]] += 1
 
