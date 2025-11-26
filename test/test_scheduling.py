@@ -7,7 +7,7 @@ import matplotlib.patches as mpatches
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.scheduling import factory_angle_execution
-from src.device_state import FactoryPool
+from src.ds.device_state import FactoryPool
 
 
 # ============================================================================

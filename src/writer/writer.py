@@ -20,9 +20,9 @@ w.write(schedule)
 import time
 from typing import Sequence, Any
 
-from zac.writer.inst import INSTRUCTIONS, ARGUMENTS
-from zac.writer.inst import ComboInst
-from zac.writer.op_expansions import DEFAULT_EXPANSION_STRATEGIES
+from src.writer.inst import INSTRUCTIONS, ARGUMENTS
+from src.writer.inst import ComboInst
+from src.writer.op_expansions import DEFAULT_EXPANSION_STRATEGIES
 
 
 class Writer:

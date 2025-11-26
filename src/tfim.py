@@ -1,4 +1,5 @@
 from .gate_operation import cx_gate, h_gate, s_gate, rz_gate
+from .ds.logical_grid import LogicalGridManager
 
 
 # Plaquette-structured Trotter steps for 2D TFIM (Qiskit)
@@ -22,8 +23,9 @@ def apply_edges_batch(
     circuit_instructions,
     edges,
     alpha,
-    logic_qubit_locations: list[tuple[int, int]],
-    magic_state_locations: list[tuple[int, int]],
+    logic_qubit_locations: list[tuple[int, int, int]],
+    magic_state_locations: list[tuple[int, int, int]],
+    logical_grid: LogicalGridManager,
 ):
     """
     edges: list of (i,j) pairs (disjoint pairs required for true parallelism).
@@ -35,19 +37,33 @@ def apply_edges_batch(
     """
     # first CX round
     mobile_qubits, pivot_qubits = map(list, zip(*edges))
-    circuit_instructions.append(
-        cx_gate(mobile_qubits, pivot_qubits, logic_qubit_locations)
+    circuit_instructions += cx_gate(
+        len(circuit_instructions),
+        mobile_qubits,
+        pivot_qubits,
+        logic_qubit_locations,
+        logical_grid,
     )
+
     # RZ on targets
     angles = [
         alpha for i in range(len(pivot_qubits))
     ]  # todo: derive physical angles from the logical angles
-    circuit_instructions.append(
-        rz_gate(pivot_qubits, angles, logic_qubit_locations, magic_state_locations)
+    circuit_instructions += rz_gate(
+        len(circuit_instructions),
+        pivot_qubits,
+        angles,
+        logic_qubit_locations,
+        magic_state_locations,
+        logical_grid,
     )
     # second CX round
-    circuit_instructions.append(
-        cx_gate(mobile_qubits, pivot_qubits, logic_qubit_locations)
+    circuit_instructions += cx_gate(
+        len(circuit_instructions),
+        mobile_qubits,
+        pivot_qubits,
+        logic_qubit_locations,
+        logical_grid,
     )
 
 
@@ -75,8 +91,9 @@ def tfim_trotter_plaquette(
     h,
     t,
     n_steps,
-    logic_qubit_locations: list[tuple[int, int]],
-    magic_state_locations: list[tuple[int, int]],
+    logic_qubit_locations: list[tuple[int, int, int]],
+    magic_state_locations: list[tuple[int, int, int]],
+    logical_grid: LogicalGridManager,
     periodic=False,
 ):
     """
@@ -108,6 +125,7 @@ def tfim_trotter_plaquette(
                     alpha,
                     logic_qubit_locations,
                     magic_state_locations,
+                    logical_grid,
                 )
             # apply sublayer B
             if edges_B:
@@ -117,18 +135,28 @@ def tfim_trotter_plaquette(
                     alpha,
                     logic_qubit_locations,
                     magic_state_locations,
+                    logical_grid,
                 )
 
         # X-field layer (apply RX on every qubit)
         phi = -2.0 * h * dt  # RX(phi) = exp(-i phi/2 X) implements exp(i h dt X)
         all_qubits = [i for i in range(N)]
-        circuit_instructions.append(h_gate(all_qubits, logic_qubit_locations))
+        circuit_instructions += h_gate(
+            len(circuit_instructions), all_qubits, logic_qubit_locations, logical_grid
+        )
         angles = [
             phi for i in range(N)
         ]  # todo: derive physical angles from the logical angles
-        circuit_instructions.append(
-            rz_gate(all_qubits, angles, logic_qubit_locations, magic_state_locations)
+        circuit_instructions += rz_gate(
+            len(circuit_instructions),
+            all_qubits,
+            angles,
+            logic_qubit_locations,
+            magic_state_locations,
+            logical_grid,
         )
-        circuit_instructions.append(h_gate(all_qubits, logic_qubit_locations))
+        circuit_instructions += h_gate(
+            len(circuit_instructions), all_qubits, logic_qubit_locations, logical_grid
+        )
 
     return circuit_instructions
