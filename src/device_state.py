@@ -1,4 +1,4 @@
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -95,7 +95,7 @@ class Factory:
     state: int = 0  # 0: 'idle', 1: 'tmr', 2: 'wait', 3: 'rus'
     tmr_state: Optional[bool] = None
     rus_state: Optional[bool] = None
-    location: Optional[tuple[int, int]] = None  # (x, y) coordinates
+    location: tuple[int, int] = (0, 0)  # (x, y) coordinates
 
     def free(self):
         """Mark the factory as idle."""
@@ -129,6 +129,9 @@ class Factory:
         self.rus_state = state
         self.state = 0
 
+    def set_location(self, loc: tuple[int, int]):
+        self.location = loc
+
 
 @dataclass
 class FactoryPool:
@@ -146,10 +149,19 @@ class FactoryPool:
     factories: list[Factory] = field(default_factory=list)
     num_idle_factories: int = field(init=False)
     num_busy_factories: int = 0
+    avaliable_factories_per_row: defaultdict[int, int] = field(
+        default_factory=defaultdict
+    )
 
     def __post_init__(self):
         self.factories = [Factory(id=i) for i in range(self.num_factories)]
         self.num_idle_factories = self.num_factories
+        self.avaliable_factories_per_row = defaultdict(int)
+
+    def set_locations(self, locations: list[tuple[int, int]]):
+        for factory, loc in zip(self.factories, locations):
+            factory.set_location(loc)
+            self.avaliable_factories_per_row[loc[1]] += 1
 
     def get_num_idle_factories(self):
         return self.num_idle_factories
@@ -183,7 +195,9 @@ class FactoryPool:
         factory = self.get_factory_by_id(factory_id)
         if factory and factory.angle is not None:
             factory.free()
-        self.num_idle_factories += 1
+            self.num_idle_factories += 1
+            loc = factory.location
+            self.avaliable_factories_per_row[loc[1]] += 1
 
     def assign_factory(
         self, factory_id: int, angle: float, qubit: int, success_rate: float
@@ -192,5 +206,7 @@ class FactoryPool:
         factory = self.get_factory_by_id(factory_id)
         if factory and factory.angle is None:
             factory.update(angle, qubit, success_rate)
-        self.num_idle_factories -= 1
-        self.num_busy_factories += 1
+            self.num_idle_factories -= 1
+            self.num_busy_factories += 1
+            loc = factory.location
+            self.avaliable_factories_per_row[loc[1]] -= 1

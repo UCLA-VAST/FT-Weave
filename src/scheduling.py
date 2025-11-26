@@ -15,70 +15,14 @@ from .config import (
 from .simulation import (
     simulate_TMR_preparation,
     simulate_RUS_injection,
-    simulate_injection,
     calculate_success_rate,
 )
 
-from .device_state import FactoryPool, Factory, QubitAngleTracker
+from .device_state import FactoryPool, QubitAngleTracker
+
+from .util import write_execution_log, write_injection_log
 
 random.seed(42)
-
-
-def write_execution_log(
-    execution_log: list,
-    start_time: int,
-    factory_id: int,
-    operation: str,
-    qubit: int | None,
-):
-    if operation == "SE":
-        end_time = start_time + SE_TIME
-    elif operation == "CNOT":
-        end_time = start_time + CNOT_TIME
-    elif operation == "Rz":
-        end_time = start_time + 1
-    else:
-        end_time = start_time
-    execution_log.append(
-        (
-            start_time,
-            end_time,
-            factory_id,
-            operation,
-            qubit,
-        )
-    )
-
-
-def write_injection_log(
-    execution_log: list,
-    start_time: int,
-    factory_id: int,
-    result: str,
-    qubit: int | None,
-):
-    write_execution_log(
-        execution_log,
-        start_time,
-        factory_id,
-        "CNOT",
-        qubit,
-    )
-    write_execution_log(
-        execution_log,
-        start_time + SE_TIME,
-        factory_id,
-        "SE",
-        qubit,
-    )
-    start_time += CNOT_TIME + SE_TIME
-    write_execution_log(
-        execution_log,
-        start_time,
-        factory_id,
-        result,
-        qubit,
-    )
 
 
 def assign_factory(
@@ -208,7 +152,6 @@ def assign_factories_for_batch(
     return factory_assignments
 
 
-# TODO2: I have finished this function. Please check it.
 def collect_injection_sequence(
     qubit_trackers: dict[int, QubitAngleTracker],
     factory_pool: FactoryPool,
@@ -431,140 +374,19 @@ def phase_3_execute_rus_injection(
     return rus_simulation
 
 
-def phase_3_simulate_and_inject(
-    qubit_trackers: dict[int, QubitAngleTracker],
+def factory_angle_execution(
     factory_pool: FactoryPool,
     target_qubits_angles: dict[int, float],
-    successful_qubits: set,
-    circuit_moment: int,
-    execution_log,
-    primary_queue,
+    logic_qubit_locations: list[tuple[int, int]] = [],
+    magic_state_locations: list[tuple[int, int]] = [],
 ):
-    """
-    PHASE 3: Simulate preparation success and attempt injections.
-
-    Uses TMR simulation results to check which factories successfully prepared angles.
-
-    Args:
-        qubit_trackers: Dict mapping qubit_id -> QubitAngleTracker
-        factory_pool: FactoryPool object containing all factories
-        target_qubits_angles: Dict mapping qubit_id -> target_rotation_angle
-        successful_qubits: Set of successfully completed qubit IDs
-        circuit_moment: Current circuit execution time
-        execution_log: List of execution events
-        primary_queue: Priority queue to re-queue angles if needed
-
-    Returns:
-        Tuple of (max_injections_this_round, target_qubits_angles)
-    """
-    max_injections_this_round = 0
-
-    for qubit, tracker in qubit_trackers.items():
-        if qubit in successful_qubits:
-            assert (
-                not tracker.has_active_factories()
-            ), f"qubit {qubit} has successfully injected, but there are active factories working for it."
-            continue
-
-        target_theta = tracker.target_angle
-
-        # Get factories sorted by angle (smallest first for injection order)
-        sorted_factories = tracker.get_sorted_factories()
-
-        qubit_injections = 0
-        success = False
-        removed_angles = set()
-        qubit_begin_time = circuit_moment
-        # Try injecting angles in order
-        for factory_id, theta in sorted_factories:
-            if theta != target_theta:
-                continue  # Not the target angle yet
-
-            # Get success_rate from the assigned Factory object
-            factory = factory_pool.get_factory_by_id(factory_id)
-            assert factory is not None, f"Factory with ID {factory_id} not found."
-            success_rate = factory.success_rate
-
-            # Check TMR preparation result
-            if not factory.tmr_state:
-                print(f"✗ Qubit {qubit}: angle {theta:.4f}° TMR preparation failed")
-                execution_log.append(
-                    (
-                        qubit_begin_time,
-                        qubit_begin_time,
-                        factory_id,
-                        "TMR_fail",
-                        qubit,
-                    )
-                )
-                factory_pool.free_factory(factory_id)
-                tracker.remove_factory(factory_id, theta)
-            # Simulate preparation
-            else:
-                injection_result = simulate_injection()
-                qubit_injections += 1
-
-                write_injection_log(
-                    execution_log,
-                    qubit_begin_time,
-                    factory_id,
-                    "RUS_success" if injection_result else "RUS_fail",
-                    qubit,
-                )
-                qubit_begin_time += CNOT_TIME + SE_TIME
-
-                # Simulate injection
-                if injection_result:
-                    print(
-                        f"✓ Qubit {qubit}: angle {theta:.4f}° prepared & injected (p={success_rate:.2f})"
-                    )
-                    success = True
-                    successful_qubits.add(qubit)
-                    break
-                else:
-                    print(
-                        f"? Qubit {qubit}: angle {theta:.4f}° prepared but injected -θ (p={success_rate:.2f})"
-                    )
-                    removed_angles.add(theta)
-                    target_theta *= 2  # Need to prepare 2θ next
-
-        # Update target angle for this qubit
-        tracker.target_angle = target_theta
-        target_qubits_angles[qubit] = target_theta
-
-        # PHASE 4: Update factory assignments based on results
-        if success:
-            # Free all factories working on this qubit
-            for factory_id, _ in tracker.factories:
-                factory_pool.free_factory(factory_id)
-            successful_qubits.add(qubit)
-            tracker.clear_all()
-        else:
-            # Free factories for removed angles
-            for angle in removed_angles:
-                removed_factories = tracker.remove_angle(angle)
-                for factory_id, _ in removed_factories:
-                    factory_pool.free_factory(factory_id)
-            # Re-queue target angle if needed
-            target_success_rate = calculate_success_rate(target_theta)
-            target_count = tracker.get_angle_count(target_theta)
-
-            if target_count == 0:
-                heapq.heappush(
-                    primary_queue, (0, target_success_rate, target_theta, qubit)
-                )
-
-        max_injections_this_round = max(max_injections_this_round, qubit_injections)
-    return max_injections_this_round, target_qubits_angles
-
-
-def factory_angle_execution(n_factories, target_qubits_angles):
     """
     Execute angle preparation on magic state factories with lookahead optimization.
 
     Args:
-        n_factories: Number of available factories
         target_qubits_angles: Dict mapping qubit_id -> target_rotation_angle
+        logic_qubit_locations: (x, y) location for each logical qubit
+        magic_state_locations: (x, y) location for each magic state factory
 
     Returns:
         circuit_moment: Total circuit execution time
@@ -580,7 +402,8 @@ def factory_angle_execution(n_factories, target_qubits_angles):
     }
 
     # Create FactoryPool with n_factories
-    factory_pool = FactoryPool(num_factories=n_factories)
+
+    factory_pool.set_locations(magic_state_locations)
 
     # Track successfully completed qubits
     successful_qubits = set()
@@ -601,8 +424,8 @@ def factory_angle_execution(n_factories, target_qubits_angles):
 
     while len(target_qubits_angles) > len(successful_qubits):
         # PHASE 1: Assign idle factories to prepare angles
-        print("primary_queue")
-        print(primary_queue)
+        # print("primary_queue")
+        # print(primary_queue)
         phase_1_assign_factories(
             qubit_trackers,
             factory_pool,
@@ -655,18 +478,6 @@ def factory_angle_execution(n_factories, target_qubits_angles):
                 )
 
         primary_queue = construct_primary_queue(successful_qubits, qubit_trackers)
-
-        # PHASE 3: Simulate preparation success and attempt injections
-        # max_injections_this_round, target_qubits_angles = phase_3_simulate_and_inject(
-        #     qubit_trackers,
-        #     factory_pool,
-        #     target_qubits_angles,
-        #     successful_qubits,
-        #     circuit_moment,
-        #     execution_log,
-        #     primary_queue,
-        # )
-        # circuit_moment += len(injection_sequence) * (CNOT_TIME + SE_TIME)
 
         # Add time for injection attempts (CNOT + SE per injection)
         execution_log.append(

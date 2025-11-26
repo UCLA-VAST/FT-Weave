@@ -1,6 +1,13 @@
-from src.scheduling import factory_angle_execution
+import os
+import sys
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+
+# Ensure repository root is on sys.path so `src` is importable when running tests
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from src.scheduling import factory_angle_execution
+from src.device_state import FactoryPool
 
 
 # ============================================================================
@@ -21,7 +28,7 @@ def plot_circuit_execution(
         print("No execution log to plot")
         return
 
-    fig, ax = plt.subplots(figsize=(14, max(6, n_factories * 0.8)))
+    fig, ax = plt.subplots(figsize=(16, max(6, n_factories * 0.8)))
 
     # Color mapping for operations
     color_map = {
@@ -57,7 +64,7 @@ def plot_circuit_execution(
             # Annotate with operation and qubit
             no_text_operations = {"RUS_success", "RUS_fail", "TMR_fail"}
             if operation in no_text_operations:
-                zorder = 10
+                zorder = 15
                 start_time -= 0.05
             else:
                 zorder = 0
@@ -68,7 +75,7 @@ def plot_circuit_execution(
                 0.8,
                 facecolor=color,
                 edgecolor="black",
-                linewidth=1.5,
+                linewidth=1,
                 zorder=zorder,
             )
             ax.add_patch(rect)
@@ -150,6 +157,21 @@ if __name__ == "__main__":
     n_factories = 5
     target_qubits_angles = {0: 0.001, 1: 0.002, 2: 0.003, 3: 0.004, 4: 0.005}
 
+    logic_qubit_locations: list[tuple[int, int]] = [
+        (0, 0),
+        (1, 0),
+        (2, 0),
+        (3, 0),
+        (4, 0),
+    ]
+    magic_state_locations: list[tuple[int, int]] = [
+        (0, 1),
+        (1, 1),
+        (2, 1),
+        (3, 1),
+        (4, 1),
+    ]
+
     print("=" * 70)
     print("MAGIC STATE FACTORY ANGLE EXECUTION SIMULATION")
     print("=" * 70)
@@ -158,7 +180,10 @@ if __name__ == "__main__":
     print("=" * 70 + "\n")
 
     # Run simulation
-    total_time, log = factory_angle_execution(n_factories, target_qubits_angles.copy())
+    factory_pool = FactoryPool(num_factories=n_factories)
+    total_time, log = factory_angle_execution(
+        factory_pool, target_qubits_angles, logic_qubit_locations, magic_state_locations
+    )
 
     # reference_log = "[(0, 1, 0, 'SE', 4), (1, 2, 0, 'SE', 4), (2, 3, 0, 'SE', 4), (3, 4, 0, 'Rz', 0.005), (4, 5, 0, 'SE', 4), (5, 6, 0, 'SE', 4), (0, 1, 1, 'SE', 3), (1, 2, 1, 'SE', 3), (2, 3, 1, 'SE', 3), (3, 4, 1, 'Rz', 0.004), (4, 5, 1, 'SE', 3), (5, 6, 1, 'SE', 3), (0, 1, 2, 'SE', 2), (1, 2, 2, 'SE', 2), (2, 3, 2, 'SE', 2), (3, 4, 2, 'Rz', 0.003), (4, 5, 2, 'SE', 2), (5, 6, 2, 'SE', 2), (0, 1, 3, 'SE', 1), (1, 2, 3, 'SE', 1), (2, 3, 3, 'SE', 1), (3, 4, 3, 'Rz', 0.002), (4, 5, 3, 'SE', 1), (5, 6, 3, 'SE', 1), (0, 1, 4, 'SE', 0), (1, 2, 4, 'SE', 0), (2, 3, 4, 'SE', 0), (3, 4, 4, 'Rz', 0.001), (4, 5, 4, 'SE', 0), (5, 6, 4, 'SE', 0), (6, 6, -1, 'Barrier', None), (6, 6, 4, 'TMR_fail', 0), (6, 7, 3, 'CNOT', 1), (7, 8, 3, 'SE', 1), (8, 8, 3, 'RUS_succsss', 1), (6, 7, 2, 'CNOT', 2), (7, 8, 2, 'SE', 2), (8, 8, 2, 'RUS_fail', 2), (6, 6, 1, 'TMR_fail', 3), (6, 6, 0, 'TMR_fail', 4), (8, 8, -1, 'Barrier', None), (8, 9, 0, 'SE', 4), (9, 10, 0, 'SE', 4), (10, 11, 0, 'SE', 4), (11, 12, 0, 'Rz', 0.005), (12, 13, 0, 'SE', 4), (13, 14, 0, 'SE', 4), (8, 9, 1, 'SE', 3), (9, 10, 1, 'SE', 3), (10, 11, 1, 'SE', 3), (11, 12, 1, 'Rz', 0.004), (12, 13, 1, 'SE', 3), (13, 14, 1, 'SE', 3), (8, 9, 2, 'SE', 2), (9, 10, 2, 'SE', 2), (10, 11, 2, 'SE', 2), (11, 12, 2, 'Rz', 0.006), (12, 13, 2, 'SE', 2), (13, 14, 2, 'SE', 2), (8, 9, 3, 'SE', 2), (9, 10, 3, 'SE', 2), (10, 11, 3, 'SE', 2), (11, 12, 3, 'Rz', 0.006), (12, 13, 3, 'SE', 2), (13, 14, 3, 'SE', 2), (8, 9, 4, 'SE', 0), (9, 10, 4, 'SE', 0), (10, 11, 4, 'SE', 0), (11, 12, 4, 'Rz', 0.001), (12, 13, 4, 'SE', 0), (13, 14, 4, 'SE', 0), (14, 14, -1, 'Barrier', None), (14, 15, 4, 'CNOT', 0), (15, 16, 4, 'SE', 0), (16, 16, 4, 'RUS_succsss', 0), (14, 15, 2, 'CNOT', 2), (15, 16, 2, 'SE', 2), (16, 16, 2, 'RUS_succsss', 2), (14, 15, 1, 'CNOT', 3), (15, 16, 1, 'SE', 3), (16, 16, 1, 'RUS_succsss', 3), (14, 15, 0, 'CNOT', 4), (15, 16, 0, 'SE', 4), (16, 16, 0, 'RUS_fail', 4), (16, 16, -1, 'Barrier', None), (16, 17, 0, 'SE', 4), (17, 18, 0, 'SE', 4), (18, 19, 0, 'SE', 4), (19, 20, 0, 'Rz', 0.01), (20, 21, 0, 'SE', 4), (21, 22, 0, 'SE', 4), (16, 17, 1, 'SE', 4), (17, 18, 1, 'SE', 4), (18, 19, 1, 'SE', 4), (19, 20, 1, 'Rz', 0.01), (20, 21, 1, 'SE', 4), (21, 22, 1, 'SE', 4), (16, 17, 2, 'SE', 4), (17, 18, 2, 'SE', 4), (18, 19, 2, 'SE', 4), (19, 20, 2, 'Rz', 0.02), (20, 21, 2, 'SE', 4), (21, 22, 2, 'SE', 4), (16, 17, 3, 'SE', 4), (17, 18, 3, 'SE', 4), (18, 19, 3, 'SE', 4), (19, 20, 3, 'Rz', 0.02), (20, 21, 3, 'SE', 4), (21, 22, 3, 'SE', 4), (16, 17, 4, 'SE', 4), (17, 18, 4, 'SE', 4), (18, 19, 4, 'SE', 4), (19, 20, 4, 'Rz', 0.01), (20, 21, 4, 'SE', 4), (21, 22, 4, 'SE', 4), (22, 22, -1, 'Barrier', None), (22, 23, 0, 'CNOT', 4), (23, 24, 0, 'SE', 4), (24, 24, 0, 'RUS_succsss', 4), (24, 24, -1, 'Barrier', None)]"
     # assert str(log) == reference_log, "Execution log does not match reference log."
