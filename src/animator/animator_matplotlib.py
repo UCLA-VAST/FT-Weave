@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 import matplotlib
 import bisect
-
+import matplotlib.patches as mpatches
 from src.ds.architecture import Architecture
 
 
@@ -15,8 +15,8 @@ class Animator:
     PT_MICRON = 8  # scaling factor: points per micron
     MUS_PER_FRM = 150 / FPS  # microseconds per frame
     MUS_PER_FRM_SLOW = 7 / FPS  # in slow motion, i.e., Rydberg
-    CANVAS_PADDING = 10
-    RYDBERG_PADDING = 3  # around each entanglement zone
+    CANVAS_PADDING: int = 10
+    RYDBERG_PADDING: int = 3  # around each entanglement zone
 
     # colors
     RYDBERG_COLOR = "b"
@@ -53,17 +53,17 @@ class Animator:
         self.title = self.ax.set_title("")
         self.inst_str = ""
 
-        num_frame = self.create_schedule()
+        num_frame: int = self.create_schedule()
         anim = FuncAnimation(
             self.fig,
-            self.update,
-            init_func=self.update_init,
+            self.update,  # type: ignore
+            init_func=self.update_init,  # type: ignore
             frames=self.INIT_FRM + num_frame,
             # blit=True
         )
         anim.save(output, writer=FFMpegWriter(self.FPS))
 
-    def create_schedule(self):
+    def create_schedule(self) -> int:
         """
         each frame is a sample on the time axis. There are two sampling rates
         one is regular, one is slow motion. The latter is used when Rydberg
@@ -169,16 +169,16 @@ class Animator:
             )
         )
         ax.set_xlim(
-            [
+            (
                 -self.CANVAS_PADDING + self.architecture.arch_range[0][0],
                 self.CANVAS_PADDING + self.architecture.arch_range[1][0],
-            ]
+            )
         )
         ax.set_ylim(
-            [
+            (
                 -self.CANVAS_PADDING + self.architecture.arch_range[0][1],
                 self.CANVAS_PADDING + self.architecture.arch_range[1][1],
-            ]
+            )
         )
 
         # rydberg_range is a list. Each entry is for an entanglement zone,
@@ -260,7 +260,7 @@ class Animator:
         # initialize Rydberg zones
         self.entanglement_rect = []
         for entangle_zone in self.entanglement_rect_range:
-            rect = matplotlib.patches.Rectangle(
+            rect = mpatches.Rectangle(
                 entangle_zone[0],
                 entangle_zone[1],
                 entangle_zone[2],
@@ -414,6 +414,20 @@ class Animator:
         def interpolate(r: float, begin: int, end: int):
             D = end - begin
             return begin + 3 * D * (r**2) - 2 * D * (r**3)
+
+        # If this is the start of a new move (ratio approximately 0),
+        # clear all previous path traces so old grey lines do not persist
+        # when we start plotting the new set of segments.
+        if abs(ratio) < 1e-5:
+            for q_id in range(len(self.path_line_collection)):
+                self.path_line_loc[q_id].clear()
+                self.path_line_color[q_id].clear()
+                self.path_line_collection[q_id].set_segments([])
+                # also clear any color set previously
+                try:
+                    self.path_line_collection[q_id].set_color([])
+                except Exception:
+                    pass
 
         # update qubit
         for begin_coords_row, end_coords_row in qubit_coord:

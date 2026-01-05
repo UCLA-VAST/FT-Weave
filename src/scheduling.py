@@ -14,6 +14,7 @@ from .simulation import (
     simulate_RUS_injection,
     calculate_success_rate,
 )
+from .rus.two_layer_routing import chain_decomposition_matching
 
 from .ds.device_state import FactoryPool, QubitAngleTracker
 
@@ -220,6 +221,47 @@ def assign_injection(
     return qubit_factory_pairs
 
 
+def two_layer_routing(
+    factory_pool: FactoryPool,
+    logic_qubit_locations: list[tuple[int, int]],
+    qubit_factory_pairs: list[tuple[int, int]],
+) -> list[list[tuple[int, int]]]:
+    """
+    Two layer routing
+    """
+    # split factories according to rows
+    compatible_row_movement_to_factories = defaultdict(list)
+    for qubit, factory_id in qubit_factory_pairs:
+        factory = factory_pool.get_factory_by_id(factory_id=factory_id)
+        x_f, y_f = factory.location
+        x_q, y_q = logic_qubit_locations[qubit]
+        compatible_row_movement_to_factories[(y_f, y_q)].append(
+            (factory_id, x_f, qubit, x_q)
+        )
+
+    routing_batches = []
+    # sort factory based on locations and solve two-layer routing
+    for y_pair in compatible_row_movement_to_factories.keys():
+        sorted_factories = sorted(
+            compatible_row_movement_to_factories[y_pair], key=lambda x: x[1]
+        )
+        sorted_qubit_indices = sorted(
+            range(len(sorted_factories)), key=lambda i: sorted_factories[i][3]
+        )
+        factory_list = list(range(len(sorted_factories)))
+        matching, chains = chain_decomposition_matching(
+            factory_list, sorted_qubit_indices
+        )
+        for chain in chains:
+            routing_batches.append([])
+            for qubit in chain:
+                routing_batches[-1].append(
+                    (sorted_factories[qubit][2], sorted_factories[qubit][0])
+                )
+
+    return routing_batches
+
+
 def update_qubit_states(
     successful_qubits: set[int],
     qubit_factory_pairs: list[tuple[int, int]],
@@ -287,8 +329,8 @@ def phase_3_execute_rus_injection(
 def factory_angle_execution(
     factory_pool: FactoryPool,
     target_qubits_angles: dict[int, float],
-    logic_qubit_locations: list[tuple[int, int]] = [],
-    magic_state_locations: list[tuple[int, int]] = [],
+    logic_qubit_locations: list[tuple[int, int]],
+    magic_state_locations: list[tuple[int, int]],
 ):
     """
     Execute angle preparation on magic state factories with lookahead optimization.
@@ -355,10 +397,35 @@ def factory_angle_execution(
             # print(injection_sequence)
             # input()
             for batch_injection in injection_sequence:
-                # qubit_factory_pairs: list[tuple(qubit, factory_ids)]
+                # qubit_factory_pairs: list[tuple(qubit, factory_id)]
                 qubit_factory_pairs = assign_injection(
                     successful_qubits, batch_injection
                 )
+                # routing
+                routing_batches = two_layer_routing(
+                    factory_pool, logic_qubit_locations, qubit_factory_pairs
+                )
+                # print("logic_qubit_locations")
+                # print(logic_qubit_locations)
+                # print("magic_state_locations")
+                # print(magic_state_locations)
+                # print("qubit_factory_pairs")
+                # print(qubit_factory_pairs)
+                # print("routing_batches")
+                # print(routing_batches)
+                for batches in routing_batches:
+                    # todo: add movement time
+                    for qubit, factory_id in batches:
+                        write_execution_log(
+                            execution_log,
+                            circuit_moment,
+                            factory_id,
+                            "move",
+                            qubit=None,
+                            movement_time=1,
+                        )
+                    circuit_moment += CNOT_TIME
+
                 rus_simulation = phase_3_execute_rus_injection(
                     qubit_factory_pairs, factory_pool, circuit_moment, execution_log
                 )

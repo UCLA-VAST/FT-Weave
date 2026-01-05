@@ -36,6 +36,7 @@ def plot_circuit_execution(
         "SE": "#4681a9",
         "CNOT": "#e74c3c",
         "Rz": "#e7ab3c",
+        "move": "#b64abe",
         "Barrier": "#000000",
         "RUS_success": "#E01414",
         "RUS_fail": "#DDA413",
@@ -62,7 +63,7 @@ def plot_circuit_execution(
         else:
 
             # Annotate with operation and qubit
-            no_text_operations = {"RUS_success", "RUS_fail", "TMR_fail"}
+            no_text_operations = {"RUS_success", "RUS_fail", "TMR_fail", "move"}
             if operation in no_text_operations:
                 zorder = 15
                 start_time -= 0.05
@@ -157,19 +158,33 @@ if __name__ == "__main__":
     n_factories = 5
     target_qubits_angles = {0: 0.001, 1: 0.002, 2: 0.003, 3: 0.004, 4: 0.005}
 
+    # logic_qubit_locations: list[tuple[int, int]] = [
+    #     (0, 0),
+    #     (1, 0),
+    #     (2, 0),
+    #     (3, 0),
+    #     (4, 0),
+    # ]
+    # magic_state_locations: list[tuple[int, int]] = [
+    #     (0, 1),
+    #     (1, 1),
+    #     (2, 1),
+    #     (3, 1),
+    #     (4, 1),
+    # ]
     logic_qubit_locations: list[tuple[int, int]] = [
         (0, 0),
         (1, 0),
         (2, 0),
-        (3, 0),
-        (4, 0),
-    ]
-    magic_state_locations: list[tuple[int, int]] = [
         (0, 1),
         (1, 1),
-        (2, 1),
-        (3, 1),
-        (4, 1),
+    ]
+    magic_state_locations: list[tuple[int, int]] = [
+        (0, 2),
+        (1, 2),
+        (2, 2),
+        (0, 3),
+        (1, 3),
     ]
 
     print("=" * 70)

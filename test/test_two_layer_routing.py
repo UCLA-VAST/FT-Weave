@@ -23,12 +23,11 @@ if __name__ == "__main__":
     print(f"Permutation 1: {perm1}")
     print(f"Permutation 2: {perm2}")
 
-    matching, chains, max_flow = chain_decomposition_matching(perm1, perm2)
+    matching, chains = chain_decomposition_matching(perm1, perm2)
 
-    print(f"\nMaximum flow (matching size): {max_flow}")
     print(f"Matching edges: {matching}")
     print(f"Number of chains: {len(chains)}")
-    print(f"Chain decomposition:")
+    print("Chain decomposition:")
     for i, chain in enumerate(chains):
         print(f"  Chain {i+1}: {' → '.join(map(str, chain))}")
 
@@ -44,12 +43,11 @@ if __name__ == "__main__":
     print(f"Permutation 1: {perm1}")
     print(f"Permutation 2: {perm2}")
 
-    matching, chains, max_flow = chain_decomposition_matching(perm1, perm2)
+    matching, chains = chain_decomposition_matching(perm1, perm2)
 
-    print(f"\nMaximum flow: {max_flow}")
     print(f"Matching edges: {matching}")
     print(f"Number of chains: {len(chains)}")
-    print(f"Chain decomposition:")
+    print("Chain decomposition:")
     for i, chain in enumerate(chains):
         print(f"  Chain {i+1}: {' → '.join(map(str, chain))}")
 
@@ -65,12 +63,11 @@ if __name__ == "__main__":
     print(f"Permutation 1: {perm1}")
     print(f"Permutation 2: {perm2}")
 
-    matching, chains, max_flow = chain_decomposition_matching(perm1, perm2)
+    matching, chains = chain_decomposition_matching(perm1, perm2)
 
-    print(f"\nMaximum flow: {max_flow}")
     print(f"Matching edges: {matching}")
     print(f"Number of chains: {len(chains)}")
-    print(f"Chain decomposition:")
+    print("Chain decomposition:")
     for i, chain in enumerate(chains):
         print(f"  Chain {i+1}: {' → '.join(map(str, chain))}")
 
@@ -86,12 +83,11 @@ if __name__ == "__main__":
     print(f"Permutation 1: {perm1}")
     print(f"Permutation 2: {perm2}")
 
-    matching, chains, max_flow = chain_decomposition_matching(perm1, perm2)
+    matching, chains = chain_decomposition_matching(perm1, perm2)
 
-    print(f"\nMaximum flow: {max_flow}")
     print(f"Matching edges: {matching}")
     print(f"Number of chains: {len(chains)}")
-    print(f"Chain decomposition:")
+    print("Chain decomposition:")
     for i, chain in enumerate(chains):
         print(f"  Chain {i+1}: {' → '.join(map(str, chain))}")
 

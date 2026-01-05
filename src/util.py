@@ -15,6 +15,7 @@ def write_execution_log(
     factory_id: int,
     operation: str,
     qubit: int | None,
+    movement_time: int = 0,
 ):
     if operation == "SE":
         end_time = start_time + SE_TIME
@@ -22,6 +23,8 @@ def write_execution_log(
         end_time = start_time + CNOT_TIME
     elif operation == "Rz":
         end_time = start_time + 1
+    elif operation == "move":
+        end_time = start_time + movement_time
     else:
         end_time = start_time
     execution_log.append(

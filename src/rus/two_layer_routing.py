@@ -82,7 +82,7 @@ def ford_fulkerson(
 
 def chain_decomposition_matching(
     perm1: list[int], perm2: list[int]
-) -> tuple[list[tuple[int, int]], list[list[int]], int]:
+) -> tuple[list[tuple[int, int]], list[list[int]]]:
     """
     Given two permutations, find minimum chain decomposition using Dilworth's theorem.
     Uses Ford-Fulkerson algorithm for maximum bipartite matching.
@@ -162,7 +162,7 @@ def chain_decomposition_matching(
             chains.append([u])
             used[u] = True
 
-    return matching, chains, max_flow
+    return matching, chains
 
 
 def verify_chain_decomposition(
