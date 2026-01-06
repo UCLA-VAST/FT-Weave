@@ -2,6 +2,12 @@ from collections import defaultdict
 import heapq
 from itertools import count
 
+from src.ds.device_state import FactoryPool, QubitAngleTracker
+
+from src.simulation import (
+    calculate_success_rate,
+)
+
 
 def phase1_exact_match(
     required_angles: list[int],
@@ -190,3 +196,34 @@ def run_tmr_row_assignment(
         "n_angles": n_angles,
         "n_factories": n_factories,
     }
+
+
+def assign_factories_for_batch(
+    factory_pool: FactoryPool,
+    qubit_trackers: dict[int, QubitAngleTracker],
+    batch_angles: dict[int, dict[int, int]],
+):
+    """
+    Assign factories to prepare the given batch of angles.
+
+    Args:
+        factory_pool: FactoryPool
+        batch_angles: List of (level, success_rate, angle, target_qubit)
+
+    Returns:
+        factory_assignments: List of (angle, qubit, success_rate) for each factory
+    """
+    # TODO: assignment based on location
+    idle_factories = factory_pool.get_idle_factories()
+    idx = 0
+    # print("assign factory")
+    for qubit, demands in batch_angles.items():
+        for level, demand in demands.items():
+            angle = qubit_trackers[qubit].target_angle * pow(2, level)
+            success_rate = calculate_success_rate(angle)
+            for i in range(demand):
+                factory = idle_factories[idx]
+                qubit_trackers[qubit].add_factory(factory.id, angle)
+                # print(factory.id, angle, qubit, success_rate)
+                factory_pool.assign_factory(factory.id, angle, qubit, success_rate)
+                idx += 1

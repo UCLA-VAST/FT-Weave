@@ -73,3 +73,17 @@ def iterative_greedy_groups(matrix: list[list[Any]]) -> list[tuple[list, dict]]:
         used = set(row_group)
         leftover = [r for r in leftover if r not in used]
     return result
+
+
+def assign_injection(
+    successful_qubits: set[int],
+    batch_injection: list[tuple[int, list[int]]],
+) -> list[tuple[int, int]]:
+    qubit_factory_pairs = []
+    for qubit, factory_ids in batch_injection:
+        if qubit in successful_qubits:
+            continue
+        # todo(f): may optimize assignment based on the location to enhance cnot parallelism
+        qubit_factory_pairs.append((qubit, factory_ids[0]))
+
+    return qubit_factory_pairs

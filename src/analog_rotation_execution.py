@@ -1,5 +1,4 @@
 import random
-import math
 from collections import defaultdict
 
 from .config import (
@@ -12,9 +11,12 @@ from .config import (
 from .simulation import (
     simulate_TMR_preparation,
     simulate_RUS_injection,
-    calculate_success_rate,
 )
 from .rus.two_layer_routing import two_layer_routing
+from .rus.rus_assignment import assign_injection
+
+from .tmr.angle_collection import get_angles_for_preparation
+from .tmr.tmr_assignment import assign_factories_for_batch
 
 from .ds.device_state import FactoryPool, QubitAngleTracker
 
@@ -26,125 +28,6 @@ random.seed(42)
 # ============================================================================
 # MAIN EXECUTION FUNCTION
 # ============================================================================
-def integer_allocation(
-    n: int, demands: dict[int, float], per_qubit: bool = False
-) -> dict[int, int]:
-    # allocate factories for qubit based on the level 1 and level 2 demands (due to expectation value)
-    # Largest Remainder Method
-    # Compute the ideal fractional allocation
-    # Take the floor of each
-    # Distribute the remaining factories to the qubits with the largest fractional remainders
-    # Step 2: take floors
-    allocation = {idx: math.floor(v) for idx, v in demands.items()}
-
-    # Step 3: distribute remaining factories
-    remaining = n - sum(allocation.values())
-
-    # sort by fractional remainder (descending)
-    remainders = sorted(
-        demands.items(),
-        key=lambda x: x[1] - math.floor(x[1]),
-        reverse=True,
-    )
-
-    for qubit, _ in remainders[:remaining]:
-        allocation[qubit] += 1
-
-    return allocation
-
-
-def get_angles_for_preparation(
-    successful_qubits: set[int],
-    qubit_trackers: dict[int, QubitAngleTracker],
-    n_available_factories: int,
-) -> dict[int, dict[int, int]]:
-    #  compute demand for qubits
-    qubit_demands = defaultdict(int)
-    sum_demands = 0
-    for qubit, tracker in qubit_trackers.items():
-        if qubit in successful_qubits:
-            continue
-        level_demand = 1
-        for level in range(0, 2):
-            angle = tracker.target_angle * pow(2, level)
-            success_rate = calculate_success_rate(angle)
-            demand = level_demand / success_rate
-            level_demand /= 2
-            qubit_demands[qubit] += demand
-            sum_demands += demand
-
-    # allocate factories for qubit based on the level 1 and level 2 demands (due to expectation value)
-    ideal_factory_allocation = {
-        qubit: n_available_factories * demand / sum_demands
-        for qubit, demand in qubit_demands.items()
-    }
-    allocation = integer_allocation(n_available_factories, ideal_factory_allocation)
-    # print("allocation")
-    # print(allocation)
-    qubit_angle_factories = {}
-    level_threshold = 5
-    for qubit, tracker in qubit_trackers.items():
-        if qubit in successful_qubits:
-            continue
-        if allocation[qubit] < 1:
-            continue
-        level_demand = 1
-        demands = {}
-        sum_demands = 0
-        for level in range(0, level_threshold):
-            angle = tracker.target_angle * pow(2, level)
-            assert angle > 0
-            success_rate = calculate_success_rate(angle)
-            demand = level_demand / success_rate
-            if level > 1 and allocation[qubit] < sum_demands:
-                break
-            demands[level] = demand
-            sum_demands += demand
-            level_demand /= 2
-        # print("allocation[qubit]")
-        # print(allocation[qubit])
-        # print("demands")
-        # print(demands)
-        qubit_angle_factories[qubit] = integer_allocation(
-            allocation[qubit], demands, True
-        )
-    # print("qubit_angle_factories")
-    # print(qubit_angle_factories)
-    # assert n_available_factories == 5
-    # assert sum(allocation.values()) == 5
-    # input()
-    return qubit_angle_factories
-
-
-def assign_factories_for_batch(
-    factory_pool: FactoryPool,
-    qubit_trackers: dict[int, QubitAngleTracker],
-    batch_angles: dict[int, dict[int, int]],
-):
-    """
-    Assign factories to prepare the given batch of angles.
-
-    Args:
-        factory_pool: FactoryPool
-        batch_angles: List of (level, success_rate, angle, target_qubit)
-
-    Returns:
-        factory_assignments: List of (angle, qubit, success_rate) for each factory
-    """
-    # TODO: assignment based on location
-    idle_factories = factory_pool.get_idle_factories()
-    idx = 0
-    # print("assign factory")
-    for qubit, demands in batch_angles.items():
-        for level, demand in demands.items():
-            angle = qubit_trackers[qubit].target_angle * pow(2, level)
-            success_rate = calculate_success_rate(angle)
-            for i in range(demand):
-                factory = idle_factories[idx]
-                qubit_trackers[qubit].add_factory(factory.id, angle)
-                # print(factory.id, angle, qubit, success_rate)
-                factory_pool.assign_factory(factory.id, angle, qubit, success_rate)
-                idx += 1
 
 
 def phase_2_execute_tmr_preparation(
@@ -203,7 +86,7 @@ def phase_2_execute_tmr_preparation(
     return circuit_moment, execution_log
 
 
-def collect_injection_sequence(
+def collect_teleportation_sequence(
     qubit_trackers: dict[int, QubitAngleTracker],
     factory_pool: FactoryPool,
 ):
@@ -272,20 +155,6 @@ def collect_injection_sequence(
                 break
 
     return injection_sequence
-
-
-def assign_injection(
-    successful_qubits: set[int],
-    batch_injection: list[tuple[int, list[int]]],
-) -> list[tuple[int, int]]:
-    qubit_factory_pairs = []
-    for qubit, factory_ids in batch_injection:
-        if qubit in successful_qubits:
-            continue
-        # todo(f): may optimize assignment based on the location to enhance cnot parallelism
-        qubit_factory_pairs.append((qubit, factory_ids[0]))
-
-    return qubit_factory_pairs
 
 
 def update_qubit_states(
@@ -426,7 +295,9 @@ def factory_angle_execution(
         # qubit_factories_pair: tuple[int,list[int]:
         # injection_sequence: list[list[qubit_factories_pair]]. A element is a list of qubits that can be
         # injected at this injection round with the possible factories.
-        injection_sequence = collect_injection_sequence(qubit_trackers, factory_pool)
+        injection_sequence = collect_teleportation_sequence(
+            qubit_trackers, factory_pool
+        )
         if injection_sequence:
             # print("injection_sequence")
             # print(injection_sequence)
