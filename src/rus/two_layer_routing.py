@@ -1,5 +1,7 @@
 from collections import defaultdict, deque
 
+from src.ds.device_state import FactoryPool
+
 
 def create_flow_network() -> tuple[dict, str, str]:
     """Create an empty flow network for bipartite matching.
@@ -163,6 +165,57 @@ def chain_decomposition_matching(
             used[u] = True
 
     return matching, chains
+
+
+def two_layer_routing(
+    factory_pool: FactoryPool,
+    logic_qubit_locations: list[tuple[int, int]],
+    qubit_factory_pairs: list[tuple[int, int]],
+) -> list[list[tuple[int, int]]]:
+    """
+    Two layer routing
+    """
+    # split factories according to rows
+    compatible_row_movement_to_factories = defaultdict(list)
+    for qubit, factory_id in qubit_factory_pairs:
+        factory = factory_pool.get_factory_by_id(factory_id=factory_id)
+        x_f, y_f = factory.location
+        x_q, y_q = logic_qubit_locations[qubit]
+        compatible_row_movement_to_factories[(y_f, y_q)].append(
+            (factory_id, x_f, qubit, x_q)
+        )
+
+    routing_batches = []
+    movement_vectors = dict()
+    # sort factory based on locations and solve two-layer routing
+    for y_pair in compatible_row_movement_to_factories.keys():
+        sorted_factories = sorted(
+            compatible_row_movement_to_factories[y_pair], key=lambda x: x[1]
+        )
+        sorted_qubit_indices = sorted(
+            range(len(sorted_factories)), key=lambda i: sorted_factories[i][3]
+        )
+        factory_list = list(range(len(sorted_factories)))
+        matching, chains = chain_decomposition_matching(
+            factory_list, sorted_qubit_indices
+        )
+        for chain in chains:
+            batch = []
+            vec = []
+            for qubit in chain:
+                batch.append((sorted_factories[qubit][2], sorted_factories[qubit][0]))
+                vec.append(sorted_factories[qubit][1])
+                vec.append(sorted_factories[qubit][3])
+            vec = tuple(vec)
+            # merge movement from two rows if they have the same pattern
+            if vec in movement_vectors:
+                batch_id = movement_vectors[vec]
+                routing_batches[batch_id] += batch
+            else:
+                movement_vectors[vec] = len(routing_batches)
+                routing_batches.append(batch)
+
+    return routing_batches
 
 
 def verify_chain_decomposition(

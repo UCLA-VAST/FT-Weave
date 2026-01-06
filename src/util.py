@@ -14,7 +14,7 @@ def write_execution_log(
     start_time: int,
     factory_id: int,
     operation: str,
-    qubit: int | None,
+    qubit: int | None = None,
     movement_time: int = 0,
 ):
     if operation == "SE":

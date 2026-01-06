@@ -13,7 +13,7 @@ random.seed(42)
 # ============================================================================
 def calculate_success_rate(angle):
     """Calculate success rate for angle preparation (decreases with angle)."""
-    return 0.6 - angle // 10
+    return 0.6 - angle // 30
 
 
 def simulate_angle_preparation(success_rate):
