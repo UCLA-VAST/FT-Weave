@@ -30,7 +30,7 @@ random.seed(42)
 # ============================================================================
 
 
-def phase_2_execute_tmr_preparation(
+def execute_tmr_preparation(
     factory_pool,
     circuit_moment,
     execution_log,
@@ -200,7 +200,7 @@ def update_qubit_states(
     return qubits_to_inject_updated
 
 
-def phase_3_execute_rus_injection(
+def execute_rus_teleportation(
     qubit_factory_pairs: list[tuple[int, int]],
     factory_pool: FactoryPool,
     circuit_moment: int,
@@ -270,10 +270,12 @@ def factory_angle_execution(
         batch_angles = get_angles_for_preparation(
             successful_qubits, qubit_trackers, factory_pool.get_num_idle_factories()
         )
-        assign_factories_for_batch(factory_pool, qubit_trackers, batch_angles)
+        assign_factories_for_batch(
+            factory_pool, qubit_trackers, logic_qubit_locations, batch_angles
+        )
 
         # PHASE 2: Execute TMR preparation
-        circuit_moment, execution_log = phase_2_execute_tmr_preparation(
+        circuit_moment, execution_log = execute_tmr_preparation(
             factory_pool,
             circuit_moment,
             execution_log,
@@ -305,7 +307,10 @@ def factory_angle_execution(
             for batch_injection in injection_sequence:
                 # qubit_factory_pairs: list[tuple(qubit, factory_id)]
                 qubit_factory_pairs = assign_injection(
-                    successful_qubits, batch_injection
+                    successful_qubits,
+                    batch_injection,
+                    factory_pool,
+                    logic_qubit_locations,
                 )
                 # routing
                 routing_batches = two_layer_routing(
@@ -320,19 +325,33 @@ def factory_angle_execution(
                 # print("routing_batches")
                 # print(routing_batches)
                 for batches in routing_batches:
-                    # todo: add movement time
+                    max_movement_time = 0
                     for qubit, factory_id in batches:
+                        x_q, y_q = logic_qubit_locations[qubit]
+                        x_f, y_f = factory_pool.get_factory_by_id(
+                            factory_id=factory_id
+                        ).location
+                        movement_time = abs(x_q - x_f) + abs(y_q - y_f)
+                        max_movement_time = max(max_movement_time, movement_time)
+
+                    for qubit, factory_id in batches:
+                        x_q, y_q = logic_qubit_locations[qubit]
+                        x_f, y_f = factory_pool.get_factory_by_id(
+                            factory_id=factory_id
+                        ).location
+                        movement_strs = [f"({x_f},{y_f})", f"({x_q},{y_q})"]
                         write_execution_log(
                             execution_log,
                             circuit_moment,
                             factory_id,
                             "move",
                             qubit=None,
-                            movement_time=1,
+                            movement_time=max_movement_time,
+                            move_vecs=movement_strs,
                         )
-                    circuit_moment += CNOT_TIME
+                    circuit_moment += max_movement_time
 
-                rus_simulation = phase_3_execute_rus_injection(
+                rus_simulation = execute_rus_teleportation(
                     qubit_factory_pairs, factory_pool, circuit_moment, execution_log
                 )
                 circuit_moment += CNOT_TIME + SE_TIME

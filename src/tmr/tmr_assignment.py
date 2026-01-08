@@ -10,9 +10,9 @@ from src.simulation import (
 
 
 def phase1_exact_match(
-    required_angles: list[int],
-    available_factories: list[int],
-    assignments: list[list[tuple[int, int, str]]],
+    required_angles: dict[int, int],
+    available_factories: dict[int, int],
+    assignments: dict[int, list[tuple[int, int, str]]],
 ) -> None:
     """
     Phase 1: Exact one-to-one match
@@ -21,7 +21,7 @@ def phase1_exact_match(
     Args:
         required_angles: working copy of required angles per row (modified in place)
         available_factories: working copy of available factories per row (modified in place)
-        assignments: list of assignments for each angle row (modified in place)
+        assignments: dict of assignments for each angle row (modified in place)
     Returns:
     """
 
@@ -30,14 +30,14 @@ def phase1_exact_match(
     # match for a required angle in O(1) average time per angle, making the
     # whole phase O(n).
     value_to_indices = defaultdict(list)
-    for j, cap in enumerate(available_factories):
+    for j, cap in available_factories.items():
         if cap > 0:
             value_to_indices[cap].append(j)
 
     # For each angle row, check whether there's a factory with exactly the
     # same remaining capacity. If so, assign and remove that factory from
     # the map (its capacity becomes zero).
-    for i in range(len(required_angles)):
+    for i in list(required_angles.keys()):
         req = required_angles[i]
         if req <= 0:
             continue
@@ -52,6 +52,8 @@ def phase1_exact_match(
         match_amount = req
 
         # Record assignment
+        if i not in assignments:
+            assignments[i] = []
         assignments[i].append((j, match_amount, "exact"))
 
         # Update remaining capacity (factory becomes zero since exact match)
@@ -64,9 +66,9 @@ def phase1_exact_match(
 
 
 def phase2_best_fit(
-    required_angles: list[int],
-    available_factories: list[int],
-    assignments: list[list[tuple[int, int, str]]],
+    required_angles: dict[int, int],
+    available_factories: dict[int, int],
+    assignments: dict[int, list[tuple[int, int, str]]],
 ) -> None:
     """
     Phase 2: Best-fit with sorted assignment
@@ -77,21 +79,19 @@ def phase2_best_fit(
     Args:
         required_angles: working copy of required angles per row (modified in place)
         available_factories: working copy of available factories per row (modified in place)
-        assignments: list of assignments for each angle row (modified in place)
+        assignments: dict of assignments for each angle row (modified in place)
     Returns:
     """
 
     # Create a max-heap of (-amount, counter, angle_row) for unassigned angles
     # Using a heap gives O(log n) insertion and removal compared to O(n)
     # list insert/pop(0) used previously.
-    n_angle_rows = len(required_angles)
-    n_factory_rows = len(available_factories)
     heap = []
     unique_counter = count()
-    for i in range(n_angle_rows):
-        if required_angles[i] > 0:
+    for i, amount in required_angles.items():
+        if amount > 0:
             # push negative amount to simulate max-heap
-            heapq.heappush(heap, (-required_angles[i], next(unique_counter), i))
+            heapq.heappush(heap, (-amount, next(unique_counter), i))
 
     # Keep working until all angles are assigned
     while heap:
@@ -103,9 +103,9 @@ def phase2_best_fit(
         best_j = -1
         min_leftover = float("inf")
 
-        for j in range(n_factory_rows):
-            if available_factories[j] >= angle_amount:
-                leftover = available_factories[j] - angle_amount
+        for j, capacity in available_factories.items():
+            if capacity >= angle_amount:
+                leftover = capacity - angle_amount
                 if leftover < min_leftover:
                     min_leftover = leftover
                     best_j = j
@@ -113,9 +113,9 @@ def phase2_best_fit(
         # If no complete fit, pick largest capacity
         if best_j == -1:
             max_capacity = 0
-            for j in range(n_factory_rows):
-                if available_factories[j] > max_capacity:
-                    max_capacity = available_factories[j]
+            for j, capacity in available_factories.items():
+                if capacity > max_capacity:
+                    max_capacity = capacity
                     best_j = j
 
         # Make assignment if valid factory found
@@ -123,6 +123,8 @@ def phase2_best_fit(
             amount = min(angle_amount, available_factories[best_j])
 
             # Record assignment
+            if angle_row not in assignments:
+                assignments[angle_row] = []
             assignments[angle_row].append((best_j, amount, "best-fit"))
 
             # Update remaining capacity
@@ -144,13 +146,13 @@ def phase2_best_fit(
             break
 
     # Update required_angles to reflect all assignments
-    for i in range(n_angle_rows):
+    for i in required_angles:
         required_angles[i] = 0  # All should be assigned
 
 
 def run_tmr_row_assignment(
-    required_angles_per_row: list[int],
-    available_factories_per_row: list[int],
+    required_angles_per_row: dict[int, int],
+    available_factories_per_row: dict[int, int],
 ) -> dict:
     """
     Execute the two-phase matching algorithm for magic state assignment.
@@ -158,30 +160,30 @@ def run_tmr_row_assignment(
     Each factory can hold multiple angle requirements.
 
     Args:
-        required_angles_per_row: list of required angles at each row (must all become 0)
-        available_factories_per_row: list of available factory slots at each row (can hold multiple angles)
+        required_angles_per_row: dict of required angles at each row (must all become 0)
+        available_factories_per_row: dict of available factory slots at each row (can hold multiple angles)
     Returns:
         result: dictionary containing:
             - required_angles_original: original required angles
             - available_factories_original: original factory capacities
             - required_angles: final required angles (should all be 0)
             - available_factories: final factory capacities
-            - assignments: list of assignments for each angle row [(factory_row, amount, phase_type), ...]
-            - n_angles: number of angle rows
-            - n_factories: number of factory rows
+            - assignments: dict of assignments for each angle row [(factory_row, amount, phase_type), ...]
+            - n_angle_rows: number of angle rows
+            - n_factory_rows: number of factory rows
     """
     # Store originals
-    required_angles_original = required_angles_per_row[:]
-    available_factories_original = available_factories_per_row[:]
-    n_angles = len(required_angles_per_row)
-    n_factories = len(available_factories_per_row)
+    required_angles_original = required_angles_per_row.copy()
+    available_factories_original = available_factories_per_row.copy()
+    n_angle_rows = len(required_angles_per_row)
+    n_factory_rows = len(available_factories_per_row)
 
     # Working copies
-    required_angles = required_angles_per_row[:]
-    available_factories = available_factories_per_row[:]
+    required_angles = required_angles_per_row.copy()
+    available_factories = available_factories_per_row.copy()
 
     # Assignments: assignments[i] = [(factory_row_j, amount, phase_type), ...]
-    assignments = [[] for _ in range(n_angles)]
+    assignments = {i: [] for i in required_angles_per_row.keys()}
 
     # Run phases
     phase1_exact_match(required_angles, available_factories, assignments)
@@ -193,14 +195,15 @@ def run_tmr_row_assignment(
         "required_angles": required_angles,
         "available_factories": available_factories,
         "assignments": assignments,
-        "n_angles": n_angles,
-        "n_factories": n_factories,
+        "n_angle_rows": n_angle_rows,
+        "n_factory_rows": n_factory_rows,
     }
 
 
 def assign_factories_for_batch(
     factory_pool: FactoryPool,
     qubit_trackers: dict[int, QubitAngleTracker],
+    logic_qubit_locations: list[tuple[int, int]],
     batch_angles: dict[int, dict[int, int]],
 ):
     """
@@ -209,21 +212,91 @@ def assign_factories_for_batch(
     Args:
         factory_pool: FactoryPool
         batch_angles: List of (level, success_rate, angle, target_qubit)
+        logic_qubit_locations: (x, y) location for each logical qubit
 
     Returns:
         factory_assignments: List of (angle, qubit, success_rate) for each factory
     """
-    # TODO: assignment based on location
+    # TODO: assignment based on location, i.e., distance
     idle_factories = factory_pool.get_idle_factories()
     idx = 0
     # print("assign factory")
+    required_angles_per_level_row = dict()
+    available_factories_per_row = defaultdict(int)
+    qubit_by_row = defaultdict(list)
+    factory_by_row = defaultdict(list)
+
     for qubit, demands in batch_angles.items():
+        x, y = logic_qubit_locations[qubit]
+        qubit_by_row[y].append((x, qubit))
         for level, demand in demands.items():
-            angle = qubit_trackers[qubit].target_angle * pow(2, level)
-            success_rate = calculate_success_rate(angle)
-            for i in range(demand):
-                factory = idle_factories[idx]
-                qubit_trackers[qubit].add_factory(factory.id, angle)
-                # print(factory.id, angle, qubit, success_rate)
-                factory_pool.assign_factory(factory.id, angle, qubit, success_rate)
-                idx += 1
+            if level not in required_angles_per_level_row:
+                required_angles_per_level_row[level] = defaultdict(int)
+            required_angles_per_level_row[level][y] += demand
+
+    for y in qubit_by_row.keys():
+        qubit_by_row[y] = sorted(qubit_by_row[y], key=lambda x: x[0])
+
+    for factory in idle_factories:
+        x, y = factory.location
+        available_factories_per_row[y] += 1
+        factory_by_row[y].append((x, factory.id))
+
+    for y in factory_by_row.keys():
+        factory_by_row[y] = sorted(factory_by_row[y], key=lambda x: x[0])
+
+    used_factories = set()
+    for level, required_angles_per_row in required_angles_per_level_row.items():
+        result = run_tmr_row_assignment(
+            required_angles_per_row, available_factories_per_row
+        )
+
+        # from src.util import print_tmr_assignment_results
+
+        # print_tmr_assignment_results(result)
+
+        # Assign angles to factories based on result using row-based assignments
+        # Process assignments from result
+        # print("batch_angles")
+        # print(batch_angles)
+        for angle_row, factory_assignments in result["assignments"].items():
+            qubits_at_row = qubit_by_row[angle_row]
+            qubit_idx = 0
+            fulfilled_demand = 0
+            for factory_row, amount, _ in factory_assignments:
+                # Get factories at factory_row
+                factories_at_row = factory_by_row[factory_row]
+
+                # Assign 'amount' angles from this angle_row to factories at factory_row
+                angles_assigned = 0
+                idx = 0
+
+                while angles_assigned < amount:
+                    # Get the qubit and factory
+                    _, qubit = qubits_at_row[qubit_idx]
+                    while factories_at_row[idx][1] in used_factories:
+                        idx += 1
+                    _, factory_id = factories_at_row[idx]
+
+                    # Assign this angle to the factory
+                    angle = qubit_trackers[qubit].target_angle * pow(2, level)
+                    success_rate = calculate_success_rate(angle)
+                    qubit_trackers[qubit].add_factory(factory_id, angle)
+                    factory_pool.assign_factory(factory_id, angle, qubit, success_rate)
+                    used_factories.add(factory_id)
+                    # print(
+                    #     f"assign factory {factory_id} for qubit {qubit} with level {level}"
+                    # )
+                    available_factories_per_row[factory_row] -= 1
+                    angles_assigned += 1
+                    fulfilled_demand += 1
+                    idx += 1
+                    # print("used_factories")
+                    # print(used_factories)
+                    # print(
+                    #     f"fulfilled_demand: {fulfilled_demand}, required demand: {batch_angles[qubit][level]}"
+                    # )
+                    if fulfilled_demand == batch_angles[qubit][level]:
+                        qubit_idx += 1
+                        fulfilled_demand = 0
+    # input()

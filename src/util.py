@@ -16,6 +16,7 @@ def write_execution_log(
     operation: str,
     qubit: int | None = None,
     movement_time: int = 0,
+    move_vecs: list[str] | None = None,
 ):
     if operation == "SE":
         end_time = start_time + SE_TIME
@@ -27,15 +28,20 @@ def write_execution_log(
         end_time = start_time + movement_time
     else:
         end_time = start_time
-    execution_log.append(
-        (
-            start_time,
-            end_time,
-            factory_id,
-            operation,
-            qubit,
+    if move_vecs:
+        execution_log.append(
+            (start_time, end_time, factory_id, operation, qubit, move_vecs)
         )
-    )
+    else:
+        execution_log.append(
+            (
+                start_time,
+                end_time,
+                factory_id,
+                operation,
+                qubit,
+            )
+        )
 
 
 def write_injection_log(
@@ -79,7 +85,7 @@ def validate_assignment(result: dict) -> bool:
         all_valid: True if all angles properly assigned, False otherwise
     """
     all_valid = True
-    for i in range(result["n_angles"]):
+    for i in result["required_angles_original"].keys():
         total_assigned = sum(amount for _, amount, _ in result["assignments"][i])
         if total_assigned != result["required_angles_original"][i]:
             print(
@@ -114,13 +120,13 @@ def print_tmr_assignment_results(result: dict):
     )
     print(
         "  Total Required: {}, Total Available: {}".format(
-            sum(result["required_angles_original"]),
-            sum(result["available_factories_original"]),
+            sum(result["required_angles_original"].values()),
+            sum(result["available_factories_original"].values()),
         )
     )
 
-    if sum(result["required_angles_original"]) > sum(
-        result["available_factories_original"]
+    if sum(result["required_angles_original"].values()) > sum(
+        result["available_factories_original"].values()
     ):
         print("  WARNING: Insufficient factory capacity!")
     print()
@@ -129,7 +135,7 @@ def print_tmr_assignment_results(result: dict):
     print("\n" + "=" * 80)
     print("FINAL ASSIGNMENTS (Angles -> Factories)")
     print("=" * 80)
-    for i in range(result["n_angles"]):
+    for i in result["required_angles_original"].keys():
         total_assigned = sum(amount for _, amount, _ in result["assignments"][i])
         status = (
             "OK"
@@ -155,11 +161,11 @@ def print_tmr_assignment_results(result: dict):
     print("\n" + "=" * 80)
     print("FACTORY UTILIZATION")
     print("=" * 80)
-    for j in range(result["n_factories"]):
+    for j in result["available_factories_original"].keys():
         # Find which angle rows are assigned to this factory
         assigned_from = []
         total_used = 0
-        for i in range(result["n_angles"]):
+        for i in result["required_angles_original"].keys():
             for factory, amount, _ in result["assignments"][i]:
                 if factory == j:
                     assigned_from.append("row{}({})".format(i, amount))
@@ -185,6 +191,6 @@ def print_tmr_assignment_results(result: dict):
     else:
         print("FAILURE: Some angles remain unassigned!")
 
-    unused_factories = sum(result["available_factories"])
+    unused_factories = sum(result["available_factories"].values())
     print("  Unused factory capacity: {}".format(unused_factories))
     print()

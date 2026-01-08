@@ -1,89 +1,103 @@
 from collections import defaultdict
 from typing import Any
+from src.ds.device_state import FactoryPool
+import sys
+
+# def greedy_label_column_assignment(
+#     matrix: list[list[Any]], rows: list[int]
+# ) -> tuple[dict[Any, int], list[int]]:
+#     """
+#     Run the greedy selection process on a given set of rows.
+#     Returns:
+#         assign: dict[label] = chosen_column
+#         surviving_rows: list of rows that remain consistent
+#     """
+#     if not rows:
+#         return {}, []
+
+#     C = len(matrix[0])
+
+#     labels: list[Any] = sorted({matrix[r][c] for r in rows for c in range(C)})
+#     remaining: set[int] = set(rows)
+#     assign: dict[Any, int] = {}
+
+#     for label in labels:
+#         # Count occurrences of label across remaining rows
+#         freq: defaultdict[int, int] = defaultdict(int)
+#         for r in remaining:
+#             for c in range(C):
+#                 if matrix[r][c] == label:
+#                     freq[c] += 1
+
+#         if not freq:
+#             continue
+
+#         best_col: int = max(freq, key=lambda c: freq[c])
+
+#         assign[label] = best_col
+
+#         # Keep only rows consistent with this label assignment
+#         new_remaining = {r for r in remaining if matrix[r][best_col] == label}
+#         if not new_remaining:
+#             # No consistent rows remain; this assignment fails
+#             return assign, []  # no rows survive
+
+#         remaining = new_remaining
+
+#     return assign, sorted(remaining)
 
 
-def greedy_label_column_assignment(
-    matrix: list[list[Any]], rows: list[int]
-) -> tuple[dict[Any, int], list[int]]:
-    """
-    Run the greedy selection process on a given set of rows.
-    Returns:
-        assign: dict[label] = chosen_column
-        surviving_rows: list of rows that remain consistent
-    """
-    if not rows:
-        return {}, []
+# def iterative_greedy_groups(matrix: list[list[Any]]) -> list[tuple[list, dict]]:
+#     """
+#     Repeatedly extract consistent row-groups until no rows remain.
+#     Returns:
+#         list of (rows, assignment)
+#     """
+#     R = len(matrix)
+#     leftover = list(range(R))
+#     result = []
 
-    C = len(matrix[0])
+#     while leftover:
+#         assign, row_group = greedy_label_column_assignment(matrix, leftover)
 
-    labels: list[Any] = sorted({matrix[r][c] for r in rows for c in range(C)})
-    remaining: set[int] = set(rows)
-    assign: dict[Any, int] = {}
+#         if not row_group:
+#             # No consistent subset can be formed from leftover rows;
+#             # treat each row as its own (degenerate) group with empty assignment.
+#             # Or you can break. For now we peel them individually.
+#             for r in leftover:
+#                 result.append(([r], {}))
+#             break
 
-    for label in labels:
-        # Count occurrences of label across remaining rows
-        freq: defaultdict[int, int] = defaultdict(int)
-        for r in remaining:
-            for c in range(C):
-                if matrix[r][c] == label:
-                    freq[c] += 1
+#         result.append((row_group, assign))
 
-        if not freq:
-            continue
-
-        best_col: int = max(freq, key=lambda c: freq[c])
-
-        assign[label] = best_col
-
-        # Keep only rows consistent with this label assignment
-        new_remaining = {r for r in remaining if matrix[r][best_col] == label}
-        if not new_remaining:
-            # No consistent rows remain; this assignment fails
-            return assign, []  # no rows survive
-
-        remaining = new_remaining
-
-    return assign, sorted(remaining)
-
-
-def iterative_greedy_groups(matrix: list[list[Any]]) -> list[tuple[list, dict]]:
-    """
-    Repeatedly extract consistent row-groups until no rows remain.
-    Returns:
-        list of (rows, assignment)
-    """
-    R = len(matrix)
-    leftover = list(range(R))
-    result = []
-
-    while leftover:
-        assign, row_group = greedy_label_column_assignment(matrix, leftover)
-
-        if not row_group:
-            # No consistent subset can be formed from leftover rows;
-            # treat each row as its own (degenerate) group with empty assignment.
-            # Or you can break. For now we peel them individually.
-            for r in leftover:
-                result.append(([r], {}))
-            break
-
-        result.append((row_group, assign))
-
-        # Remove used rows from leftover
-        used = set(row_group)
-        leftover = [r for r in leftover if r not in used]
-    return result
+#         # Remove used rows from leftover
+#         used = set(row_group)
+#         leftover = [r for r in leftover if r not in used]
+#     return result
 
 
 def assign_injection(
     successful_qubits: set[int],
     batch_injection: list[tuple[int, list[int]]],
+    factory_pool: FactoryPool,
+    logic_qubit_locations: list[tuple[int, int]],
 ) -> list[tuple[int, int]]:
     qubit_factory_pairs = []
     for qubit, factory_ids in batch_injection:
         if qubit in successful_qubits:
             continue
-        # todo(f): may optimize assignment based on the location to enhance cnot parallelism
-        qubit_factory_pairs.append((qubit, factory_ids[0]))
+        # todo(f): may optimize assignment based on the routing parallelism to enhance cnot parallelism
+        # current implementation do assignment based on distance
+        nearset_factory_id = 0
+        nearset_factory_distance = sys.maxsize
+        x_q, y_q = logic_qubit_locations[qubit]
+        for factory_id in factory_ids:
+            factory = factory_pool.get_factory_by_id(factory_id=factory_id)
+            x_f, y_f = factory.location
+            distance = abs(x_q - x_f) + abs(y_q - y_f)
+            if distance < nearset_factory_distance:
+                nearset_factory_distance = distance
+                nearset_factory_id = factory_id
+        qubit_factory_pairs.append((qubit, nearset_factory_id))
 
     return qubit_factory_pairs

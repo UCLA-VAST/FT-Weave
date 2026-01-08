@@ -6,7 +6,7 @@ import matplotlib.patches as mpatches
 # Ensure repository root is on sys.path so `src` is importable when running tests
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.scheduling import factory_angle_execution
+from src.analog_rotation_execution import factory_angle_execution
 from src.ds.device_state import FactoryPool
 
 
@@ -28,7 +28,7 @@ def plot_circuit_execution(
         print("No execution log to plot")
         return
 
-    fig, ax = plt.subplots(figsize=(20, max(6, n_factories * 0.8)))
+    fig, ax = plt.subplots(figsize=(16, max(6, n_factories * 0.8)))
 
     # Color mapping for operations
     color_map = {
@@ -40,11 +40,16 @@ def plot_circuit_execution(
         "Barrier": "#000000",
         "RUS_success": "#E01414",
         "RUS_fail": "#DDA413",
-        "TUM_fail": "#007E15",
+        "TMR_fail": "#007E15",
     }
 
     # Plot each operation as a rectangle
-    for start_time, end_time, factory_id, operation, value in execution_log:
+    for entry in execution_log:
+        if len(entry) == 5:
+            start_time, end_time, factory_id, operation, value = entry
+            move_vecs = None
+        else:
+            start_time, end_time, factory_id, operation, value, move_vecs = entry
         duration = end_time - start_time
         if duration == 0:
             duration = 0.1
@@ -63,7 +68,11 @@ def plot_circuit_execution(
         else:
 
             # Annotate with operation and qubit
-            no_text_operations = {"RUS_success", "RUS_fail", "TMR_fail", "move"}
+            no_text_operations = {
+                "RUS_success",
+                "RUS_fail",
+                "TMR_fail",
+            }
             if operation in no_text_operations:
                 zorder = 15
                 start_time -= 0.05
@@ -84,6 +93,8 @@ def plot_circuit_execution(
             if operation not in no_text_operations:
                 if operation == "Rz":
                     text = f"{operation}\nθ:{value}"
+                elif operation == "move" and move_vecs:
+                    text = f"{operation}\n{move_vecs[0]}\n->{move_vecs[1]}"
                 else:
                     text = f"{operation}\nQ{value}"
 
@@ -131,7 +142,7 @@ def plot_circuit_execution(
             label="RUS:fail",
         ),
         mpatches.Patch(
-            facecolor=color_map["TUM_fail"],
+            facecolor=color_map["TMR_fail"],
             edgecolor="black",
             label="TMR:fail",
         ),

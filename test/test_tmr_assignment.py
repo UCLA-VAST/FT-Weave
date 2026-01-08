@@ -12,8 +12,8 @@ from src.util import print_tmr_assignment_results
 if __name__ == "__main__":
     # Example 1
     print("EXAMPLE 1")
-    M1 = [4, 3, 2, 5, 1]
-    A1 = [5, 4, 4, 2]
+    M1 = {0: 4, 1: 3, 2: 2, 3: 5, 4: 1}
+    A1 = {0: 5, 1: 4, 2: 4, 3: 2}
 
     result = run_tmr_row_assignment(M1, A1)
     print_tmr_assignment_results(result)
@@ -23,8 +23,8 @@ if __name__ == "__main__":
 
     # Example 2
     # print("EXAMPLE 2")
-    M2 = [10, 5, 4, 6, 8, 1]
-    A2 = [10, 5, 3, 7, 9]
+    M2 = {0: 10, 1: 5, 2: 4, 3: 6, 4: 8}
+    A2 = {0: 10, 1: 5, 2: 3, 3: 8, 5: 9}
 
     result = run_tmr_row_assignment(M2, A2)
     print_tmr_assignment_results(result)
