@@ -7,6 +7,8 @@ from .config import (
     LOOKAHEAD_THRESHOLD,
     LOOKAHEAD_LEVEL,
 )
+from typing import Any
+from collections import defaultdict
 
 
 def write_execution_log(
@@ -194,3 +196,192 @@ def print_tmr_assignment_results(result: dict):
     unused_factories = sum(result["available_factories"].values())
     print("  Unused factory capacity: {}".format(unused_factories))
     print()
+
+
+def analyze_execution_log(
+    execution_log: list[tuple],
+    n_factories: int | None = None,
+) -> dict[str, Any]:
+    """
+    Analyze an execution log into a plotting-friendly profile.
+
+    The returned profile mirrors information used by `plot_circuit_execution` but
+    is compact and numeric so it can be consumed without rendering a large figure.
+
+    Returns a dict with:
+      - total_time: overall circuit end time
+      - ops: mapping op -> {count, total_time, circuit_time, avg_time, max_time}
+        where circuit_time = time occupied by op in circuit (accounting for parallelism)
+      - per_factory: mapping factory_id -> {timeline: [entries], busy_time, idle_time, ops}
+      - movements: movement-pair stats mapping move_vecs -> {count, total_time, avg, max}
+      - failures: overall failure count and per-factory failure counts
+
+    Each timeline entry is (start, end, operation, value, move_vecs_or_None).
+    """
+    if not execution_log:
+        return {
+            "total_time": 0,
+            "ops": {},
+            "per_factory": {},
+            "movements": {},
+            "failures": {"total": 0, "by_factory": {}},
+        }
+
+    # Normalize entries and build per-factory timelines
+    per_factory: dict[Any, dict[str, Any]] = {}
+    ops: dict[str, dict[str, float]] = {}
+    op_intervals: dict[str, list[tuple]] = defaultdict(
+        list
+    )  # op -> [(start, end), ...]
+    movements: dict[tuple, dict[str, float]] = {}
+    rus_failures_total = 0
+    rus_failures_by_factory = defaultdict(int)
+    tmr_failures_total = 0
+    tmr_failures_by_factory = defaultdict(int)
+    overall_end = 0
+
+    for e in execution_log:
+        # Accept either 5- or 6-element tuples
+        if len(e) == 5:
+            start, end, factory_id, operation, value = e
+            move_vecs = None
+        else:
+            start, end, factory_id, operation, value, move_vecs = e
+
+        overall_end = max(overall_end, end)
+
+        # Record op stats
+        dur = max(0, end - start)
+        s = ops.setdefault(operation, {"count": 0, "total_time": 0, "max_time": 0})
+        s["count"] += 1
+        s["total_time"] += dur
+        s["max_time"] = max(s["max_time"], dur)
+
+        # Track intervals for circuit_time calculation
+        op_intervals[operation].append((start, end))
+
+        # Per-factory timeline
+        fid = factory_id
+        timeline = per_factory.setdefault(
+            fid, {"timeline": [], "busy_time": 0, "ops": {}}
+        )
+        timeline["timeline"].append((start, end, operation, value, move_vecs))
+        timeline["busy_time"] += dur
+        opf = timeline["ops"].setdefault(operation, {"count": 0, "total_time": 0})
+        opf["count"] += 1
+        opf["total_time"] += dur
+
+        # Movements grouping
+        if operation == "move":
+            key = tuple(move_vecs) if move_vecs is not None else ("unknown",)
+            mv = movements.setdefault(key, {"count": 0, "total_time": 0, "max_time": 0})
+            mv["count"] += 1
+            mv["total_time"] += dur
+            mv["max_time"] = max(mv["max_time"], dur)
+
+        # Failures
+        if operation == "RUS_fail":
+            rus_failures_total += 1
+            rus_failures_by_factory[fid] += 1
+        elif operation == "TMR_fail":
+            tmr_failures_total += 1
+            tmr_failures_by_factory[fid] += 1
+
+    # Compute circuit_time for each operation (merge overlapping intervals)
+    def merge_intervals(intervals: list[tuple]) -> int:
+        """Merge overlapping intervals and return total time covered."""
+        if not intervals:
+            return 0
+        intervals = list(set(intervals))
+        intervals.sort()
+        total = 0
+        for start, end in intervals:
+            total += end - start
+
+        # merged_start, merged_end = intervals[0]
+        # total = 0
+        # for start, end in intervals[1:]:
+        #     if start <= merged_end:
+        #         merged_end = max(merged_end, end)
+        #     else:
+        #         total += merged_end - merged_start
+        #         merged_start, merged_end = start, end
+        # total += merged_end - merged_start
+        return total
+
+    for op_name in ops.keys():
+        circuit_time = merge_intervals(op_intervals[op_name])
+        ops[op_name]["circuit_time"] = circuit_time
+
+    # Finalize averages
+    for k, v in ops.items():
+        v["avg_time"] = v["total_time"] / v["count"] if v["count"] else 0
+    for k, v in movements.items():
+        v["avg_time"] = v["total_time"] / v["count"] if v["count"] else 0
+
+    # Compute idle times (if n_factories provided use that, else infer from per_factory keys)
+    if n_factories is None:
+        # infer number of factories as max key + 1 when keys are ints; otherwise skip
+        try:
+            int_keys = [k for k in per_factory.keys() if isinstance(k, int) and k >= 0]
+            n_factories = max(int_keys) + 1 if int_keys else None
+        except Exception:
+            n_factories = None
+
+    if n_factories is not None:
+        # ensure all factories from 0..n_factories-1 are present
+        for fid in range(n_factories):
+            if fid not in per_factory:
+                per_factory[fid] = {"timeline": [], "busy_time": 0, "ops": {}}
+
+    for fid, info in per_factory.items():
+        info["timeline"].sort(key=lambda x: x[0])
+        info["idle_time"] = overall_end - info.get("busy_time", 0)
+
+    profile = {
+        "total_time": overall_end,
+        "ops": ops,
+        "per_factory": per_factory,
+        "movements": movements,
+        "failures": {
+            "tmr_total": tmr_failures_total,
+            "tmr_by_factory": tmr_failures_by_factory,
+            "rus_total": rus_failures_total,
+            "rus_by_factory": rus_failures_by_factory,
+        },
+    }
+
+    return profile
+
+
+def print_execution_profile(profile: dict[str, Any], top_n_pairs: int = 0) -> None:
+    """Print concise execution profile produced by `analyze_execution_log`."""
+    print("EXECUTION PROFILE SUMMARY")
+    print(f"- Total circuit time: {profile.get('total_time', 0)}")
+
+    ops = profile.get("ops", {})
+    print(f"- Operations: {len(ops)} types")
+    for op, s in ops.items():
+        circuit_time = s.get("circuit_time", 0)
+        print(
+            f"  - {op}: count={s['count']}, circuit_time={circuit_time}, total={s['total_time']}, avg={s.get('avg_time',0):.3f}, max={s['max_time']}"
+        )
+
+    mv = profile.get("movements", {})
+    print(f"- Movement pairs: {len(mv)} unique")
+    for k, v in list(mv.items())[:top_n_pairs]:
+        print(
+            f"  - {k}: count={v['count']}, total={v['total_time']}, avg={v.get('avg_time',0):.3f}, max={v['max_time']}"
+        )
+
+    failures = profile.get("failures", {})
+    print(f"- TMR failures total: {failures.get('tmr_total',0)}")
+    if failures.get("tmr_by_factory"):
+        print("- TMR failures by factory (sample):")
+        for fid, c in list(failures["tmr_by_factory"].items())[:10]:
+            print(f"  - Factory {fid}: {c}")
+    print(f"- RUS failures total: {failures.get('rus_total',0)}")
+    if failures.get("rus_by_factory"):
+        print("- RUS failures by factory (sample):")
+        for fid, c in list(failures["rus_by_factory"].items())[:10]:
+            print(f"  - Factory {fid}: {c}")
