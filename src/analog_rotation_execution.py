@@ -305,6 +305,7 @@ def factory_angle_execution(
             # print(injection_sequence)
             # input()
             for batch_injection in injection_sequence:
+                # print(f"batch_injection: {batch_injection}")
                 # qubit_factory_pairs: list[tuple(qubit, factory_id)]
                 qubit_factory_pairs = assign_injection(
                     successful_qubits,
@@ -312,6 +313,8 @@ def factory_angle_execution(
                     factory_pool,
                     logic_qubit_locations,
                 )
+                if not qubit_factory_pairs:
+                    break
                 # routing
                 routing_batches = two_layer_routing(
                     factory_pool, logic_qubit_locations, qubit_factory_pairs
@@ -324,6 +327,7 @@ def factory_angle_execution(
                 # print(qubit_factory_pairs)
                 # print("routing_batches")
                 # print(routing_batches)
+
                 for batches in routing_batches:
                     max_movement_time = 0
                     for qubit, factory_id in batches:
