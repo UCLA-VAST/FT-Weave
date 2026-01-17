@@ -33,6 +33,8 @@ def get_angles_for_preparation(
         qubit: n_available_factories * demand / sum_demands
         for qubit, demand in qubit_demands.items()
     }
+    print("ideal_factory_allocation:")
+    print(ideal_factory_allocation)
     allocation = integer_allocation(n_available_factories, ideal_factory_allocation)
     # print("allocation")
     # print(allocation)
@@ -56,6 +58,8 @@ def get_angles_for_preparation(
             demands[level] = demand
             sum_demands += demand
             level_demand /= 2
+        for level, demand in demands.items():
+            demands[level] = demand / sum_demands * allocation[qubit]
         # print("allocation[qubit]")
         # print(allocation[qubit])
         # print("demands")

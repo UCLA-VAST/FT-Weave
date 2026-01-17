@@ -123,6 +123,7 @@ def collect_teleportation_sequence(
                     generation_to_factories[generation].append(factory_id)
                     max_generation = max(max_generation, generation)
                 else:
+                    print(f"free factory {factory_id} for qubit {qubit}")
                     factory_pool.free_factory(factory_id)
                     removed_factory.append((factory_id, angle))
         for factory_id, angle in removed_factory:
@@ -256,20 +257,21 @@ def factory_angle_execution(
     execution_log = []
 
     circuit_moment = 0
-
     # ========================================================================
     # MAIN EXECUTION LOOP
     # ========================================================================
 
     while len(target_qubits_angles) > len(successful_qubits):
+        print(f"circuit_moment: {circuit_moment}")
+        print(f"idle factories: {factory_pool.get_num_idle_factories()}")
         # print("successful_qubits")
         # print(successful_qubits)
-        # print("circuit_moment")
-        # print(circuit_moment)
         # PHASE 1: Assign idle factories to prepare angles
         batch_angles = get_angles_for_preparation(
             successful_qubits, qubit_trackers, factory_pool.get_num_idle_factories()
         )
+        print("batch_angles")
+        print(batch_angles)
         assign_factories_for_batch(
             factory_pool, qubit_trackers, logic_qubit_locations, batch_angles
         )
@@ -301,8 +303,8 @@ def factory_angle_execution(
             qubit_trackers, factory_pool
         )
         if injection_sequence:
-            # print("injection_sequence")
-            # print(injection_sequence)
+            print("injection_sequence")
+            print(injection_sequence)
             # input()
             for batch_injection in injection_sequence:
                 # print(f"batch_injection: {batch_injection}")
@@ -338,6 +340,7 @@ def factory_angle_execution(
                         movement_time = abs(x_q - x_f) + abs(y_q - y_f)
                         max_movement_time = max(max_movement_time, movement_time)
 
+                    max_movement_time /= 2
                     for qubit, factory_id in batches:
                         x_q, y_q = logic_qubit_locations[qubit]
                         x_f, y_f = factory_pool.get_factory_by_id(

@@ -13,11 +13,11 @@ from collections import defaultdict
 
 def write_execution_log(
     execution_log: list,
-    start_time: int,
+    start_time: float,
     factory_id: int,
     operation: str,
     qubit: int | None = None,
-    movement_time: int = 0,
+    movement_time: float = 0,
     move_vecs: list[str] | None = None,
 ):
     if operation == "SE":
@@ -48,7 +48,7 @@ def write_execution_log(
 
 def write_injection_log(
     execution_log: list,
-    start_time: int,
+    start_time: float,
     factory_id: int,
     result: str,
     qubit: int | None,
