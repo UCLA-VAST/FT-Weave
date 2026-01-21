@@ -2,6 +2,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
+import numpy as np
 from ..config import PRECISION
 
 # ============================================================================
@@ -23,12 +24,12 @@ class QubitAngleTracker:
     def __init__(self, qubit_id, target_angle):
         self.qubit_id = round(qubit_id, PRECISION)
         self.target_angle = target_angle
-        self.factories = []  # List of (factory_id, angle)
+        self.factories: list[tuple[int, float]] = []  # List of (factory_id, angle)
         self.angle_counts = Counter()  # angle -> count
 
     def get_generation(self, angle):
         """Calculate generation level: 0 for original, 1 for 2x, 2 for 4x, etc."""
-        if angle == self.target_angle:
+        if np.isclose(angle, self.target_angle):
             return 0
         # Calculate how many times we've doubled: log2(angle/original)
         import math

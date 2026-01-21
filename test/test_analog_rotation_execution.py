@@ -20,7 +20,7 @@ from src.util import analyze_execution_log, print_execution_profile
 # VISUALIZATION FUNCTION
 # ============================================================================
 def plot_circuit_execution(
-    execution_log, n_factories, save_path="circuit_execution.pdf"
+    execution_log, n_factories, save_path="circuit_execution.pdf", figure_width=16
 ):
     """
     Plot circuit execution timeline showing operations on each factory.
@@ -33,8 +33,8 @@ def plot_circuit_execution(
     if not execution_log:
         print("No execution log to plot")
         return
-
-    fig, ax = plt.subplots(figsize=(16, max(6, n_factories * 0.8)))
+    circuit_length = len(execution_log)
+    fig, ax = plt.subplots(figsize=(circuit_length / 8 + 4, max(6, n_factories * 0.8)))
 
     # Color mapping for operations
     color_map = {
@@ -235,7 +235,7 @@ def test(
 ):
     target_qubits_angles = {}
     if same_angle:
-        angle = random.uniform(0.0001, 0.001)
+        angle = 0.001
         for i in range(n_qubits):
             target_qubits_angles[i] = angle
     else:
@@ -285,6 +285,7 @@ def test(
 
     profiling_result = analyze_execution_log(log, n_factories=n_factories)
     print_execution_profile(profile=profiling_result)
+    plot_circuit_execution(log, n_factories, figure_width=50)
 
 
 if __name__ == "__main__":
@@ -293,6 +294,9 @@ if __name__ == "__main__":
         n_qubits=25,
         n_factories=25,
         qubit_layout=(5, 5),
+        # n_qubits=9,
+        # n_factories=9,
+        # qubit_layout=(3, 3),
         same_angle=True,
         placement="seperate_region",
         # placement="close",

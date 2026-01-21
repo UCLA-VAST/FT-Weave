@@ -41,7 +41,7 @@ class QubitAngleTracker:
 
     def get_generation(self, angle):
         """Calculate generation level: 0 for original, 1 for 2x, 2 for 4x, etc."""
-        if angle == self.target_angle:
+        if np.isclose(angle, self.target_angle):
             return 0
         # Calculate how many times we've doubled: log2(angle/original)
         import math

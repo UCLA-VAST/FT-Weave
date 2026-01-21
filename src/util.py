@@ -1,11 +1,6 @@
 from .config import (
-    TMR_P,
-    TMR_Q,
-    TMR_PREPARATION_TIME,
     CNOT_TIME,
     SE_TIME,
-    LOOKAHEAD_THRESHOLD,
-    LOOKAHEAD_LEVEL,
 )
 from typing import Any
 from collections import defaultdict

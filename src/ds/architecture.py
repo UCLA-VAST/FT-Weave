@@ -300,3 +300,9 @@ class Architecture:
         # d= 15
         t = math.sqrt(d / a)
         return t
+
+
+def move_duration(x1, y1, x2, y2) -> float:
+    movement_time = abs(x1 - x2) + abs(y1 - y2)
+    movement_time /= 2
+    return movement_time

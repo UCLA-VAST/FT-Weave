@@ -39,7 +39,7 @@ def get_angles_for_preparation(
     # print("allocation")
     # print(allocation)
     qubit_angle_factories = {}
-    level_threshold = 5
+    level_threshold = 3
     for qubit, tracker in qubit_trackers.items():
         if qubit in successful_qubits:
             continue
