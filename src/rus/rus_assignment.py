@@ -48,7 +48,7 @@ def assign_teleportation_with_sharing(
 
     qubit_factory_pairs = []
     assigned_qubits = set()
-    print(f"angle_to_qubits: {angle_to_qubits}")
+    # print(f"angle_to_qubits: {angle_to_qubits}")
     # Process each angle group separately
     for angle, qubits_for_angle in angle_to_qubits.items():
         # Get all factories preparing this angle
@@ -61,7 +61,7 @@ def assign_teleportation_with_sharing(
             if factory is not None:
                 available_factories[factory_id] = factory.location
 
-        print(f"available_factories: {available_factories}")
+        # print(f"available_factories: {available_factories}")
         if not available_factories:
             continue
 

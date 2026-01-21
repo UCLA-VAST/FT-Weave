@@ -30,15 +30,14 @@ def phase1_exact_match(
     # match for a required angle in O(1) average time per angle, making the
     # whole phase O(n).
     value_to_indices = defaultdict(list)
-    for j, cap in available_factories.items():
+    for j, cap in sorted(available_factories.items()):
         if cap > 0:
             value_to_indices[cap].append(j)
 
     # For each angle row, check whether there's a factory with exactly the
     # same remaining capacity. If so, assign and remove that factory from
     # the map (its capacity becomes zero).
-    for i in list(required_angles.keys()):
-        req = required_angles[i]
+    for i, req in sorted(required_angles.items()):
         if req <= 0:
             continue
 
@@ -46,8 +45,8 @@ def phase1_exact_match(
         if not indices:
             continue
 
-        # Pop one matching factory index (use pop for O(1) removal).
-        j = indices.pop()
+        # Pop the first matching factory index (use pop(0) to preserve order).
+        j = indices.pop(0)
 
         match_amount = req
 

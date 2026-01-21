@@ -311,16 +311,16 @@ def factory_angle_execution(
     # ========================================================================
 
     while len(target_qubits_angles) > len(successful_qubits):
-        print(f"circuit_moment: {circuit_moment}")
-        print(f"idle factories: {factory_pool.get_num_idle_factories()}")
-        print("successful_qubits")
-        print(successful_qubits)
+        # print(f"circuit_moment: {circuit_moment}")
+        # print(f"idle factories: {factory_pool.get_num_idle_factories()}")
+        # print("successful_qubits")
+        # print(successful_qubits)
         # PHASE 1: Assign idle factories to prepare angles
         batch_angles = get_angles_for_preparation(
             successful_qubits, qubit_trackers, factory_pool.get_num_idle_factories()
         )
-        print("batch_angles")
-        print(batch_angles)
+        # print("batch_angles")
+        # print(batch_angles)
         assign_factories_for_batch(
             factory_pool, qubit_trackers, logic_qubit_locations, batch_angles
         )
@@ -352,10 +352,7 @@ def factory_angle_execution(
         angle_factory_index = build_angle_factory_index_from_tmr_results(
             qubit_trackers, successful_qubits, factory_pool
         )
-        print(
-            f"Indexed {len(angle_factory_index.get_all_angles())} angles for factory sharing"
-        )
-        print(angle_factory_index)
+        # print(angle_factory_index)
         # injection_sequence = collect_teleportation_sequence(
         #     qubit_trackers, factory_pool
         # )
