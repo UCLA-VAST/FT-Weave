@@ -271,11 +271,49 @@ def execute_rus_teleportation(
     return rus_simulation
 
 
+def execute_movement(
+    routing_batches: list,
+    logic_qubit_locations: list,
+    factory_pool: FactoryPool,
+    execution_log: list,
+    circuit_moment: float,
+    reverse: bool = False,
+) -> float:
+    for batches in routing_batches:
+        max_movement_time = 0.0
+        for qubit, factory_id in batches:
+            x_q, y_q = logic_qubit_locations[qubit]
+            x_f, y_f = factory_pool.get_factory_by_id(factory_id=factory_id).location
+            max_movement_time = max(
+                max_movement_time, move_duration(x_q, y_q, x_f, y_f)
+            )
+
+        for qubit, factory_id in batches:
+            x_q, y_q = logic_qubit_locations[qubit]
+            x_f, y_f = factory_pool.get_factory_by_id(factory_id=factory_id).location
+            if reverse:
+                movement_strs = [f"({x_q},{y_q})", f"({x_f},{y_f})"]
+            else:
+                movement_strs = [f"({x_f},{y_f})", f"({x_q},{y_q})"]
+            write_execution_log(
+                execution_log,
+                circuit_moment,
+                factory_id,
+                "move",
+                qubit=None,
+                movement_time=max_movement_time,
+                move_vecs=movement_strs,
+            )
+        circuit_moment += max_movement_time
+    return circuit_moment
+
+
 def factory_angle_execution(
     factory_pool: FactoryPool,
     target_qubits_angles: dict[int, float],
     logic_qubit_locations: list[tuple[int, int]],
     magic_state_locations: list[tuple[int, int]],
+    column_based_placement: bool = True,
 ):
     """
     Execute angle preparation on magic state factories with lookahead optimization.
@@ -306,6 +344,7 @@ def factory_angle_execution(
     execution_log = []
 
     circuit_moment = 0
+
     # ========================================================================
     # MAIN EXECUTION LOOP
     # ========================================================================
@@ -322,7 +361,11 @@ def factory_angle_execution(
         # print("batch_angles")
         # print(batch_angles)
         assign_factories_for_batch(
-            factory_pool, qubit_trackers, logic_qubit_locations, batch_angles
+            factory_pool,
+            qubit_trackers,
+            logic_qubit_locations,
+            batch_angles,
+            column=column_based_placement,
         )
 
         # PHASE 2: Execute TMR preparation
@@ -381,34 +424,13 @@ def factory_angle_execution(
             # print(qubit_factory_pairs)
             # print("routing_batches")
             # print(routing_batches)
-
-            for batches in routing_batches:
-                max_movement_time = 0
-                for qubit, factory_id in batches:
-                    x_q, y_q = logic_qubit_locations[qubit]
-                    x_f, y_f = factory_pool.get_factory_by_id(
-                        factory_id=factory_id
-                    ).location
-                    max_movement_time = max(
-                        max_movement_time, move_duration(x_q, y_q, x_f, y_f)
-                    )
-
-                for qubit, factory_id in batches:
-                    x_q, y_q = logic_qubit_locations[qubit]
-                    x_f, y_f = factory_pool.get_factory_by_id(
-                        factory_id=factory_id
-                    ).location
-                    movement_strs = [f"({x_f},{y_f})", f"({x_q},{y_q})"]
-                    write_execution_log(
-                        execution_log,
-                        circuit_moment,
-                        factory_id,
-                        "move",
-                        qubit=None,
-                        movement_time=max_movement_time,
-                        move_vecs=movement_strs,
-                    )
-                circuit_moment += max_movement_time
+            circuit_moment = execute_movement(
+                routing_batches,
+                logic_qubit_locations,
+                factory_pool,
+                execution_log,
+                circuit_moment,
+            )
 
             rus_simulation = execute_rus_teleportation(
                 qubit_factory_pairs, factory_pool, circuit_moment, execution_log
@@ -422,6 +444,14 @@ def factory_angle_execution(
                 qubit_trackers,
                 factory_pool,
                 angle_factory_index,
+            )
+            circuit_moment = execute_movement(
+                routing_batches,
+                logic_qubit_locations,
+                factory_pool,
+                execution_log,
+                circuit_moment,
+                reverse=True,
             )
             if len(target_qubits_angles) == len(successful_qubits):
                 break
