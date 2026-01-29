@@ -2,6 +2,20 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import os
 
+# Color mapping for operations
+color_map = {
+    "TUM": "#9ed76c",
+    "SE": "#4681a9",
+    "CNOT": "#e74c3c",
+    "Rz": "#e7ab3c",
+    "move": "#b64abe",
+    "return_move": "#9edc6f",
+    "Barrier": "#000000",
+    "RUS_success": "#E01414",
+    "RUS_fail": "#DDA413",
+    "TMR_fail": "#007E15",
+}
+
 
 # ============================================================================
 # VISUALIZATION FUNCTION
@@ -25,19 +39,6 @@ def plot_circuit_execution(
         return
     circuit_length = len(execution_log)
     fig, ax = plt.subplots(figsize=(circuit_length / 8 + 4, max(6, n_factories * 0.8)))
-
-    # Color mapping for operations
-    color_map = {
-        "TUM": "#9ed76c",
-        "SE": "#4681a9",
-        "CNOT": "#e74c3c",
-        "Rz": "#e7ab3c",
-        "move": "#b64abe",
-        "Barrier": "#000000",
-        "RUS_success": "#E01414",
-        "RUS_fail": "#DDA413",
-        "TMR_fail": "#007E15",
-    }
 
     # Plot each operation as a rectangle
     for entry in execution_log:
@@ -89,7 +90,7 @@ def plot_circuit_execution(
             if operation not in no_text_operations:
                 if operation == "Rz":
                     text = f"{operation}\nθ:{value}"
-                elif operation == "move" and move_vecs:
+                elif operation in ["move", "return_move"] and move_vecs:
                     text = f"{operation}\n{move_vecs[0]}\n->{move_vecs[1]}"
                 else:
                     text = f"{operation}\nQ{value}"
@@ -126,6 +127,14 @@ def plot_circuit_execution(
         ),
         mpatches.Patch(
             facecolor=color_map["CNOT"], edgecolor="black", label="CNOT (Injection)"
+        ),
+        mpatches.Patch(
+            facecolor=color_map["move"], edgecolor="black", label="move (Forward)"
+        ),
+        mpatches.Patch(
+            facecolor=color_map["return_move"],
+            edgecolor="black",
+            label="return_move (Return)",
         ),
         mpatches.Patch(
             facecolor=color_map["RUS_success"],
@@ -185,19 +194,6 @@ def plot_circuit_execution_vertical(
     circuit_length = len(execution_log)
     fig, ax = plt.subplots(figsize=(max(6, n_factories * 0.8), circuit_length / 10))
 
-    # Color mapping for operations
-    color_map = {
-        "TUM": "#9ed76c",
-        "SE": "#4681a9",
-        "CNOT": "#e74c3c",
-        "Rz": "#e7ab3c",
-        "move": "#b64abe",
-        "Barrier": "#000000",
-        "RUS_success": "#E01414",
-        "RUS_fail": "#DDA413",
-        "TMR_fail": "#007E15",
-    }
-
     # Plot each operation as a rectangle
     for entry in execution_log:
         if len(entry) == 5:
@@ -250,7 +246,7 @@ def plot_circuit_execution_vertical(
             if operation not in no_text_operations:
                 if operation == "Rz":
                     text = f"{operation}\nθ:{value}"
-                elif operation == "move" and move_vecs:
+                elif operation in ["move", "return_move"] and move_vecs:
                     text = f"{operation}\n{move_vecs[0]}\n->{move_vecs[1]}"
                 else:
                     text = f"{operation}\nQ{value}"
@@ -287,6 +283,14 @@ def plot_circuit_execution_vertical(
         ),
         mpatches.Patch(
             facecolor=color_map["CNOT"], edgecolor="black", label="CNOT (Injection)"
+        ),
+        mpatches.Patch(
+            facecolor=color_map["move"], edgecolor="black", label="move (Forward)"
+        ),
+        mpatches.Patch(
+            facecolor=color_map["return_move"],
+            edgecolor="black",
+            label="return_move (Return)",
         ),
         mpatches.Patch(
             facecolor=color_map["RUS_success"],

@@ -85,6 +85,7 @@ def test(
     same_angle: bool = True,
     visualize_rus: bool = False,
     placement: str = "seperate_region",
+    prefix: str = "",
 ):
     target_qubits_angles = {}
     if same_angle:
@@ -159,11 +160,11 @@ def test(
     profiling_result = analyze_execution_log(log, n_factories=n_factories)
     print_execution_profile(profile=profiling_result)
 
-    pdf_path = f"output/circuit_execution_vertical/{placement}.pdf"
+    pdf_path = f"output/circuit_execution_vertical/{prefix}{placement}.pdf"
     plot_circuit_execution_vertical(
         log, n_factories, figure_height=50, save_path=pdf_path
     )
-    pdf_path = f"output/circuit_execution/{placement}.pdf"
+    pdf_path = f"output/circuit_execution/{prefix}{placement}.pdf"
     plot_circuit_execution(log, n_factories, figure_width=50, save_path=pdf_path)
 
     if visualize_rus:
@@ -171,7 +172,7 @@ def test(
         output_dir = "output"
         os.makedirs(output_dir, exist_ok=True)
 
-        pdf_path = os.path.join(output_dir, f"rus_rounds_detailed/{placement}")
+        pdf_path = os.path.join(output_dir, f"rus_rounds_detailed/{prefix}{placement}")
         plot_all_rus_rounds(
             execution_log=log,
             logic_qubit_locations=logic_qubit_locations,
@@ -198,6 +199,7 @@ if __name__ == "__main__":
         # placement="row_based",
         placement="col_based",
         visualize_rus=True,
+        # prefix="trivial_return_",
     )
 
     # test(

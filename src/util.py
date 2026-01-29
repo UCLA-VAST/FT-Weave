@@ -21,7 +21,7 @@ def write_execution_log(
         end_time = start_time + CNOT_TIME
     elif operation == "Rz":
         end_time = start_time + 1
-    elif operation == "move":
+    elif operation in ["move", "return_move"]:
         end_time = start_time + movement_time
     else:
         end_time = start_time
@@ -229,6 +229,7 @@ def analyze_execution_log(
         list
     )  # op -> [(start, end), ...]
     movements: dict[tuple, dict[str, float]] = {}
+    return_movements: dict[tuple, dict[str, float]] = {}
     rus_failures_total = 0
     rus_failures_by_factory = defaultdict(int)
     tmr_failures_total = 0
@@ -266,10 +267,18 @@ def analyze_execution_log(
         opf["count"] += 1
         opf["total_time"] += dur
 
-        # Movements grouping
+        # Movements grouping - separate move and return_move
         if operation == "move":
             key = tuple(move_vecs) if move_vecs is not None else ("unknown",)
             mv = movements.setdefault(key, {"count": 0, "total_time": 0, "max_time": 0})
+            mv["count"] += 1
+            mv["total_time"] += dur
+            mv["max_time"] = max(mv["max_time"], dur)
+        elif operation == "return_move":
+            key = tuple(move_vecs) if move_vecs is not None else ("unknown",)
+            mv = return_movements.setdefault(
+                key, {"count": 0, "total_time": 0, "max_time": 0}
+            )
             mv["count"] += 1
             mv["total_time"] += dur
             mv["max_time"] = max(mv["max_time"], dur)
@@ -313,6 +322,8 @@ def analyze_execution_log(
         v["avg_time"] = v["total_time"] / v["count"] if v["count"] else 0
     for k, v in movements.items():
         v["avg_time"] = v["total_time"] / v["count"] if v["count"] else 0
+    for k, v in return_movements.items():
+        v["avg_time"] = v["total_time"] / v["count"] if v["count"] else 0
 
     # Compute idle times (if n_factories provided use that, else infer from per_factory keys)
     if n_factories is None:
@@ -338,6 +349,7 @@ def analyze_execution_log(
         "ops": ops,
         "per_factory": per_factory,
         "movements": movements,
+        "return_movements": return_movements,
         "failures": {
             "tmr_total": tmr_failures_total,
             "tmr_by_factory": tmr_failures_by_factory,
@@ -351,32 +363,51 @@ def analyze_execution_log(
 
 def print_execution_profile(profile: dict[str, Any], top_n_pairs: int = 0) -> None:
     """Print concise execution profile produced by `analyze_execution_log`."""
+    total_time = profile.get("total_time", 0)
+
+    print("=" * 70)
+    print(f"TOTAL CIRCUIT EXECUTION TIME: {total_time} moments")
+    print("=" * 70)
     print("EXECUTION PROFILE SUMMARY")
-    print(f"- Total circuit time: {profile.get('total_time', 0)}")
+    print(f"- Total circuit time: {total_time}")
 
     ops = profile.get("ops", {})
     print(f"- Operations: {len(ops)} types")
-    for op, s in ops.items():
-        circuit_time = s.get("circuit_time", 0)
-        print(
-            f"  - {op}: count={s['count']}, circuit_time={circuit_time}, total={s['total_time']}, avg={s.get('avg_time',0):.3f}, max={s['max_time']}"
-        )
 
-    mv = profile.get("movements", {})
-    print(f"- Movement pairs: {len(mv)} unique")
-    for k, v in list(mv.items())[:top_n_pairs]:
-        print(
-            f"  - {k}: count={v['count']}, total={v['total_time']}, avg={v.get('avg_time',0):.3f}, max={v['max_time']}"
-        )
+    # Define operation order for output
+    op_order = [
+        "SE",
+        "Rz",
+        "move",
+        "return_move",
+        "CNOT",
+        "RUS_success",
+        "RUS_fail",
+        "TMR_fail",
+        "Barrier",
+    ]
 
-    failures = profile.get("failures", {})
-    print(f"- TMR failures total: {failures.get('tmr_total',0)}")
-    if failures.get("tmr_by_factory"):
-        print("- TMR failures by factory (sample):")
-        for fid, c in list(failures["tmr_by_factory"].items())[:10]:
-            print(f"  - Factory {fid}: {c}")
-    print(f"- RUS failures total: {failures.get('rus_total',0)}")
-    if failures.get("rus_by_factory"):
-        print("- RUS failures by factory (sample):")
-        for fid, c in list(failures["rus_by_factory"].items())[:10]:
-            print(f"  - Factory {fid}: {c}")
+    # Operations with timing details
+    timing_ops = {"SE", "Rz", "CNOT"}
+    move_ops = {"move", "return_move"}
+    # Operations with count only
+    count_only_ops = {"RUS_success", "RUS_fail", "TMR_fail"}
+
+    for op_name in op_order:
+        if op_name not in ops:
+            continue
+
+        s = ops[op_name]
+
+        if op_name in timing_ops:
+            circuit_time = s.get("circuit_time", 0)
+            print(
+                f"  - {op_name}: circuit_time={circuit_time}, total={s['total_time']}"
+            )
+        elif op_name in move_ops:
+            circuit_time = s.get("circuit_time", 0)
+            print(
+                f"  - {op_name}: circuit_time={circuit_time}, total={s['total_time']}, avg={s.get('avg_time',0):.3f}, max={s['max_time']}"
+            )
+        elif op_name in count_only_ops:
+            print(f"  - {op_name}: count={s['count']}")

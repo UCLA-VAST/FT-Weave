@@ -203,6 +203,7 @@ def execute_movement(
     routing_batches: list,
     execution_log: list,
     circuit_moment: float,
+    move_type: str = "move",
 ) -> float:
     for batches in routing_batches:
         max_movement_time = 0.0
@@ -217,7 +218,7 @@ def execute_movement(
                 execution_log,
                 circuit_moment,
                 factory_id,
-                "move",
+                move_type,
                 qubit=None,
                 movement_time=max_movement_time,
                 move_vecs=movement_strs,
@@ -364,12 +365,19 @@ def factory_angle_execution(
             )
 
             # ! return factories qubit to empty spot
-            return_routing_batches = solve_return_move(routing_batches, factory_pool)
+            trivial_return = False
+            # trivial_return = True
+            if trivial_return:
+                return_routing_batches = routing_batches
+            else:
+                return_routing_batches = solve_return_move(
+                    routing_batches, factory_pool
+                )
             circuit_moment = execute_movement(
                 return_routing_batches,
-                # routing_batches,
                 execution_log,
                 circuit_moment,
+                move_type="return_move",
             )
             if len(target_qubits_angles) == len(successful_qubits):
                 break

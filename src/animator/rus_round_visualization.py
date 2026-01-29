@@ -80,7 +80,7 @@ def extract_rus_rounds(execution_log: List[Tuple]) -> List[List[Tuple]]:
 
 def extract_assignments_from_round(
     rus_round: list, logic_qubit_locations: List[Tuple[int, int]]
-) -> Dict[int, int]:
+) -> Tuple[Dict[int, int], Dict[int, Tuple[int, int]]]:
     """
     Extract factory-to-qubit assignments from a RUS round.
 
@@ -98,6 +98,7 @@ def extract_assignments_from_round(
         multiple factories (for retry attempts).
     """
     assignments = {}
+    return_assignments = {}
 
     # Create a mapping from qubit location to qubit_id
     location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
@@ -112,7 +113,7 @@ def extract_assignments_from_round(
 
         # Look for move operations or injection operations (CNOT/SE + RUS_success/RUS_fail)
         if operation == "move" and move_vecs:
-            # move operations have move_vecs = [from_loc_str, to_loc_str]
+            # move/return_move operations have move_vecs = [from_loc_str, to_loc_str]
             # Extract destination location and find qubit_id
             if len(move_vecs) >= 2:
                 to_loc_str = move_vecs[1]  # e.g., "(0,0)"
@@ -126,12 +127,24 @@ def extract_assignments_from_round(
                         assignments[factory_id] = qubit_id
                 except (ValueError, IndexError):
                     pass
+        elif operation == "return_move" and move_vecs:
+            # move/return_move operations have move_vecs = [from_loc_str, to_loc_str]
+            # Extract destination location and find qubit_id
+            if len(move_vecs) >= 2:
+                to_loc_str = move_vecs[1]  # e.g., "(0,0)"
+                # Parse the location string
+                try:
+                    loc_str = to_loc_str.strip("()")
+                    x, y = map(int, loc_str.split(","))
+                    return_assignments[factory_id] = (x, y)
+                except (ValueError, IndexError):
+                    pass
         elif operation in ["RUS_success", "RUS_fail"]:
             # Use the qubit from RUS result marker (qubit_value)
             if qubit_value is not None and factory_id is not None and factory_id >= 0:
                 assignments[factory_id] = qubit_value
 
-    return assignments
+    return (assignments, return_assignments)
 
 
 def extract_rus_results(rus_round: List[Tuple]) -> Dict[int, bool]:
@@ -273,7 +286,7 @@ def plot_rus_round(
     logic_qubit_locations: List[Tuple[int, int]],
     magic_state_locations: List[Tuple[int, int]],
     qubit_trackers: Optional[Dict] = None,
-) -> Optional[Figure]:
+) -> Tuple[Optional[Figure], List[Tuple[int, int]]]:
     """
     Plot a single RUS round with 2D layout.
 
@@ -285,10 +298,10 @@ def plot_rus_round(
         qubit_trackers: Optional dict of QubitAngleTracker objects for detailed angle info
 
     Returns:
-        Figure object or None if round is empty
+        Tuple of (Figure object or None, updated magic_state_locations for next round)
     """
     if not rus_round:
-        return None
+        return (None, magic_state_locations)
 
     circuit_times = [entry[0] for entry in rus_round if len(entry) >= 2]
     circuit_times.extend([entry[1] for entry in rus_round if len(entry) >= 2])
@@ -317,7 +330,9 @@ def plot_rus_round(
         rus_time = max(qubit_cnot_count.values())
 
     # Extract information from the round
-    assignments = extract_assignments_from_round(rus_round, logic_qubit_locations)
+    assignments, return_assignments = extract_assignments_from_round(
+        rus_round, logic_qubit_locations
+    )
     rus_results = extract_rus_results(rus_round)
     tmr_failures = extract_tmr_failures(rus_round)
     qubit_angles, factory_angles = extract_angles_from_round(rus_round)
@@ -325,9 +340,10 @@ def plot_rus_round(
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 10))
 
-    # Determine axis limits with padding
-    all_x = [loc[0] for loc in logic_qubit_locations + magic_state_locations]
-    all_y = [loc[1] for loc in logic_qubit_locations + magic_state_locations]
+    # Determine axis limits with padding (include both initial and current factory locations)
+    all_locations = logic_qubit_locations + magic_state_locations
+    all_x = [loc[0] for loc in all_locations]
+    all_y = [loc[1] for loc in all_locations]
 
     x_min, x_max = min(all_x) - 1, max(all_x) + 1
     y_min, y_max = min(all_y) - 1, max(all_y) + 1
@@ -344,6 +360,7 @@ def plot_rus_round(
     color_factory_border = "#FF9900"
     color_rus_success = "#00AA00"
     color_rus_fail = "#DD0000"
+    color_return_move = "#b64abe"
 
     box_width = 0.6
     box_height = 0.5
@@ -445,18 +462,21 @@ def plot_rus_round(
         )
 
     # Group arrows by time to assign shades
-    # Collect move operations from the round
+    # Collect move and return_move operations from the round
     move_times = set()
+    return_move_times = set()
     move_info = {}  # (qubit, factory, time) -> move info
+    return_move_info = {}  # (factory, time) -> return_move info
 
     # Create a mapping from qubit location to qubit_id
     location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
 
     for entry in rus_round:
-        if len(entry) >= 4 and entry[3] == "move":
+        if len(entry) >= 4 and entry[3] in ["move", "return_move"]:
             start_time = entry[0]
             end_time = entry[1]
             factory_id = entry[2]
+            operation = entry[3]
             move_vecs = entry[5] if len(entry) > 5 else None
 
             if move_vecs and len(move_vecs) >= 2:
@@ -468,24 +488,27 @@ def plot_rus_round(
                     qubit_loc = (x, y)
                     if qubit_loc in location_to_qubit:
                         qubit_id = location_to_qubit[qubit_loc]
-                        move_times.add((start_time, end_time))
-                        move_info[(qubit_id, factory_id)] = (start_time, end_time)
+                        if operation == "move":
+                            move_times.add((start_time, end_time))
+                            move_info[(qubit_id, factory_id)] = (start_time, end_time)
+                        else:  # return_move
+                            return_move_times.add((start_time, end_time))
+                            return_move_info[factory_id] = (
+                                start_time,
+                                end_time,
+                            )
                 except (ValueError, IndexError):
                     pass
 
-    # Create a mapping of time periods to shade intensity
-    sorted_times = sorted(move_times)
-    time_to_intensity = {
-        t: i / max(len(sorted_times), 1) for i, t in enumerate(sorted_times)
-    }
-
     # Draw assignment arrows
+    sorted_times = sorted(move_times) if move_times else []
     for factory_id, qubit_id in assignments.items():
         if qubit_id < len(logic_qubit_locations) and factory_id < len(
             magic_state_locations
         ):
             x_q, y_q = logic_qubit_locations[qubit_id]
             x_f, y_f = magic_state_locations[factory_id]
+            magic_state_locations[factory_id] = (x_q, y_q)
 
             # Calculate direction vector from factory to qubit
             dx = x_q - x_f
@@ -496,18 +519,19 @@ def plot_rus_round(
             start_point = get_box_edge_point((x_f, y_f), box_size, (dx, dy))
             end_point = get_box_edge_point((x_q, y_q), box_size, (-dx, -dy))
 
-            # Determine arrow color based on RUS result
-            if factory_id in rus_results:
-                if rus_results[factory_id]:
-                    base_color = color_rus_success  # green
-                else:
-                    base_color = color_rus_fail  # red
+            # Determine if this is a move or return_move operation
+            assert factory_id in rus_results
+            if rus_results[factory_id]:
+                base_color = color_rus_success  # green
             else:
-                base_color = "#666666"
+                base_color = color_rus_fail  # red
 
             # Adjust shade based on movement time
             if (qubit_id, factory_id) in move_info:
                 move_time = move_info[(qubit_id, factory_id)]
+                time_to_intensity = {
+                    t: i / max(len(sorted_times), 1) for i, t in enumerate(sorted_times)
+                }
                 intensity = time_to_intensity.get(move_time, 0.5)
             else:
                 intensity = 0.5
@@ -518,7 +542,7 @@ def plot_rus_round(
                 end_point,
                 arrowstyle="->",
                 mutation_scale=25,
-                linewidth=2.5 - +2 * intensity,  # Thicker for later moves
+                linewidth=2.5 - 2 * intensity,  # Thicker for later moves
                 color=base_color,
                 alpha=0.3
                 + 0.4 * intensity,  # Lighter for early moves, darker for later
@@ -526,6 +550,48 @@ def plot_rus_round(
                 connectionstyle="arc3,rad=0.2",
             )
             ax.add_patch(arrow)
+
+    sorted_times = sorted(return_move_times) if move_times else []
+    for factory_id, (new_x, new_y) in return_assignments.items():
+        old_x, old_y = magic_state_locations[factory_id]
+        magic_state_locations[factory_id] = (new_x, new_y)
+        # Calculate direction vector from factory to qubit
+        dx = new_x - old_x
+        dy = new_y - old_y
+
+        # Get box edge points
+        box_size = (0.6, 0.5)
+        start_point = get_box_edge_point((old_x, old_y), box_size, (dx, dy))
+        end_point = get_box_edge_point((new_x, new_y), box_size, (-dx, -dy))
+
+        # Determine if this is a move or return_move operation
+        assert factory_id in rus_results
+        base_color = color_return_move
+
+        # Adjust shade based on movement time
+        if factory_id in return_move_info:
+            move_time = return_move_info[factory_id]
+            sorted_times = sorted(move_times) if move_times else []
+            time_to_intensity = {
+                t: i / max(len(sorted_times), 1) for i, t in enumerate(sorted_times)
+            }
+            intensity = time_to_intensity.get(move_time, 0.5)
+        else:
+            intensity = 0.5
+
+        # Draw arrow with clear direction indication
+        arrow = FancyArrowPatch(
+            start_point,
+            end_point,
+            arrowstyle="->",
+            mutation_scale=25,
+            linewidth=2.5 - 2 * intensity,  # Thicker for later moves
+            color=base_color,
+            alpha=0.3 + 0.4 * intensity,  # Lighter for early moves, darker for later
+            zorder=5,
+            connectionstyle="arc3,rad=0.2",
+        )
+        ax.add_patch(arrow)
 
     # Labels and title
     ax.set_xlabel("X Position", fontsize=10, fontweight="bold")
@@ -567,7 +633,7 @@ def plot_rus_round(
             width=0.1,
             color=color_rus_success,
             alpha=0.7,
-            label="RUS:Success",
+            label="move:Success",
         ),
         mpatches.FancyArrow(
             0,
@@ -577,7 +643,17 @@ def plot_rus_round(
             width=0.1,
             color=color_rus_fail,
             alpha=0.7,
-            label="RUS:Fail",
+            label="move:Fail",
+        ),
+        mpatches.FancyArrow(
+            0,
+            0,
+            1,
+            0,
+            width=0.1,
+            color=color_return_move,
+            alpha=0.7,
+            label="return_move",
         ),
     ]
     ax.legend(
@@ -591,7 +667,7 @@ def plot_rus_round(
     )
 
     plt.tight_layout()
-    return fig
+    return fig, magic_state_locations
 
 
 def plot_all_rus_rounds(
@@ -630,13 +706,17 @@ def plot_all_rus_rounds(
     # Get the base name from pdf_path (without extension)
 
     # Save each round as a separate PDF
+    current_magic_state_locations = magic_state_locations
     for round_idx, rus_round in enumerate(rus_rounds):
-        fig = plot_rus_round(
+        fig, updated_locations = plot_rus_round(
             round_idx,
             rus_round,
             logic_qubit_locations,
-            magic_state_locations,
+            current_magic_state_locations,
         )
+
+        # Update locations for next round
+        current_magic_state_locations = updated_locations
 
         if fig is not None:
             # Generate individual PDF filename
