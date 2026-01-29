@@ -200,17 +200,17 @@ if __name__ == "__main__":
         visualize_rus=True,
     )
 
-    test(
-        n_qubits=25,
-        n_factories=25,
-        qubit_layout=(5, 5),
-        # n_qubits=9,
-        # n_factories=9,
-        # qubit_layout=(3, 3),
-        same_angle=True,
-        # placement="seperate_region_row",
-        placement="seperate_region_col",
-        # placement="row_based",
-        # placement="col_based",
-        visualize_rus=True,
-    )
+    # test(
+    #     n_qubits=25,
+    #     n_factories=25,
+    #     qubit_layout=(5, 5),
+    #     # n_qubits=9,
+    #     # n_factories=9,
+    #     # qubit_layout=(3, 3),
+    #     same_angle=True,
+    #     # placement="seperate_region_row",
+    #     placement="seperate_region_col",
+    #     # placement="row_based",
+    #     # placement="col_based",
+    #     visualize_rus=True,
+    # )

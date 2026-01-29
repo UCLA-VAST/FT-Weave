@@ -171,7 +171,7 @@ def two_layer_routing(
     factory_pool: FactoryPool,
     logic_qubit_locations: list[tuple[int, int]],
     qubit_factory_pairs: list[tuple[int, int]],
-) -> list[list[tuple[int, int]]]:
+) -> list[list[tuple[int, int, int, int, int, int]]]:
     """
     Two layer routing
     """
@@ -202,10 +202,15 @@ def two_layer_routing(
         for chain in chains:
             batch = []
             vec = []
-            for qubit in chain:
-                batch.append((sorted_factories[qubit][2], sorted_factories[qubit][0]))
-                vec.append(sorted_factories[qubit][1])
-                vec.append(sorted_factories[qubit][3])
+            for idx in chain:
+                qubit = sorted_factories[idx][2]
+                factory_id = sorted_factories[idx][0]
+                x_q, y_q = logic_qubit_locations[qubit]
+                factory = factory_pool.get_factory_by_id(factory_id=factory_id)
+                x_f, y_f = factory.location
+                batch.append((qubit, x_q, y_q, factory_id, x_f, y_f))
+                vec.append(sorted_factories[idx][1])
+                vec.append(sorted_factories[idx][3])
             vec = tuple(vec)
             # merge movement from two rows if they have the same pattern
             if vec in movement_vectors:

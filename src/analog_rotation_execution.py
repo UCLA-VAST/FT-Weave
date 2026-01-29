@@ -1,5 +1,4 @@
 import random
-from collections import defaultdict
 
 from .config import (
     TMR_P,
@@ -20,7 +19,8 @@ from .tmr.tmr_assignment import assign_factories_for_batch
 
 from .ds.device_state import FactoryPool, QubitAngleTracker
 from .ds.architecture import move_duration
-from src.rus.angle_factory_index import AngleFactoryIndex
+from .rus.angle_factory_index import AngleFactoryIndex
+from .rus.solve_return_move import solve_return_move
 
 from .util import write_execution_log, write_injection_log
 
@@ -127,78 +127,6 @@ def execute_tmr_preparation(
     return circuit_moment, execution_log
 
 
-def collect_teleportation_sequence(
-    qubit_trackers: dict[int, QubitAngleTracker],
-    factory_pool: FactoryPool,
-):
-    """
-    Collect teleportation sequence organized by teleportation rounds.
-
-    Groups qubits that can be injected in parallel based on which factories
-    successfully prepared their target angles (TMR phase) and are ready for teleportation,
-    organized by generation level.
-
-    Args:
-        qubit_trackers: Dict mapping qubit_id -> QubitAngleTracker
-        factory_pool: FactoryPool object containing Factory objects
-
-    Returns:
-        teleportation_sequence: List of lists, where each element represents an teleportation round.
-                           Each teleportation round is a list of (qubit, factory_ids) tuples.
-                           factory_ids is a list of factory IDs that can inject for this qubit.
-    """
-    teleportation_sequence = []
-
-    for qubit, tracker in qubit_trackers.items():
-        # Get factories with target angle that successfully passed TMR
-        generation_to_factories = {}
-        max_generation = 0
-        removed_factory = []
-        for factory_id, angle in tracker.factories:
-            factory = factory_pool.get_factory_by_id(factory_id)
-            if factory is not None:
-                if factory.tmr_state:
-                    generation = tracker.get_generation(angle)
-                    if generation not in generation_to_factories:
-                        generation_to_factories[generation] = []
-                    generation_to_factories[generation].append(factory_id)
-                    max_generation = max(max_generation, generation)
-                else:
-                    print(f"free factory {factory_id} for qubit {qubit}")
-                    factory_pool.free_factory(factory_id)
-                    removed_factory.append((factory_id, angle))
-        for factory_id, angle in removed_factory:
-            tracker.remove_factory(factory_id, angle)
-        for i in range(max_generation + 1):
-            if i in generation_to_factories:
-                assert (
-                    len(teleportation_sequence) >= i
-                ), "Injection sequence not long enough"
-                if len(teleportation_sequence) == i:
-                    teleportation_sequence.append([])
-                teleportation_sequence[i].append((qubit, generation_to_factories[i]))
-            else:
-                # Free up factories for this qubit that are working on higher generations
-                # If a lower generation is missing, higher-generation preparations
-                # cannot be used for injection; mark those factories idle so they
-                # can be reassigned in the next scheduling phase.
-                # Collect factories to free to avoid modifying the list while iterating.
-                factories_to_free = defaultdict(list)
-                for factory_id, angle in list(tracker.factories):
-                    factories_to_free[angle].append(factory_id)
-
-                for angle, factory_ids in factories_to_free.items():
-                    if len(factory_ids) > 1:
-                        for factory_id in factory_ids[1:]:
-                            # Mark factory assignment as free
-                            factory_pool.free_factory(factory_id)
-                            # Remove the factory from the tracker
-                            tracker.remove_factory(factory_id, angle)
-                break
-
-    return teleportation_sequence
-
-
 def update_qubit_state_per_teleportation(
     successful_qubits: set[int],
     successful_teleportation_qubits: set[int],
@@ -273,28 +201,18 @@ def execute_rus_teleportation(
 
 def execute_movement(
     routing_batches: list,
-    logic_qubit_locations: list,
-    factory_pool: FactoryPool,
     execution_log: list,
     circuit_moment: float,
-    reverse: bool = False,
 ) -> float:
     for batches in routing_batches:
         max_movement_time = 0.0
-        for qubit, factory_id in batches:
-            x_q, y_q = logic_qubit_locations[qubit]
-            x_f, y_f = factory_pool.get_factory_by_id(factory_id=factory_id).location
+        for _, x_q, y_q, factory_id, x_f, y_f in batches:
             max_movement_time = max(
                 max_movement_time, move_duration(x_q, y_q, x_f, y_f)
             )
 
-        for qubit, factory_id in batches:
-            x_q, y_q = logic_qubit_locations[qubit]
-            x_f, y_f = factory_pool.get_factory_by_id(factory_id=factory_id).location
-            if reverse:
-                movement_strs = [f"({x_q},{y_q})", f"({x_f},{y_f})"]
-            else:
-                movement_strs = [f"({x_f},{y_f})", f"({x_q},{y_q})"]
+        for _, x_q, y_q, factory_id, x_f, y_f in batches:
+            movement_strs = [f"({x_f},{y_f})", f"({x_q},{y_q})"]
             write_execution_log(
                 execution_log,
                 circuit_moment,
@@ -395,11 +313,8 @@ def factory_angle_execution(
         angle_factory_index = build_angle_factory_index_from_tmr_results(
             qubit_trackers, successful_qubits, factory_pool
         )
-        # print(angle_factory_index)
-        # injection_sequence = collect_teleportation_sequence(
-        #     qubit_trackers, factory_pool
-        # )
         successful_teleportation_qubits = set()
+        factory_return_move = []
         while True:
             # qubit_factory_pairs: list[tuple(qubit, factory_id)]
             # Use enhanced assignment with factory sharing
@@ -413,6 +328,7 @@ def factory_angle_execution(
             if not qubit_factory_pairs:
                 break
             # routing
+            # batch: list of tuple (qubit, x_q, y_q, factory_id, x_f, y_f, reverse)
             routing_batches = two_layer_routing(
                 factory_pool, logic_qubit_locations, qubit_factory_pairs
             )
@@ -424,10 +340,11 @@ def factory_angle_execution(
             # print(qubit_factory_pairs)
             # print("routing_batches")
             # print(routing_batches)
+            if factory_return_move:
+                # ! merge movement
+                raise NotImplementedError
             circuit_moment = execute_movement(
                 routing_batches,
-                logic_qubit_locations,
-                factory_pool,
                 execution_log,
                 circuit_moment,
             )
@@ -445,16 +362,18 @@ def factory_angle_execution(
                 factory_pool,
                 angle_factory_index,
             )
+
+            # ! return factories qubit to empty spot
+            return_routing_batches = solve_return_move(routing_batches, factory_pool)
             circuit_moment = execute_movement(
-                routing_batches,
-                logic_qubit_locations,
-                factory_pool,
+                return_routing_batches,
+                # routing_batches,
                 execution_log,
                 circuit_moment,
-                reverse=True,
             )
             if len(target_qubits_angles) == len(successful_qubits):
                 break
+
         update_qubit_state_post_teleportation(
             successful_teleportation_qubits,
             qubit_trackers,
