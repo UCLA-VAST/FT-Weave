@@ -368,7 +368,13 @@ def factory_angle_execution(
             trivial_return = False
             # trivial_return = True
             if trivial_return:
-                return_routing_batches = routing_batches
+                return_routing_batches = []
+                for batches in routing_batches:
+                    return_routing_batches.append([])
+                    for _, x_q, y_q, factory_id, x_f, y_f in batches:
+                        return_routing_batches[-1].append(
+                            (-1, x_f, y_f, factory_id, x_q, y_q)
+                        )
             else:
                 return_routing_batches = solve_return_move(
                     routing_batches, factory_pool

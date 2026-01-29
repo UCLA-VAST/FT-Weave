@@ -706,6 +706,8 @@ def plot_all_rus_rounds(
     # Get the base name from pdf_path (without extension)
 
     # Save each round as a separate PDF
+    # print("init magic_state_locations")
+    # print(magic_state_locations)
     current_magic_state_locations = magic_state_locations
     for round_idx, rus_round in enumerate(rus_rounds):
         fig, updated_locations = plot_rus_round(
@@ -714,6 +716,9 @@ def plot_all_rus_rounds(
             logic_qubit_locations,
             current_magic_state_locations,
         )
+        # print("updated_locations")
+        # print(updated_locations)
+        # input()
 
         # Update locations for next round
         current_magic_state_locations = updated_locations

@@ -107,7 +107,7 @@ def plot_circuit_execution(
                 )
 
     # Configure axes
-    ax.set_xlim(0, max(e[1] for e in execution_log) * 1.05)
+    ax.set_xlim(0, max(max(e[1] for e in execution_log), 115) * 1.01)
     ax.set_ylim(-0.5, n_factories - 0.5)
     ax.set_xlabel("Time (circuit moments)", fontsize=12, fontweight="bold")
     ax.set_ylabel("Magic State Factory ID", fontsize=12, fontweight="bold")

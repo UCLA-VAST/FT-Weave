@@ -176,7 +176,7 @@ def gready_routing(
     routing_batches = []
 
     while remaining_assignment_idx:
-        print(len(remaining_assignment_idx))
+        # print(len(remaining_assignment_idx))
         new_remaining_assignment_idx = []
         batch = []
         for idx in remaining_assignment_idx:
