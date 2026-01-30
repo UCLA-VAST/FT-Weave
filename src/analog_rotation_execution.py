@@ -22,7 +22,7 @@ from .ds.architecture import move_duration
 from .rus.angle_factory_index import AngleFactoryIndex
 from .rus.solve_return_move import solve_return_move
 
-from .util import write_execution_log, write_injection_log
+from .util import write_execution_log
 
 random.seed(42)
 
@@ -180,23 +180,17 @@ def update_qubit_state_post_teleportation(
 
 def execute_rus_teleportation(
     qubit_factory_pairs: list[tuple[int, int]],
-    factory_pool: FactoryPool,
     circuit_moment: float,
     execution_log: list,
-) -> list[bool]:
-    rus_simulation = simulate_RUS_injection(qubit_factory_pairs, factory_pool)
-    for (qubit, factory_id), injection_result in zip(
-        qubit_factory_pairs, rus_simulation
-    ):
-        write_injection_log(
+):
+    for qubit, factory_id in qubit_factory_pairs:
+        write_execution_log(
             execution_log,
             circuit_moment,
             factory_id,
-            "RUS_success" if injection_result else "RUS_fail",
+            "CNOT",
             qubit,
         )
-
-    return rus_simulation
 
 
 def execute_movement(
@@ -350,21 +344,12 @@ def factory_angle_execution(
                 circuit_moment,
             )
 
-            rus_simulation = execute_rus_teleportation(
-                qubit_factory_pairs, factory_pool, circuit_moment, execution_log
+            execute_rus_teleportation(
+                qubit_factory_pairs, circuit_moment, execution_log
             )
-            circuit_moment += CNOT_TIME + SE_TIME
-            update_qubit_state_per_teleportation(
-                successful_qubits,
-                successful_teleportation_qubits,
-                qubit_factory_pairs,
-                rus_simulation,
-                qubit_trackers,
-                factory_pool,
-                angle_factory_index,
-            )
+            circuit_moment += CNOT_TIME
 
-            # ! return factories qubit to empty spot
+            # return factories qubit to empty spot
             trivial_return = False
             # trivial_return = True
             if trivial_return:
@@ -385,6 +370,40 @@ def factory_angle_execution(
                 circuit_moment,
                 move_type="return_move",
             )
+            rus_simulation = simulate_RUS_injection(qubit_factory_pairs, factory_pool)
+            for (qubit, factory_id), injection_result in zip(
+                qubit_factory_pairs, rus_simulation
+            ):
+                write_execution_log(
+                    execution_log,
+                    circuit_moment,
+                    factory_id,
+                    "SE",
+                    qubit,
+                )
+                if injection_result:
+                    result = "RUS_success"
+                else:
+                    result = "RUS_fail"
+                write_execution_log(
+                    execution_log,
+                    circuit_moment + SE_TIME,
+                    factory_id,
+                    result,
+                    qubit,
+                )
+            circuit_moment += SE_TIME
+
+            update_qubit_state_per_teleportation(
+                successful_qubits,
+                successful_teleportation_qubits,
+                qubit_factory_pairs,
+                rus_simulation,
+                qubit_trackers,
+                factory_pool,
+                angle_factory_index,
+            )
+
             if len(target_qubits_angles) == len(successful_qubits):
                 break
 
