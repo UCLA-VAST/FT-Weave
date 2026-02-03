@@ -80,6 +80,8 @@ def test(
     visualize_rus: bool = False,
     placement: str = "seperate_region",
     prefix: str = "",
+    n_aods: int = 1,
+    consider_skip_rus: bool = False,
 ):
     target_qubits_angles = {}
     if same_angle:
@@ -118,7 +120,7 @@ def test(
             (x, y) for x, y in product(range(n_columns), range(1, 2 * n_rows + 1, 2))
         ]
         column_based_placement = False
-    else:
+    elif placement == "col_based":
         # Generate logic qubit locations as the Cartesian product of columns and rows
         logic_qubit_locations = [
             (x, y) for x, y in product(range(0, 2 * n_columns, 2), range(n_rows))
@@ -127,6 +129,17 @@ def test(
             (x, y) for x, y in product(range(1, 2 * n_columns + 1, 2), range(n_rows))
         ]
         column_based_placement = True
+    elif placement == "checkerboard":
+        logic_qubit_locations = []
+        magic_state_locations = []
+        for x, y in product(range(n_columns * 2), range(n_rows)):
+            if (x + y) % 2 == 0:
+                logic_qubit_locations.append((x, y))
+            else:
+                magic_state_locations.append((x, y))
+        column_based_placement = False
+    else:
+        raise ValueError(f"Unknown placement strategy: {placement}")
 
     print("=" * 70)
     print("MAGIC STATE FACTORY ANGLE EXECUTION SIMULATION")
@@ -143,6 +156,8 @@ def test(
         logic_qubit_locations,
         magic_state_locations,
         column_based_placement=column_based_placement,
+        n_aods=n_aods,
+        consider_skip_rus=consider_skip_rus,
     )
 
     profiling_result = analyze_execution_log(log, n_factories=n_factories)
@@ -186,8 +201,12 @@ if __name__ == "__main__":
         # placement="seperate_region_col",
         # placement="row_based",
         placement="col_based",
+        # placement="checkerboard",
         visualize_rus=True,
-        prefix="tmr_matching_",
+        prefix="no_skip_tmr_matching_aod_2_",
+        # prefix="checkerboard_aod_2_",
+        n_aods=2,
+        consider_skip_rus=True,
     )
 
     # test(

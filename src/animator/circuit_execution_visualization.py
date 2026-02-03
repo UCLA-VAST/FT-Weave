@@ -16,6 +16,25 @@ color_map = {
     "TMR_fail": "#007E15",
 }
 
+# Color mapping for AOD devices (for border colors)
+aod_colors = [
+    "#FF57579A",
+    "#EF7432F4",
+    "#F3C82DEB",
+    "#F62ED1C2",
+    "#C540BE79",
+    "#B145D9E5",
+    "#4825E8CC",
+]
+max_aod = 5
+alpha_constant = 0.3
+ylim = 93
+
+
+def get_aod_border_color(aod_idx: int) -> str:
+    """Get border color for a given AOD index."""
+    return aod_colors[aod_idx % len(aod_colors)]
+
 
 # ============================================================================
 # VISUALIZATION FUNCTION
@@ -38,19 +57,41 @@ def plot_circuit_execution(
         print("No execution log to plot")
         return
     circuit_length = len(execution_log)
-    fig, ax = plt.subplots(figsize=(circuit_length / 8 + 4, max(6, n_factories * 0.8)))
+    fig, ax = plt.subplots(figsize=(circuit_length / 15 + 4, max(6, n_factories * 0.8)))
 
     # Plot each operation as a rectangle
     for entry in execution_log:
         if len(entry) == 5:
             start_time, end_time, factory_id, operation, value = entry
             move_vecs = None
-        else:
+            aod_assignment = 0
+        elif len(entry) == 6:
             start_time, end_time, factory_id, operation, value, move_vecs = entry
+            aod_assignment = 0
+        else:
+            (
+                start_time,
+                end_time,
+                factory_id,
+                operation,
+                value,
+                move_vecs,
+                aod_assignment,
+            ) = entry
         duration = end_time - start_time
         if duration == 0:
             duration = 0.1
         color = color_map.get(operation, "#95a5a6")
+
+        # Determine border color: use AOD color for move operations, else black
+        alpha = 1
+        if operation in ["move", "return_move"]:
+            border_color = "black"
+            border_width = 2
+            alpha = aod_assignment / max_aod + alpha_constant
+        else:
+            border_color = "black"
+            border_width = 1
 
         if operation == "Barrier":
             continue
@@ -81,9 +122,10 @@ def plot_circuit_execution(
                 duration,
                 0.8,
                 facecolor=color,
-                edgecolor="black",
-                linewidth=1,
+                edgecolor=border_color,
+                linewidth=border_width,
                 zorder=zorder,
+                alpha=alpha,
             )
             ax.add_patch(rect)
 
@@ -103,11 +145,11 @@ def plot_circuit_execution(
                     va="center",
                     fontsize=7,
                     fontweight="bold",
-                    color="white",
+                    color="black",
                 )
 
     # Configure axes
-    ax.set_xlim(0, max(max(e[1] for e in execution_log), 115) * 1.01)
+    ax.set_xlim(0, max(max(e[1] for e in execution_log), ylim) * 1.01)
     ax.set_ylim(-0.5, n_factories - 0.5)
     ax.set_xlabel("Time (circuit moments)", fontsize=12, fontweight="bold")
     ax.set_ylabel("Magic State Factory ID", fontsize=12, fontweight="bold")
@@ -199,13 +241,35 @@ def plot_circuit_execution_vertical(
         if len(entry) == 5:
             start_time, end_time, factory_id, operation, value = entry
             move_vecs = None
-        else:
+            aod_assignment = 0
+        elif len(entry) == 6:
             start_time, end_time, factory_id, operation, value, move_vecs = entry
+            aod_assignment = 0
+        else:
+            (
+                start_time,
+                end_time,
+                factory_id,
+                operation,
+                value,
+                move_vecs,
+                aod_assignment,
+            ) = entry
 
         duration = end_time - start_time
         if duration == 0:
             duration = 0.1
         color = color_map.get(operation, "#95a5a6")
+
+        # Determine border color: use AOD color for move operations, else black
+        alpha = 1
+        if operation in ["move", "return_move"]:
+            border_color = "black"
+            border_width = 2
+            alpha = aod_assignment / max_aod + alpha_constant
+        else:
+            border_color = "black"
+            border_width = 1
 
         if operation == "Barrier":
             continue
@@ -237,8 +301,9 @@ def plot_circuit_execution_vertical(
                 0.8,
                 duration,
                 facecolor=color,
-                edgecolor="black",
-                linewidth=1,
+                edgecolor=border_color,
+                alpha=alpha,  # Lighter for early moves, darker for later
+                linewidth=border_width,
                 zorder=zorder,
             )
             ax.add_patch(rect)
@@ -259,7 +324,7 @@ def plot_circuit_execution_vertical(
                     va="center",
                     fontsize=7,
                     fontweight="bold",
-                    color="white",
+                    color="black",
                 )
 
     # Configure axes

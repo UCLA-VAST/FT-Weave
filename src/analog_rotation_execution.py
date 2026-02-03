@@ -26,6 +26,8 @@ from .util import write_execution_log
 
 random.seed(42)
 
+threshold_high_tmr = 5
+
 
 # ============================================================================
 # MAIN EXECUTION FUNCTION
@@ -197,28 +199,44 @@ def execute_movement(
     routing_batches: list,
     execution_log: list,
     circuit_moment: float,
+    n_aods: int = 1,
     move_type: str = "move",
 ) -> float:
-    for batches in routing_batches:
+    move_time_idx_pairs = []
+    for i, batches in enumerate(routing_batches):
         max_movement_time = 0.0
         for _, x_q, y_q, factory_id, x_f, y_f in batches:
             max_movement_time = max(
                 max_movement_time, move_duration(x_q, y_q, x_f, y_f)
             )
+        move_time_idx_pairs.append((max_movement_time, i))
+    # if move_type == "return_move":
+    #     print("circuit_moment: ", circuit_moment)
+    #     print("move_time_idx_pairs")
+    #     print(move_time_idx_pairs)
+    #     input()
+    # Sort by movement time descending
+    move_time_idx_pairs.sort(reverse=True)
+    aod_earliest_available_time = [circuit_moment] * n_aods
+    for movement_time, idx in move_time_idx_pairs:
+        # Assign to the earliest available AOD
+        aod_idx = aod_earliest_available_time.index(min(aod_earliest_available_time))
+        start_time = aod_earliest_available_time[aod_idx]
+        aod_earliest_available_time[aod_idx] += movement_time
+        for _, x_q, y_q, factory_id, x_f, y_f in routing_batches[idx]:
 
-        for _, x_q, y_q, factory_id, x_f, y_f in batches:
             movement_strs = [f"({x_f},{y_f})", f"({x_q},{y_q})"]
             write_execution_log(
                 execution_log,
-                circuit_moment,
+                start_time,
                 factory_id,
                 move_type,
                 qubit=None,
-                movement_time=max_movement_time,
+                movement_time=movement_time,
                 move_vecs=movement_strs,
+                aod_assignment=aod_idx,
             )
-        circuit_moment += max_movement_time
-    return circuit_moment
+    return max(aod_earliest_available_time)
 
 
 def factory_angle_execution(
@@ -227,6 +245,8 @@ def factory_angle_execution(
     logic_qubit_locations: list[tuple[int, int]],
     magic_state_locations: list[tuple[int, int]],
     column_based_placement: bool = True,
+    n_aods: int = 1,
+    consider_skip_rus: bool = True,
 ):
     """
     Execute angle preparation on magic state factories with lookahead optimization.
@@ -235,6 +255,7 @@ def factory_angle_execution(
         target_qubits_angles: Dict mapping qubit_id -> target_rotation_angle
         logic_qubit_locations: (x, y) location for each logical qubit
         magic_state_locations: (x, y) location for each magic state factory
+        n_aods: Number of AODs available for parallel operations
 
     Returns:
         circuit_moment: Total circuit execution time
@@ -320,6 +341,7 @@ def factory_angle_execution(
                 logic_qubit_locations,
                 angle_factory_index,
             )
+            # check if keep doing teleportaiton is worth it.
             if not qubit_factory_pairs:
                 break
             # routing
@@ -327,6 +349,29 @@ def factory_angle_execution(
             routing_batches = two_layer_routing(
                 factory_pool, logic_qubit_locations, qubit_factory_pairs
             )
+            # check if executing teleporation is worth it.
+            aod_earliest_available_time = [0.0] * n_aods
+            if consider_skip_rus:
+                for routing in routing_batches:
+                    movement_time = 0.0
+                    for _, x_q, y_q, factory_id, x_f, y_f in routing:
+                        movement_time = max(
+                            movement_time, move_duration(x_q, y_q, x_f, y_f)
+                        )
+                    aod_idx = aod_earliest_available_time.index(
+                        min(aod_earliest_available_time)
+                    )
+                    aod_earliest_available_time[aod_idx] += movement_time
+                total_movement_time = max(aod_earliest_available_time) * 2
+                if (
+                    total_movement_time + CNOT_TIME > SE_TIME * (TMR_P + TMR_Q)
+                    and len(qubit_factory_pairs) < threshold_high_tmr
+                    and (len(target_qubits_angles) - len(successful_qubits))
+                    > threshold_high_tmr
+                ):
+                    print("Breaking teleportation loop to do another TMR")
+                    # input()
+                    break
             # print("logic_qubit_locations")
             # print(logic_qubit_locations)
             # print("magic_state_locations")
@@ -342,6 +387,7 @@ def factory_angle_execution(
                 routing_batches,
                 execution_log,
                 circuit_moment,
+                n_aods=n_aods,
             )
 
             execute_rus_teleportation(
@@ -368,6 +414,7 @@ def factory_angle_execution(
                 return_routing_batches,
                 execution_log,
                 circuit_moment,
+                n_aods=n_aods,
                 move_type="return_move",
             )
             rus_simulation = simulate_RUS_injection(qubit_factory_pairs, factory_pool)

@@ -14,6 +14,7 @@ def write_execution_log(
     qubit: int | None = None,
     movement_time: float = 0,
     move_vecs: list[str] | None = None,
+    aod_assignment: int = 0,
 ):
     if operation == "SE":
         end_time = start_time + SE_TIME
@@ -27,7 +28,15 @@ def write_execution_log(
         end_time = start_time
     if move_vecs:
         execution_log.append(
-            (start_time, end_time, factory_id, operation, qubit, move_vecs)
+            (
+                start_time,
+                end_time,
+                factory_id,
+                operation,
+                qubit,
+                move_vecs,
+                aod_assignment,
+            )
         )
     else:
         execution_log.append(
@@ -235,14 +244,22 @@ def analyze_execution_log(
     tmr_failures_total = 0
     tmr_failures_by_factory = defaultdict(int)
     overall_end = 0
+    # Track AOD utilization: aod_idx -> {move_intervals: [...], total_time: 0}
+    aod_utilization: dict[int, dict[str, Any]] = defaultdict(
+        lambda: {"move_intervals": [], "total_time": 0}
+    )
 
     for e in execution_log:
-        # Accept either 5- or 6-element tuples
+        # Accept either 5-, 6-, or 7-element tuples (with optional aod_assignment)
         if len(e) == 5:
             start, end, factory_id, operation, value = e
             move_vecs = None
-        else:
+            aod_assignment = 0
+        elif len(e) == 6:
             start, end, factory_id, operation, value, move_vecs = e
+            aod_assignment = 0
+        else:
+            start, end, factory_id, operation, value, move_vecs, aod_assignment = e
 
         overall_end = max(overall_end, end)
 
@@ -274,6 +291,9 @@ def analyze_execution_log(
             mv["count"] += 1
             mv["total_time"] += dur
             mv["max_time"] = max(mv["max_time"], dur)
+            # Track AOD utilization
+            aod_utilization[aod_assignment]["move_intervals"].append((start, end))
+            aod_utilization[aod_assignment]["total_time"] += dur
         elif operation == "return_move":
             key = tuple(move_vecs) if move_vecs is not None else ("unknown",)
             mv = return_movements.setdefault(
@@ -282,6 +302,9 @@ def analyze_execution_log(
             mv["count"] += 1
             mv["total_time"] += dur
             mv["max_time"] = max(mv["max_time"], dur)
+            # Track AOD utilization
+            aod_utilization[aod_assignment]["move_intervals"].append((start, end))
+            aod_utilization[aod_assignment]["total_time"] += dur
 
         # Failures
         if operation == "RUS_fail":
@@ -350,6 +373,7 @@ def analyze_execution_log(
         "per_factory": per_factory,
         "movements": movements,
         "return_movements": return_movements,
+        "aod_utilization": dict(aod_utilization),
         "failures": {
             "tmr_total": tmr_failures_total,
             "tmr_by_factory": tmr_failures_by_factory,

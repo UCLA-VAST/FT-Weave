@@ -16,6 +16,22 @@ from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 from typing import Dict, List, Tuple, Optional
 import os
 
+# Color mapping for AOD devices (for border colors)
+aod_colors = [
+    "#FF57579A",
+    "#EF7432F4",
+    "#F3C82DEB",
+    "#F62ED1C2",
+    "#C540BE79",
+    "#B145D9E5",
+    "#4825E8CC",
+]
+
+
+def get_aod_border_color(aod_idx: int) -> str:
+    """Get border color for a given AOD index."""
+    return aod_colors[aod_idx % len(aod_colors)]
+
 
 def extract_rus_rounds(execution_log: List[Tuple]) -> List[List[Tuple]]:
     """
@@ -467,6 +483,8 @@ def plot_rus_round(
     return_move_times = set()
     move_info = {}  # (qubit, factory, time) -> move info
     return_move_info = {}  # (factory, time) -> return_move info
+    move_aod_info = {}  # (qubit_id, factory_id) -> aod_assignment
+    return_move_aod_info = {}  # factory_id -> aod_assignment
 
     # Create a mapping from qubit location to qubit_id
     location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
@@ -478,6 +496,7 @@ def plot_rus_round(
             factory_id = entry[2]
             operation = entry[3]
             move_vecs = entry[5] if len(entry) > 5 else None
+            aod_assignment = entry[6] if len(entry) > 6 else 0
 
             if move_vecs and len(move_vecs) >= 2:
                 # Extract destination location and find qubit_id
@@ -491,12 +510,14 @@ def plot_rus_round(
                         if operation == "move":
                             move_times.add((start_time, end_time))
                             move_info[(qubit_id, factory_id)] = (start_time, end_time)
+                            move_aod_info[(qubit_id, factory_id)] = aod_assignment
                         else:  # return_move
                             return_move_times.add((start_time, end_time))
                             return_move_info[factory_id] = (
                                 start_time,
                                 end_time,
                             )
+                            return_move_aod_info[factory_id] = aod_assignment
                 except (ValueError, IndexError):
                     pass
 
@@ -526,6 +547,12 @@ def plot_rus_round(
             else:
                 base_color = color_rus_fail  # red
 
+            # Get AOD assignment for edge color
+            aod_edge_color = "black"
+            if (qubit_id, factory_id) in move_aod_info:
+                aod_idx = move_aod_info[(qubit_id, factory_id)]
+                aod_edge_color = get_aod_border_color(aod_idx)
+
             # Adjust shade based on movement time
             if (qubit_id, factory_id) in move_info:
                 move_time = move_info[(qubit_id, factory_id)]
@@ -536,7 +563,7 @@ def plot_rus_round(
             else:
                 intensity = 0.5
 
-            # Draw arrow with clear direction indication
+            # Draw arrow with AOD color outline
             arrow = FancyArrowPatch(
                 start_point,
                 end_point,
@@ -544,6 +571,7 @@ def plot_rus_round(
                 mutation_scale=25,
                 linewidth=2.5 - 2 * intensity,  # Thicker for later moves
                 color=base_color,
+                # edgecolor=aod_edge_color,
                 alpha=0.3
                 + 0.4 * intensity,  # Lighter for early moves, darker for later
                 zorder=5,
@@ -568,6 +596,12 @@ def plot_rus_round(
         assert factory_id in rus_results
         base_color = color_return_move
 
+        # Get AOD assignment for edge color
+        aod_edge_color = "black"
+        if factory_id in return_move_aod_info:
+            aod_idx = return_move_aod_info[factory_id]
+            aod_edge_color = get_aod_border_color(aod_idx)
+
         # Adjust shade based on movement time
         if factory_id in return_move_info:
             move_time = return_move_info[factory_id]
@@ -579,7 +613,7 @@ def plot_rus_round(
         else:
             intensity = 0.5
 
-        # Draw arrow with clear direction indication
+        # Draw arrow with AOD color outline
         arrow = FancyArrowPatch(
             start_point,
             end_point,
@@ -587,6 +621,7 @@ def plot_rus_round(
             mutation_scale=25,
             linewidth=2.5 - 2 * intensity,  # Thicker for later moves
             color=base_color,
+            # edgecolor=aod_edge_color,
             alpha=0.3 + 0.4 * intensity,  # Lighter for early moves, darker for later
             zorder=5,
             connectionstyle="arc3,rad=0.2",

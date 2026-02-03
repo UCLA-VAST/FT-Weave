@@ -334,15 +334,25 @@ def assign_factories_for_batch_matching(
                 # Manhattan distance as cost
                 angle = qubit_trackers[qubit].target_angle * pow(2, level)
                 for _ in range(demand):
-                    cost_matrix[i, idx] = (
-                        move_duration(x_src, y_src, x_dst, y_dst)
-                        + level * level_constant
+                    cost_matrix[i, idx] = move_duration(x_src, y_src, x_dst, y_dst) / (
+                        level + 1
                     )
                     assignment_idx_to_qubit_anlge_pair[idx] = (qubit, angle)
                     idx += 1
+    print("cost_matrix:")
+    print(cost_matrix)
     # Use linear_sum_assignment for optimal matching
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
+    for i, j in zip(row_ind, col_ind):
+        print(
+            "Factory {} assigned to qubit {}, angle {}".format(
+                idle_factories[i].id,
+                assignment_idx_to_qubit_anlge_pair[j][0],
+                assignment_idx_to_qubit_anlge_pair[j][1],
+            )
+        )
+    input()
     # assign factory based on solution
     for i, j in zip(row_ind, col_ind):
         factory = idle_factories[i]
