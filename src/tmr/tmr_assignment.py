@@ -11,6 +11,14 @@ from src.simulation import (
 )
 
 
+from src.config import (
+    TMR_P,
+    TMR_Q,
+    CNOT_TIME,
+    SE_TIME,
+)
+
+
 def phase1_exact_match(
     required_angles: dict[int, int],
     available_factories: dict[int, int],
@@ -324,7 +332,7 @@ def assign_factories_for_batch_matching(
 
     cost_matrix = np.zeros((len(idle_factories), len(idle_factories)))
     assignment_idx_to_qubit_anlge_pair = dict()
-    level_constant = 10  # constant to prioritize lower level angles
+    # level_constant = 10  # constant to prioritize lower level angles
     for i, factory in enumerate(idle_factories):
         x_src, y_src = factory.location
         idx = 0
@@ -339,20 +347,20 @@ def assign_factories_for_batch_matching(
                     )
                     assignment_idx_to_qubit_anlge_pair[idx] = (qubit, angle)
                     idx += 1
-    print("cost_matrix:")
-    print(cost_matrix)
+    # print("cost_matrix:")
+    # print(cost_matrix)
     # Use linear_sum_assignment for optimal matching
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
-    for i, j in zip(row_ind, col_ind):
-        print(
-            "Factory {} assigned to qubit {}, angle {}".format(
-                idle_factories[i].id,
-                assignment_idx_to_qubit_anlge_pair[j][0],
-                assignment_idx_to_qubit_anlge_pair[j][1],
-            )
-        )
-    input()
+    # for i, j in zip(row_ind, col_ind):
+    #     print(
+    #         "Factory {} assigned to qubit {}, angle {}".format(
+    #             idle_factories[i].id,
+    #             assignment_idx_to_qubit_anlge_pair[j][0],
+    #             assignment_idx_to_qubit_anlge_pair[j][1],
+    #         )
+    #     )
+    # input()
     # assign factory based on solution
     for i, j in zip(row_ind, col_ind):
         factory = idle_factories[i]
@@ -401,3 +409,72 @@ def assign_factories_for_batch(
         )
     else:
         raise ValueError(f"Unknown assignment method: {method}")
+
+
+def reassign_factories(
+    factory_pool: FactoryPool,
+    qubit_trackers: dict[int, QubitAngleTracker],
+    successful_qubits: set[int],
+    logic_qubit_locations: list[tuple[int, int]],
+):
+    """
+    Release factories that are no longer needed.
+    """
+    # return
+    busy_factories = factory_pool.get_busy_factories()
+
+    cost_matrix = np.zeros(
+        (len(busy_factories), len(qubit_trackers) - len(successful_qubits))
+    )
+
+    angles_to_factory = defaultdict(list)
+    for i, factory in enumerate(busy_factories):
+        angles_to_factory[factory.angle].append((i, factory.id))
+
+    # print("angles_to_factory")
+    # print(angles_to_factory)
+    duration_threshold = SE_TIME * (TMR_P + TMR_Q) - CNOT_TIME
+
+    assignment_idx_to_qubit_anlge_pair = dict()
+    i = 0
+    for qubit_idx, qubit in qubit_trackers.items():
+        if qubit_idx in successful_qubits:
+            continue
+        x_dst, y_dst = logic_qubit_locations[qubit_idx]
+        angle = qubit.target_angle
+        assignment_idx_to_qubit_anlge_pair[i] = (qubit_idx, angle)
+        for j, factory_id in angles_to_factory[angle]:
+            factory = factory_pool.get_factory_by_id(factory_id)
+            x_src, y_src = factory.location
+            duration = move_duration(x_src, y_src, x_dst, y_dst)
+            if duration < duration_threshold:
+                cost_matrix[j, i] = duration
+        i += 1
+
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    # print("assignment_idx_to_qubit_anlge_pair")
+    # print(assignment_idx_to_qubit_anlge_pair)
+    # print("cost_matrix")
+    # print(cost_matrix)
+
+    used_factories = [False for _ in range(len(busy_factories))]
+    # print("Reassignment results:")
+    for i, j in zip(row_ind, col_ind):
+        factory = busy_factories[i]
+        used_factories[i] = True
+        qubit, angle = assignment_idx_to_qubit_anlge_pair[j]
+        # success_rate = calculate_success_rate(angle)
+        qubit_trackers[qubit].add_factory(factory.id, angle)
+        print(
+            f"Reassigning factory {factory.id} at location {factory.location} preparing angle {factory.angle} to qubit {qubit} who need angle {angle}"
+        )
+        # factory_pool.assign_factory(factory.id, angle, qubit, success_rate)
+
+    for i, used in enumerate(used_factories):
+        if not used:
+            factory = busy_factories[i]
+            factory_pool.free_factory(factory.id)
+            print(
+                f"Releasing factory {factory.id} at location {factory.location} preparing angle {factory.angle}"
+            )
+    # input()

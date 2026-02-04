@@ -174,6 +174,10 @@ class FactoryPool:
         """Return a list of idle factories."""
         return [factory for factory in self.factories if factory.angle is None]
 
+    def get_busy_factories(self) -> list[Factory]:
+        """Return a list of idle factories."""
+        return [factory for factory in self.factories if factory.angle is not None]
+
     def get_tmr_factories(self) -> list[Factory]:
         """Return a list of active factories."""
         return [f for f in self.factories if f.state == 1]

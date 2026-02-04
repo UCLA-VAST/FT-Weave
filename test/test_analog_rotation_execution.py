@@ -55,6 +55,27 @@ def test_small():
         (1, 3),
     ]
 
+    # build facoty_qubit_map
+    facoty_qubit_map = []
+    max_x = 0
+    max_y = 0
+    for x, y in logic_qubit_locations:
+        if x > max_x:
+            max_x = x
+        if y > max_y:
+            max_y = y
+    for x, y in magic_state_locations:
+        if x > max_x:
+            max_x = x
+        if y > max_y:
+            max_y = y
+    for x in range(max_x + 1):
+        facoty_qubit_map.append([0 for _ in range(max_y + 1)])
+    for x, y in logic_qubit_locations:
+        facoty_qubit_map[x][y] = 1
+    for x, y in magic_state_locations:
+        facoty_qubit_map[x][y] = 2
+
     print("=" * 70)
     print("MAGIC STATE FACTORY ANGLE EXECUTION SIMULATION")
     print("=" * 70)
@@ -65,7 +86,10 @@ def test_small():
     # Run simulation
     factory_pool = FactoryPool(num_factories=n_factories)
     total_time, log = factory_angle_execution(
-        factory_pool, target_qubits_angles, logic_qubit_locations, magic_state_locations
+        factory_pool,
+        target_qubits_angles,
+        logic_qubit_locations,
+        magic_state_locations,
     )
 
     # Visualize
@@ -141,6 +165,27 @@ def test(
     else:
         raise ValueError(f"Unknown placement strategy: {placement}")
 
+    # build facoty_qubit_map
+    facoty_qubit_map = []
+    max_x = 0
+    max_y = 0
+    for x, y in logic_qubit_locations:
+        if x > max_x:
+            max_x = x
+        if y > max_y:
+            max_y = y
+    for x, y in magic_state_locations:
+        if x > max_x:
+            max_x = x
+        if y > max_y:
+            max_y = y
+    for x in range(max_x + 1):
+        facoty_qubit_map.append([0 for _ in range(max_y + 1)])
+    for x, y in logic_qubit_locations:
+        facoty_qubit_map[x][y] = 1
+    for x, y in magic_state_locations:
+        facoty_qubit_map[x][y] = 2
+
     print("=" * 70)
     print("MAGIC STATE FACTORY ANGLE EXECUTION SIMULATION")
     print("=" * 70)
@@ -203,9 +248,11 @@ if __name__ == "__main__":
         placement="col_based",
         # placement="checkerboard",
         visualize_rus=True,
-        prefix="no_skip_tmr_matching_aod_2_",
+        # prefix="no_skip_tmr_matching_aod_2_",
+        prefix="reassign_aod_2_",
         # prefix="checkerboard_aod_2_",
         n_aods=2,
+        # consider_skip_rus=False,
         consider_skip_rus=True,
     )
 
