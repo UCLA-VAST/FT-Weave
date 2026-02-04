@@ -7,13 +7,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import json
 
 from src.tfim import tfim_trotter_plaquette
-from src.ds.architecture import Architecture
-from src.ds.logical_grid import LogicalGridManager
-from src.writer.writer import Writer
+from src.ds import LogicalGridManager, Architecture
+from src.writer import Writer
 from src.instruction_scheduling import instruction_scheduling
 
 # from src.animator.animator import Animator
-from src.animator.animator_matplotlib import Animator
+from src.animator import Animator
 
 # Example usage: 4x4 lattice, J=1.0, h=0.7, t=1.0, 2 trotter steps
 if __name__ == "__main__":

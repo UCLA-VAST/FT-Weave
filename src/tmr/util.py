@@ -1,5 +1,5 @@
-from src.rus.angle_factory_index import AngleFactoryIndex
-from src.ds.device_state import FactoryPool, QubitAngleTracker
+from src.rus import AngleFactoryIndex
+from src.ds import FactoryPool, QubitAngleTracker
 
 
 def build_angle_factory_index_from_tmr_results(

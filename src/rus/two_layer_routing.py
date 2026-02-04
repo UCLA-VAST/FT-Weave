@@ -1,6 +1,6 @@
 from collections import defaultdict, deque
 
-from src.ds.device_state import FactoryPool
+from src.ds import FactoryPool
 
 
 def create_flow_network() -> tuple[dict, str, str]:

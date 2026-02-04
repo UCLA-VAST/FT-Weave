@@ -11,10 +11,10 @@ random.seed(1234)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.analog_rotation_execution import factory_angle_execution
-from src.ds.device_state import FactoryPool
+from src.ds import FactoryPool
 from src.util import analyze_execution_log, print_execution_profile
-from src.animator.rus_round_visualization import plot_all_rus_rounds
-from src.animator.circuit_execution_visualization import (
+from src.animator import (
+    plot_all_rus_rounds,
     plot_circuit_execution,
     plot_circuit_execution_vertical,
 )
@@ -106,6 +106,8 @@ def test(
     prefix: str = "",
     n_aods: int = 1,
     consider_skip_rus: bool = False,
+    tmr_assignment_method: str = "matching",
+    trivial_return: bool = False,
 ):
     target_qubits_angles = {}
     if same_angle:
@@ -203,6 +205,8 @@ def test(
         column_based_placement=column_based_placement,
         n_aods=n_aods,
         consider_skip_rus=consider_skip_rus,
+        tmr_assignment_method=tmr_assignment_method,
+        trivial_return=trivial_return,
     )
 
     profiling_result = analyze_execution_log(log, n_factories=n_factories)
@@ -234,6 +238,28 @@ def test(
 
 if __name__ == "__main__":
     # test_small()
+    # test(
+    #     n_qubits=25,
+    #     n_factories=25,
+    #     qubit_layout=(5, 5),
+    #     # n_qubits=9,
+    #     # n_factories=9,
+    #     # qubit_layout=(3, 3),
+    #     same_angle=True,
+    #     # placement="seperate_region_row",
+    #     # placement="seperate_region_col",
+    #     # placement="row_based",
+    #     placement="col_based",
+    #     # placement="checkerboard",
+    #     visualize_rus=True,
+    #     # prefix="no_skip_tmr_matching_aod_2_",
+    #     prefix="reassign_aod_2_",
+    #     # prefix="checkerboard_aod_2_",
+    #     n_aods=2,
+    #     # consider_skip_rus=False,
+    #     consider_skip_rus=True,
+    # )
+
     test(
         n_qubits=25,
         n_factories=25,
@@ -245,15 +271,14 @@ if __name__ == "__main__":
         # placement="seperate_region_row",
         # placement="seperate_region_col",
         # placement="row_based",
-        placement="col_based",
-        # placement="checkerboard",
+        # placement="col_based",
+        placement="checkerboard",
         visualize_rus=True,
-        # prefix="no_skip_tmr_matching_aod_2_",
-        prefix="reassign_aod_2_",
-        # prefix="checkerboard_aod_2_",
-        n_aods=2,
-        # consider_skip_rus=False,
-        consider_skip_rus=True,
+        prefix="",
+        n_aods=1,
+        consider_skip_rus=False,
+        tmr_assignment_method="naive",
+        trivial_return=True,
     )
 
     # test(

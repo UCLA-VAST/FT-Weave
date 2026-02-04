@@ -4,7 +4,7 @@ from matplotlib.collections import LineCollection
 import matplotlib
 import bisect
 import matplotlib.patches as mpatches
-from src.ds.architecture import Architecture
+from src.ds import Architecture
 
 
 class Animator:

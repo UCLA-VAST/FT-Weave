@@ -1,7 +1,7 @@
 import math
 from collections import defaultdict
 
-from src.ds.device_state import QubitAngleTracker
+from src.ds import QubitAngleTracker
 
 from src.simulation import (
     calculate_success_rate,

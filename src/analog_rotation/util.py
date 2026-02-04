@@ -5,7 +5,7 @@ from src.config import (
     TMR_P,
     TMR_Q,
 )
-from src.ds.architecture import move_duration
+from src.ds import move_duration
 
 
 def write_execution_log(

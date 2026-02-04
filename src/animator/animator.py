@@ -4,7 +4,7 @@ from pyqtgraph.exporters import ImageExporter
 import numpy as np
 import bisect
 import imageio
-from src.ds.architecture import Architecture
+from src.ds import Architecture
 
 
 class Animator:

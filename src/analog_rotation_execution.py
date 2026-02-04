@@ -8,19 +8,22 @@ from .simulation import (
     simulate_TMR_preparation,
     simulate_RUS_injection,
 )
-from .rus.two_layer_routing import two_layer_routing
-from .rus.rus_assignment import assign_teleportation_with_sharing
 
-from .tmr.angle_collection import get_angles_for_preparation
-from .tmr.tmr_assignment import assign_factories_for_batch, reassign_factories
-from .tmr.util import build_angle_factory_index_from_tmr_results
+from .tmr import (
+    get_angles_for_preparation,
+    assign_factories_for_batch,
+    reassign_factories,
+    build_angle_factory_index_from_tmr_results,
+)
 
-from .ds.device_state import FactoryPool, QubitAngleTracker
-from .rus.solve_return_move import solve_return_move
-from .rus.util import (
+from .ds import FactoryPool, QubitAngleTracker
+from .rus import (
+    solve_return_move,
     check_teleportation_worthiness,
     update_qubit_state_per_teleportation,
     update_qubit_state_post_teleportation,
+    two_layer_routing,
+    assign_teleportation_with_sharing,
 )
 
 from .analog_rotation.util import (
@@ -51,6 +54,7 @@ def factory_angle_execution(
     n_aods: int = 1,
     consider_skip_rus: bool = True,
     tmr_assignment_method: str = "matching",
+    trivial_return: bool = True,
 ):
     """
     Execute angle preparation on magic state factories with lookahead optimization.
@@ -185,7 +189,6 @@ def factory_angle_execution(
             circuit_moment += CNOT_TIME
 
             # return factories qubit to empty spot
-            trivial_return = False
             # trivial_return = True
             if trivial_return:
                 return_routing_batches = []

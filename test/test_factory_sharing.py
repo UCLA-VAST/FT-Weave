@@ -9,9 +9,9 @@ Tests cover:
 """
 
 import pytest
-from src.ds.device_state import FactoryPool, QubitAngleTracker
-from src.rus.angle_factory_index import AngleFactoryIndex
-from src.rus.rus_assignment import (
+from src.ds import FactoryPool, QubitAngleTracker
+from src.rus import (
+    AngleFactoryIndex,
     assign_teleportation_with_sharing,
     find_optimal_factory_assignment,
 )

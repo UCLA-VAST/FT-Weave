@@ -1,4 +1,4 @@
-from src.ds.architecture import Architecture
+from src.ds import Architecture
 
 
 def instruction_scheduling(

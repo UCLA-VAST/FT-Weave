@@ -1,4 +1,4 @@
-from src.ds.logical_grid import LogicalGridManager
+from src.ds import LogicalGridManager
 
 
 def h_gate(
