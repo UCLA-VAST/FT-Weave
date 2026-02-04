@@ -125,7 +125,7 @@ def print_tmr_assignment_results(result: dict):
 
 def analyze_execution_log(
     execution_log: list[tuple],
-    n_factories: int | None = None,
+    n_factories: int,
 ) -> dict[str, Any]:
     """
     Analyze an execution log into a plotting-friendly profile.
@@ -165,6 +165,7 @@ def analyze_execution_log(
     tmr_failures_total = 0
     tmr_failures_by_factory = defaultdict(int)
     overall_end = 0
+    qubit_cnot_counts = [0 for i in range(n_factories)]
     # Track AOD utilization: aod_idx -> {move_intervals: [...], total_time: 0}
     aod_utilization: dict[int, dict[str, Any]] = defaultdict(
         lambda: {"move_intervals": [], "total_time": 0}
@@ -205,6 +206,8 @@ def analyze_execution_log(
         opf["count"] += 1
         opf["total_time"] += dur
 
+        if operation == "CNOT":
+            qubit_cnot_counts[value] += 1
         # Movements grouping - separate move and return_move
         if operation == "move":
             key = tuple(move_vecs) if move_vecs is not None else ("unknown",)
@@ -301,6 +304,7 @@ def analyze_execution_log(
             "rus_total": rus_failures_total,
             "rus_by_factory": rus_failures_by_factory,
         },
+        "qubit_cnot_counts": qubit_cnot_counts,
     }
 
     return profile

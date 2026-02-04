@@ -1,7 +1,7 @@
 import os
 import sys
 
-from itertools import product
+
 import random
 
 
@@ -10,7 +10,7 @@ random.seed(1234)
 # Ensure repository root is on sys.path so `src` is importable when running tests
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.analog_rotation_execution import factory_angle_execution
+from src.analog_rotation_execution import factory_angle_execution, get_microarchitecture
 from src.ds import FactoryPool
 from src.util import analyze_execution_log, print_execution_profile
 from src.animator import (
@@ -119,74 +119,16 @@ def test(
             target_qubits_angles[i] = random.uniform(0.0001, 0.001)
 
     n_columns, n_rows = qubit_layout
-    if placement == "seperate_region_row":
-        # Generate logic qubit locations as the Cartesian product of columns and rows
-        logic_qubit_locations = [
-            (x, y) for x, y in product(range(n_columns), range(n_rows))
-        ]
-        magic_state_locations = [
-            (x, n_rows + y) for x, y in product(range(n_columns), range(n_rows))
-        ]
-        column_based_placement = False
-    elif placement == "seperate_region_col":
-        # Generate logic qubit locations as the Cartesian product of columns and rows
-        logic_qubit_locations = [
-            (x, y) for x, y in product(range(n_columns), range(n_rows))
-        ]
-        magic_state_locations = [
-            (x + n_columns, y) for x, y in product(range(n_columns), range(n_rows))
-        ]
+    column_based_placement = False
+    if placement == "seperate_region_col" or placement == "col_based":
         column_based_placement = True
-    elif placement == "row_based":
-        # Generate logic qubit locations as the Cartesian product of columns and rows
-        logic_qubit_locations = [
-            (x, y) for x, y in product(range(n_columns), range(0, 2 * n_rows, 2))
-        ]
-        magic_state_locations = [
-            (x, y) for x, y in product(range(n_columns), range(1, 2 * n_rows + 1, 2))
-        ]
-        column_based_placement = False
-    elif placement == "col_based":
-        # Generate logic qubit locations as the Cartesian product of columns and rows
-        logic_qubit_locations = [
-            (x, y) for x, y in product(range(0, 2 * n_columns, 2), range(n_rows))
-        ]
-        magic_state_locations = [
-            (x, y) for x, y in product(range(1, 2 * n_columns + 1, 2), range(n_rows))
-        ]
-        column_based_placement = True
-    elif placement == "checkerboard":
-        logic_qubit_locations = []
-        magic_state_locations = []
-        for x, y in product(range(n_columns * 2), range(n_rows)):
-            if (x + y) % 2 == 0:
-                logic_qubit_locations.append((x, y))
-            else:
-                magic_state_locations.append((x, y))
-        column_based_placement = False
-    else:
-        raise ValueError(f"Unknown placement strategy: {placement}")
 
-    # build facoty_qubit_map
-    facoty_qubit_map = []
-    max_x = 0
-    max_y = 0
-    for x, y in logic_qubit_locations:
-        if x > max_x:
-            max_x = x
-        if y > max_y:
-            max_y = y
-    for x, y in magic_state_locations:
-        if x > max_x:
-            max_x = x
-        if y > max_y:
-            max_y = y
-    for x in range(max_x + 1):
-        facoty_qubit_map.append([0 for _ in range(max_y + 1)])
-    for x, y in logic_qubit_locations:
-        facoty_qubit_map[x][y] = 1
-    for x, y in magic_state_locations:
-        facoty_qubit_map[x][y] = 2
+    logic_qubit_locations, magic_state_locations = get_microarchitecture(
+        n_qubits,
+        n_factories,
+        qubit_layout,
+        placement,
+    )
 
     print("=" * 70)
     print("MAGIC STATE FACTORY ANGLE EXECUTION SIMULATION")
@@ -212,19 +154,18 @@ def test(
     profiling_result = analyze_execution_log(log, n_factories=n_factories)
     print_execution_profile(profile=profiling_result)
 
-    pdf_path = f"output/circuit_execution_vertical/{prefix}{placement}.pdf"
+    # pdf_path based on the arguments
+    base_path = f"{prefix}_n{n_qubits}f{n_factories}_{placement}_naod_{n_aods}_tmr_{tmr_assignment_method}_skipRUS_{consider_skip_rus}_trivial-return{trivial_return}.pdf"
+    pdf_path = f"output/circuit_execution_vertical/{base_path}"
     plot_circuit_execution_vertical(
         log, n_factories, figure_height=50, save_path=pdf_path
     )
-    pdf_path = f"output/circuit_execution/{prefix}{placement}.pdf"
+    pdf_path = f"output/circuit_execution/{base_path}"
     plot_circuit_execution(log, n_factories, figure_width=50, save_path=pdf_path)
 
     if visualize_rus:
         # Generate RUS round visualizations
-        output_dir = "output"
-        os.makedirs(output_dir, exist_ok=True)
-
-        pdf_path = os.path.join(output_dir, f"rus_rounds_detailed/{prefix}{placement}")
+        pdf_path = os.path.join("output", f"rus_rounds_detailed/{base_path}")
         plot_all_rus_rounds(
             execution_log=log,
             logic_qubit_locations=logic_qubit_locations,
