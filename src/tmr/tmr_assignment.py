@@ -113,16 +113,16 @@ def reassign_factories(
         qubit, angle = assignment_idx_to_qubit_anlge_pair[j]
         # success_rate = calculate_success_rate(angle)
         qubit_trackers[qubit].add_factory(factory.id, angle)
-        print(
-            f"Reassigning factory {factory.id} at location {factory.location} preparing angle {factory.angle} to qubit {qubit} who need angle {angle}"
-        )
+        # print(
+        #     f"Reassigning factory {factory.id} at location {factory.location} preparing angle {factory.angle} to qubit {qubit} who need angle {angle}"
+        # )
         # factory_pool.assign_factory(factory.id, angle, qubit, success_rate)
 
     for i, used in enumerate(used_factories):
         if not used:
             factory = busy_factories[i]
             factory_pool.free_factory(factory.id)
-            print(
-                f"Releasing factory {factory.id} at location {factory.location} preparing angle {factory.angle}"
-            )
+            # print(
+            #     f"Releasing factory {factory.id} at location {factory.location} preparing angle {factory.angle}"
+            # )
     # input()

@@ -1,10 +1,14 @@
 import math
 from collections import defaultdict
-
+import numpy as np
 from src.ds import QubitAngleTracker
 
 from src.simulation import (
     calculate_success_rate,
+)
+
+from src.config import (
+    ANGLE_S,
 )
 
 
@@ -22,6 +26,10 @@ def get_angles_for_preparation(
         level_demand = 1
         for level in range(0, 2):
             angle = tracker.target_angle * pow(2, level)
+            if np.isclose(angle, 0.0, atol=1e-8):
+                continue
+            if ANGLE_S < angle:
+                angle -= ANGLE_S
             success_rate = calculate_success_rate(angle)
             demand = level_demand / success_rate
             level_demand /= 2
@@ -40,6 +48,8 @@ def get_angles_for_preparation(
     # print(allocation)
     qubit_angle_factories = {}
     level_threshold = 3
+    # print("Allocating factories for qubits:")
+    # print(allocation)
     for qubit, tracker in qubit_trackers.items():
         if qubit in successful_qubits:
             continue
@@ -50,8 +60,17 @@ def get_angles_for_preparation(
         sum_demands = 0
         for level in range(0, level_threshold):
             angle = tracker.target_angle * pow(2, level)
+            if np.isclose(angle, 0.0, atol=1e-8):
+                continue
+            if ANGLE_S < angle:
+                angle -= ANGLE_S
             assert angle > 0
             success_rate = calculate_success_rate(angle)
+            # if qubit == 7:
+            #     print("angle")
+            #     print(angle)
+            #     print("success_rate")
+            #     print(success_rate)
             demand = level_demand / success_rate
             if level > 1 and allocation[qubit] < sum_demands:
                 break
@@ -60,15 +79,20 @@ def get_angles_for_preparation(
             level_demand /= 2
         for level, demand in demands.items():
             demands[level] = demand / sum_demands * allocation[qubit]
-        # print("allocation[qubit]")
-        # print(allocation[qubit])
+        # if qubit == 7:
+        #     print("demands for qubit 7")
+        #     print(demands)
         # print("demands")
         # print(demands)
         qubit_angle_factories[qubit] = integer_allocation(allocation[qubit], demands)
     # print("qubit_angle_factories")
     # print(qubit_angle_factories)
     # assert n_available_factories == 5
-    # assert sum(allocation.values()) == 5
+    count = 0
+    for allocation in qubit_angle_factories.values():
+        count += sum(allocation.values())
+    assert count == n_available_factories
+    # print(f"count: {count}, n_available_factories: {n_available_factories}")
     # input()
     return qubit_angle_factories
 

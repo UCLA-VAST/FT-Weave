@@ -26,10 +26,12 @@ def assign_factories_for_batch_matching(
         None (modifies factory_pool and qubit_trackers in place)
     """
     idle_factories = factory_pool.get_idle_factories()
-
+    assert len(idle_factories) == factory_pool.get_num_idle_factories()
     cost_matrix = np.zeros((len(idle_factories), len(idle_factories)))
     assignment_idx_to_qubit_anlge_pair = dict()
     # level_constant = 10  # constant to prioritize lower level angles
+    # print("batch_angles:")
+    # print(batch_angles)
     for i, factory in enumerate(idle_factories):
         x_src, y_src = factory.location
         idx = 0

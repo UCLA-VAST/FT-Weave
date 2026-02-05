@@ -6,6 +6,7 @@ import os
 color_map = {
     "TUM": "#9ed76c",
     "SE": "#4681a9",
+    "S": "#a98546",
     "CNOT": "#e74c3c",
     "Rz": "#e7ab3c",
     "move": "#b64abe",
@@ -132,6 +133,8 @@ def plot_circuit_execution(
             if operation not in no_text_operations:
                 if operation == "Rz":
                     text = f"{operation}\nθ:{value}"
+                elif operation == "S":
+                    text = f"{operation}\nθ:{value}"
                 elif operation in ["move", "return_move"] and move_vecs:
                     text = f"{operation}\n{move_vecs[0]}\n->{move_vecs[1]}"
                 else:
@@ -170,6 +173,7 @@ def plot_circuit_execution(
         mpatches.Patch(
             facecolor=color_map["CNOT"], edgecolor="black", label="CNOT (Injection)"
         ),
+        mpatches.Patch(facecolor=color_map["S"], edgecolor="black", label="S gate"),
         mpatches.Patch(
             facecolor=color_map["move"], edgecolor="black", label="move (Forward)"
         ),
@@ -311,6 +315,8 @@ def plot_circuit_execution_vertical(
             if operation not in no_text_operations:
                 if operation == "Rz":
                     text = f"{operation}\nθ:{value}"
+                elif operation == "S":
+                    text = f"{operation}\nθ:{value}"
                 elif operation in ["move", "return_move"] and move_vecs:
                     text = f"{operation}\n{move_vecs[0]}\n->{move_vecs[1]}"
                 else:
@@ -349,6 +355,7 @@ def plot_circuit_execution_vertical(
         mpatches.Patch(
             facecolor=color_map["CNOT"], edgecolor="black", label="CNOT (Injection)"
         ),
+        mpatches.Patch(facecolor=color_map["S"], edgecolor="black", label="S gate"),
         mpatches.Patch(
             facecolor=color_map["move"], edgecolor="black", label="move (Forward)"
         ),

@@ -1,9 +1,7 @@
-import random
 from itertools import product
-from .config import (
-    CNOT_TIME,
-    SE_TIME,
-)
+import numpy as np
+
+from .config import CNOT_TIME, SE_TIME
 from .simulation import (
     simulate_TMR_preparation,
     simulate_RUS_injection,
@@ -26,18 +24,12 @@ from .rus import (
     assign_teleportation_with_sharing,
 )
 
-from .analog_rotation.util import (
+from .analog_rotation import (
     write_execution_log,
     execute_movement,
     execute_rus_teleportation,
     execute_tmr_preparation,
 )
-
-
-random.seed(42)
-
-threshold_high_tmr = 5
-threshold_high_rus = 5
 
 
 # ============================================================================
@@ -118,6 +110,7 @@ def factory_angle_execution(
     consider_skip_rus: bool = True,
     tmr_assignment_method: str = "matching",
     trivial_return: bool = True,
+    rng: np.random.Generator | None = None,
 ):
     """
     Execute angle preparation on magic state factories with lookahead optimization.
@@ -133,6 +126,8 @@ def factory_angle_execution(
         circuit_moment: Total circuit execution time
         execution_log: List of (time, factory_id, operation, qubit) for visualization
     """
+    if rng is None:
+        rng = np.random.default_rng()
     # Map qubit_id to QubitAngleTracker
     qubit_trackers = {
         qubit: QubitAngleTracker(qubit_id=qubit, target_angle=round(theta, 7))
@@ -182,7 +177,7 @@ def factory_angle_execution(
             execution_log,
         )
 
-        simulate_TMR_preparation(factory_pool)
+        simulate_TMR_preparation(factory_pool, rng)
         for factory in factory_pool.factories:
             if not factory.tmr_state:
                 write_execution_log(
@@ -272,7 +267,9 @@ def factory_angle_execution(
                 n_aods=n_aods,
                 move_type="return_move",
             )
-            rus_simulation = simulate_RUS_injection(qubit_factory_pairs, factory_pool)
+            rus_simulation = simulate_RUS_injection(
+                qubit_factory_pairs, factory_pool, rng
+            )
             for (qubit, factory_id), injection_result in zip(
                 qubit_factory_pairs, rus_simulation
             ):
@@ -296,7 +293,7 @@ def factory_angle_execution(
                 )
             circuit_moment += SE_TIME
 
-            update_qubit_state_per_teleportation(
+            circuit_moment = update_qubit_state_per_teleportation(
                 successful_qubits,
                 successful_teleportation_qubits,
                 qubit_factory_pairs,
@@ -304,6 +301,8 @@ def factory_angle_execution(
                 qubit_trackers,
                 factory_pool,
                 angle_factory_index,
+                execution_log,
+                circuit_moment,
             )
 
             if len(target_qubits_angles) == len(successful_qubits):
@@ -321,6 +320,7 @@ def factory_angle_execution(
             successful_qubits,
             logic_qubit_locations,
         )
+
         # Add time for injection attempts (CNOT + SE per injection)
         execution_log.append(
             (

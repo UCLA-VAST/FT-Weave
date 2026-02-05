@@ -27,18 +27,6 @@ class QubitAngleTracker:
         self.factories: list[tuple[int, float]] = []  # List of (factory_id, angle)
         self.angle_counts = Counter()  # angle -> count
 
-    def get_generation(self, angle):
-        """Calculate generation level: 0 for original, 1 for 2x, 2 for 4x, etc."""
-        if np.isclose(angle, self.target_angle):
-            return 0
-        # Calculate how many times we've doubled: log2(angle/original)
-        import math
-
-        ratio = angle // self.target_angle
-        if ratio >= 1:  # Check if power of 2
-            return int(math.log2(ratio))
-        return 999  # Large number for non-power-of-2 angles
-
     def add_factory(self, factory_id, angle):
         """Add a factory working on a specific angle."""
         self.factories.append((factory_id, angle))
@@ -82,6 +70,9 @@ class QubitAngleTracker:
 
     def double_target_angle(self):
         self.target_angle *= 2
+
+    def set_target_angle(self, angle):
+        self.target_angle = angle
 
     def __repr__(self):
         return f"QubitTracker(qubit={self.qubit_id}, target={self.target_angle}, factories={len(self.factories)})"

@@ -19,6 +19,10 @@ LOOKAHEAD_THRESHOLD = 2  # Max factories working on same angle
 LOOKAHEAD_LEVEL = 2
 PRECISION = 8
 LARGE_ANGLE_LIMIT = round(np.pi / 2, PRECISION)  # time to inject S gate
+THRESHOLD_HIGH_TMR = 5
+THRESHOLD_HIGH_RUS = 5
+ANGLE_S = np.pi / 2
+ANGLE_T = np.pi / 4
 
 
 def update_config(**kwargs):

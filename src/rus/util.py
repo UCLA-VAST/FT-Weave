@@ -1,16 +1,18 @@
+import numpy as np
+
 from src.config import (
     CNOT_TIME,
     SE_TIME,
     TMR_P,
     TMR_Q,
+    ANGLE_S,
+    THRESHOLD_HIGH_TMR,
+    THRESHOLD_HIGH_RUS,
 )
 
 from src.ds import FactoryPool, QubitAngleTracker, move_duration
 from src.rus import AngleFactoryIndex
-
-
-threshold_high_tmr = 5
-threshold_high_rus = 5
+from src.analog_rotation import insert_s_gate
 
 
 def update_qubit_state_per_teleportation(
@@ -21,10 +23,13 @@ def update_qubit_state_per_teleportation(
     qubit_trackers: dict[int, QubitAngleTracker],
     factory_pool: FactoryPool,
     angle_factory_index: AngleFactoryIndex,
+    execution_log: list,
+    start_time: float,
 ):
     """
     Update qubit states
     """
+    is_s_gate_inserted = False
     for (qubit, factory_id), success in zip(qubit_factory_pairs, rus_simulation):
         tracker = qubit_trackers[qubit]
         angle_factory_index.remove_qubit_for_angle(tracker.target_angle)
@@ -39,7 +44,29 @@ def update_qubit_state_per_teleportation(
             teleportation_angle = tracker.target_angle
             _ = tracker.remove_angle(teleportation_angle)
             tracker.double_target_angle()
-            angle_factory_index.add_qubit_for_angle(tracker.target_angle)
+            # ! insert S gate
+            if np.isclose(ANGLE_S - tracker.target_angle, 0.0, atol=1e-8):
+                insert_s_gate(execution_log, start_time, -1, qubit)
+                is_s_gate_inserted = True
+                successful_qubits.add(qubit)
+                successful_teleportation_qubits.add(qubit)
+                tracker.clear_all()
+            else:
+                if tracker.target_angle > ANGLE_S:
+                    is_s_gate_inserted = True
+                    insert_s_gate(execution_log, start_time, -1, qubit)
+                    tracker.set_target_angle(tracker.target_angle - ANGLE_S)
+                angle_factory_index.add_qubit_for_angle(tracker.target_angle)
+
+    # for qubit in qubit_trackers.keys():
+    #     tracker = qubit_trackers[qubit]
+    #     if qubit in successful_teleportation_qubits:
+    #         continue
+    #     if np.isclose(ANGLE_S - tracker.target_angle, 0.0, atol=1e-8):
+    #         insert_s_gate(execution_log, start_time, -1, qubit)
+    #         is_s_gate_inserted = True
+
+    return start_time + (SE_TIME if is_s_gate_inserted else 0)
 
 
 def update_qubit_state_post_teleportation(
@@ -90,8 +117,8 @@ def check_teleportation_worthiness(
         if not parital_skip or (
             2 * max_movement_time // len(batches) + CNOT_TIME
             < SE_TIME * (TMR_P + TMR_Q)
-            or len(qubit_factory_pairs) > threshold_high_rus
-            or (len(target_qubits_angles) - len(successful_qubits)) < threshold_high_tmr
+            or len(qubit_factory_pairs) > THRESHOLD_HIGH_RUS
+            or (len(target_qubits_angles) - len(successful_qubits)) < THRESHOLD_HIGH_TMR
         ):
             move_time_idx_pairs.append((max_movement_time, i))
             new_routing_batches.append(batches)
@@ -110,8 +137,8 @@ def check_teleportation_worthiness(
     # input()
     if (
         total_movement_time + CNOT_TIME > SE_TIME * (TMR_P + TMR_Q)
-        and len(qubit_factory_pairs) < threshold_high_rus
-        and (len(target_qubits_angles) - len(successful_qubits)) > threshold_high_tmr
+        and len(qubit_factory_pairs) < THRESHOLD_HIGH_RUS
+        and (len(target_qubits_angles) - len(successful_qubits)) > THRESHOLD_HIGH_TMR
     ):
         # print("Breaking teleportation loop to do another TMR")
         return []

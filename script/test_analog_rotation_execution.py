@@ -2,10 +2,10 @@ import os
 import sys
 
 
-import random
+import numpy as np
 
 
-random.seed(1234)
+np.random.seed(1234)
 
 # Ensure repository root is on sys.path so `src` is importable when running tests
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -116,7 +116,7 @@ def test(
             target_qubits_angles[i] = angle
     else:
         for i in range(n_qubits):
-            target_qubits_angles[i] = random.uniform(0.0001, 0.001)
+            target_qubits_angles[i] = np.random.uniform(0.0001, 0.001)
 
     n_columns, n_rows = qubit_layout
     column_based_placement = False

@@ -13,7 +13,7 @@ def write_execution_log(
     start_time: float,
     factory_id: int,
     operation: str,
-    qubit: int | None = None,
+    target: int | float | None = None,
     movement_time: float = 0,
     move_vecs: list[str] | None = None,
     aod_assignment: int = 0,
@@ -24,6 +24,8 @@ def write_execution_log(
         end_time = start_time + CNOT_TIME
     elif operation == "Rz":
         end_time = start_time + 1
+    elif operation == "S":
+        end_time = start_time + SE_TIME
     elif operation in ["move", "return_move"]:
         end_time = start_time + movement_time
     else:
@@ -35,7 +37,7 @@ def write_execution_log(
                 end_time,
                 factory_id,
                 operation,
-                qubit,
+                target,
                 move_vecs,
                 aod_assignment,
             )
@@ -47,40 +49,9 @@ def write_execution_log(
                 end_time,
                 factory_id,
                 operation,
-                qubit,
+                target,
             )
         )
-
-
-def write_injection_log(
-    execution_log: list,
-    start_time: float,
-    factory_id: int,
-    result: str,
-    qubit: int | None,
-):
-    write_execution_log(
-        execution_log,
-        start_time,
-        factory_id,
-        "CNOT",
-        qubit,
-    )
-    write_execution_log(
-        execution_log,
-        start_time + SE_TIME,
-        factory_id,
-        "SE",
-        qubit,
-    )
-    start_time += CNOT_TIME + SE_TIME
-    write_execution_log(
-        execution_log,
-        start_time,
-        factory_id,
-        result,
-        qubit,
-    )
 
 
 def execute_tmr_preparation(
@@ -190,9 +161,27 @@ def execute_movement(
                 start_time,
                 factory_id,
                 move_type,
-                qubit=None,
+                target=None,
                 movement_time=movement_time,
                 move_vecs=movement_strs,
                 aod_assignment=aod_idx,
             )
     return max(aod_earliest_available_time)
+
+
+def insert_s_gate(
+    execution_log: list,
+    start_time: float,
+    factory_id: int,
+    qubit: int,
+):
+    """
+    Update qubit states
+    """
+    write_execution_log(
+        execution_log,
+        start_time,
+        factory_id,
+        "S",
+        qubit,
+    )
