@@ -116,7 +116,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
                 "qubit_rows": n_rows,
                 "placement": placement,
                 "n_aods": n_aods,
-                "consider_skip_rus": skip_rus,
+                "consider_skip_rus": 2,  #!
                 "tmr_assignment_method": tmr_method,
                 "trivial_return": trivial_ret,
                 "total_time": profiling_result["total_time"],
@@ -153,7 +153,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
     # Save results to CSV
     csv_path = os.path.join(output_dir, "evaluation_results.csv")
     if results:
-        with open(csv_path, "w", newline="") as csvfile:
+        with open(csv_path, "a", newline="") as csvfile:
             fieldnames = results[0].keys()
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
@@ -180,18 +180,18 @@ if __name__ == "__main__":
             (10, 10),  # 100 qubits
         ],
         "placement_methods": [
-            "seperate_region_col",
-            "col_based",
+            # "seperate_region_col",
+            # "col_based",
             "checkerboard",
         ],
-        "n_aods": [1, 2, 3, 4, 5],
-        # "n_aods": [1, 3],
-        "consider_skip_rus": [False, True],
-        # "consider_skip_rus": [False],
-        "tmr_assignment_method": ["naive", "matching"],
-        # "tmr_assignment_method": ["matching"],
-        "trivial_return": [False, True],
-        # "trivial_return": [False],
+        # "n_aods": [1, 2, 3, 4, 5],
+        "n_aods": [2, 3, 4],
+        # "consider_skip_rus": [False, True],
+        "consider_skip_rus": [True],
+        # "tmr_assignment_method": ["naive", "matching"],
+        "tmr_assignment_method": ["matching"],
+        # "trivial_return": [False, True],
+        "trivial_return": [False],
         "trials_per_config": 10,
     }
     run_evaluation(params=params, plot_figure=False)

@@ -124,6 +124,9 @@ class Factory:
     def set_location(self, loc: tuple[int, int]):
         self.location = loc
 
+    def __repr__(self):
+        return f"Factory(id={self.id}, angle={self.angle}, qubit={self.qubit}, state={self.state}, location={self.location})"
+
 
 @dataclass
 class FactoryPool:
@@ -207,3 +210,6 @@ class FactoryPool:
             self.num_busy_factories += 1
             loc = factory.location
             self.avaliable_factories_per_row[loc[1]] -= 1
+
+    def __repr__(self):
+        return f"FactoryPool(num_factories={self.num_factories}, idle={self.num_idle_factories}, busy={self.num_busy_factories})"

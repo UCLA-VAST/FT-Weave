@@ -151,16 +151,29 @@ def factory_angle_execution(
     # ========================================================================
 
     while len(target_qubits_angles) > len(successful_qubits):
-        # print(f"circuit_moment: {circuit_moment}")
-        # print(f"idle factories: {factory_pool.get_num_idle_factories()}")
         # print("successful_qubits")
         # print(successful_qubits)
         # PHASE 1: Assign idle factories to prepare angles
         batch_angles = get_angles_for_preparation(
             successful_qubits, qubit_trackers, factory_pool.get_num_idle_factories()
         )
-        # print("batch_angles")
-        # print(batch_angles)
+        # if circuit_moment > 1000:
+        #     print(
+        #         f"circuit_moment: {circuit_moment}, successful_qubits: {len(successful_qubits)}/{len(target_qubits_angles)}"
+        #     )
+        #     print(f"batch_angles: {batch_angles}")
+        #     print(factory_pool)
+        #     factories = factory_pool.get_busy_factories()
+        #     print(f"Busy factories: {[str(factory) for factory in factories]}")
+        #     from .animator import plot_all_rus_rounds
+
+        #     plot_all_rus_rounds(
+        #         execution_log=execution_log,
+        #         logic_qubit_locations=logic_qubit_locations,
+        #         magic_state_locations=magic_state_locations,
+        #         base_path="output/debug",
+        #     )
+        #     input()
         assign_factories_for_batch(
             factory_pool,
             qubit_trackers,
@@ -216,6 +229,10 @@ def factory_angle_execution(
                 factory_pool, logic_qubit_locations, qubit_factory_pairs
             )
             # check if executing teleporation is worth it.
+            # if circuit_moment > 1000:
+            #     print(f"qubit_factory_pairs: {qubit_factory_pairs}")
+            #     print(f"routing_batches: {routing_batches}")
+            #     input()
             if consider_skip_rus:
                 routing_batches = check_teleportation_worthiness(
                     routing_batches,

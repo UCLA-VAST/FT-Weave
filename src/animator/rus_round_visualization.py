@@ -354,7 +354,10 @@ def plot_rus_round(
     qubit_angles, factory_angles = extract_angles_from_round(rus_round)
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(10, 10))
+    if len(logic_qubit_locations) < 30:
+        fig, ax = plt.subplots(figsize=(10, 10))
+    else:
+        fig, ax = plt.subplots(figsize=(13, 13))
 
     # Determine axis limits with padding (include both initial and current factory locations)
     all_locations = logic_qubit_locations + magic_state_locations
@@ -410,9 +413,9 @@ def plot_rus_round(
 
         # Angle if available
         if qubit_id in qubit_angles:
-            angle_str = f"θ={qubit_angles[qubit_id]:.3f}"
+            angle_str = f"θ={qubit_angles[qubit_id]:.4f}"
         elif qubit_trackers and qubit_id in qubit_trackers:
-            angle_str = f"θ={qubit_trackers[qubit_id].target_angle:.3f}"
+            angle_str = f"θ={qubit_trackers[qubit_id].target_angle:.4f}"
         else:
             angle_str = "?"
 
@@ -462,7 +465,7 @@ def plot_rus_round(
 
         # Angle if available
         if factory_id in factory_angles:
-            angle_str = f"θ={factory_angles[factory_id]:.3f}"
+            angle_str = f"θ={factory_angles[factory_id]:.4f}"
         else:
             angle_str = "?"
 

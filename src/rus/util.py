@@ -6,8 +6,8 @@ from src.config import (
     TMR_P,
     TMR_Q,
     ANGLE_S,
-    THRESHOLD_HIGH_TMR,
-    THRESHOLD_HIGH_RUS,
+    # THRESHOLD_HIGH_TMR,
+    # THRESHOLD_HIGH_RUS,
 )
 
 from src.ds import FactoryPool, QubitAngleTracker, move_duration
@@ -102,6 +102,8 @@ def check_teleportation_worthiness(
     """
     Check if performing injection is worth it based on movement time and qubit counts.
     """
+    THRESHOLD_HIGH_TMR = np.sqrt(len(target_qubits_angles))
+    THRESHOLD_HIGH_RUS = THRESHOLD_HIGH_TMR
 
     new_routing_batches = []
     # check if executing teleporation is worth it.
@@ -126,7 +128,7 @@ def check_teleportation_worthiness(
             # print("Skipping teleportation for this batch due to high movement time:")
             for qubit, _, _, factory_id, _, _ in batches:
                 qubit_factory_pairs.remove((qubit, factory_id))
-            print(batches)
+            # print(batches)
     # Sort by movement time descending
     move_time_idx_pairs.sort(reverse=True)
     for movement_time, idx in move_time_idx_pairs:

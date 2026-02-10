@@ -1,16 +1,19 @@
 # analyze_results.py
-
+import io
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 import os
 
+mapping = {"True": 1, "False": 0, "2": 2}
+
 SETTINGS = [
     (True, "naive", False),  # vanilla
-    (True, "naive", True),  # optimized return
-    (False, "matching", True),  # optimized return + matching TMR
-    (False, "matching", False),
+    (False, "naive", False),  # optimized return
+    (False, "matching", False),  # optimized return + matching TMR
+    (False, "matching", True),  # optimized return + matching TMR + skip partial RUS
+    (False, "matching", 2),
 ]  # optimized return + matching TMR + skip
 
 # Configuration columns (experimental settings)
@@ -368,7 +371,8 @@ def plot_ablation(df, output_dir, placement):
         "vanilla",
         "optimized return",
         "optimized return + matching TMR",
-        "optimized return + matching TMR + skip RUS",
+        "optimized return + matching TMR + skip parital RUS",
+        "optimized return + matching TMR + skip whole RUS",
     ]
     df_list = []
     for setting in SETTINGS:
@@ -405,14 +409,12 @@ def plot_ablation(df, output_dir, placement):
 def process_csv(csv_file: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     df = pd.read_csv(csv_file)
-
+    df["consider_skip_rus"] = df["consider_skip_rus"].map(mapping)
     plot_microarch_comp_average_all(df, output_dir + "/microarch_all")
-    plot_microarch_comp_setting(df, output_dir + "/microarch_setting", setting_idx=2)
-    plot_microarch_comp_setting(df, output_dir + "/microarch_setting", setting_idx=3)
-    plot_ablation(df, output_dir + "/ablation_col", "col_based")
+    plot_microarch_comp_setting(df, output_dir + "/microarch_setting", setting_idx=4)
     plot_ablation(df, output_dir + "/ablation_checkerboard", "checkerboard")
-    plot_nAOD_placement_lines(df, output_dir, setting_idx=2, skip_placements=False)
-    # plot_nAOD_placement_lines(df, output_dir, setting_idx=3)
+    plot_nAOD_placement_lines(df, output_dir, setting_idx=4, skip_placements=False)
+    plot_nAOD_placement_lines(df, output_dir, setting_idx=4)
 
     print("Saved plots to", output_dir)
 
