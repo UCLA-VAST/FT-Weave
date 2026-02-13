@@ -110,6 +110,7 @@ def factory_angle_execution(
     consider_skip_rus: bool = True,
     tmr_assignment_method: str = "matching",
     trivial_return: bool = True,
+    decompose_move: bool = True,
     rng: np.random.Generator | None = None,
 ):
     """
@@ -275,7 +276,7 @@ def factory_angle_execution(
                         )
             else:
                 return_routing_batches = solve_return_move(
-                    routing_batches, factory_pool
+                    routing_batches, factory_pool, decompose_move=decompose_move
                 )
             circuit_moment = execute_movement(
                 return_routing_batches,

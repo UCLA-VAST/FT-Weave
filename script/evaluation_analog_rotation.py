@@ -38,6 +38,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         * len(params["tmr_assignment_method"])
         * len(params["trivial_return"])
         * params["trials_per_config"]
+        * len(params["decompose_move"])
     )
 
     print("=" * 80)
@@ -56,6 +57,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         skip_rus,
         tmr_method,
         trivial_ret,
+        decompose_move,
     ) in product(
         params["qubit_sizes"],
         params["placement_methods"],
@@ -63,6 +65,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         params["consider_skip_rus"],
         params["tmr_assignment_method"],
         params["trivial_return"],
+        params["decompose_move"],
     ):
         for trial in range(params["trials_per_config"]):
             rng = np.random.default_rng(42 + trial)
@@ -91,6 +94,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
                 "consider_skip_rus": skip_rus,
                 "tmr_assignment_method": tmr_method,
                 "trivial_return": trivial_ret,
+                "decompose_move": decompose_move,
                 "rng": rng,
             }
 
@@ -119,6 +123,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
                 "consider_skip_rus": 2,  #!
                 "tmr_assignment_method": tmr_method,
                 "trivial_return": trivial_ret,
+                "decompose_move": decompose_move,
                 "total_time": profiling_result["total_time"],
                 "movement_time": profiling_result["ops"]["move"]["circuit_time"],
                 "return_movement_time": profiling_result["ops"]["return_move"][
@@ -181,11 +186,10 @@ if __name__ == "__main__":
         ],
         "placement_methods": [
             # "seperate_region_col",
-            # "col_based",
+            "col_based",
             "checkerboard",
         ],
-        # "n_aods": [1, 2, 3, 4, 5],
-        "n_aods": [2, 3, 4],
+        "n_aods": [1, 2, 3, 4, 5],
         # "consider_skip_rus": [False, True],
         "consider_skip_rus": [True],
         # "tmr_assignment_method": ["naive", "matching"],
@@ -193,5 +197,6 @@ if __name__ == "__main__":
         # "trivial_return": [False, True],
         "trivial_return": [False],
         "trials_per_config": 10,
+        "decompose_move": [True],
     }
     run_evaluation(params=params, plot_figure=False)

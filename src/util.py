@@ -171,6 +171,7 @@ def analyze_execution_log(
         lambda: {"move_intervals": [], "total_time": 0}
     )
 
+    rotation_count = defaultdict(int)
     for e in execution_log:
         # Accept either 5-, 6-, or 7-element tuples (with optional aod_assignment)
         if len(e) == 5:
@@ -186,6 +187,9 @@ def analyze_execution_log(
         overall_end = max(overall_end, end)
 
         # Record op stats
+        if operation == "Rz":
+            rotation_count[value] += 1
+
         dur = max(0, end - start)
         s = ops.setdefault(operation, {"count": 0, "total_time": 0, "max_time": 0})
         s["count"] += 1
@@ -305,6 +309,7 @@ def analyze_execution_log(
             "rus_by_factory": rus_failures_by_factory,
         },
         "qubit_cnot_counts": qubit_cnot_counts,
+        "rotation_counts": rotation_count,
     }
 
     return profile
@@ -360,3 +365,19 @@ def print_execution_profile(profile: dict[str, Any], top_n_pairs: int = 0) -> No
             )
         elif op_name in count_only_ops:
             print(f"  - {op_name}: count={s['count']}")
+
+
+def fidelity_simulation(log, n_factories, fidelity: dict) -> dict:
+    profiling_result = analyze_execution_log(log, n_factories=n_factories)
+    fidelity_result = {}
+    n_cnot = profiling_result["ops"]["cnot"]["total_time"]
+    rotation_count = profiling_result["rotation_count"]
+
+    fidelity_result["cnot"] = fidelity["cnot"] ** n_cnot
+    fidelity_result["rz"] = 1
+    for angle, count in rotation_count.items():
+        fidelity_angle = fidelity["rz"](angle)
+        fidelity_result["rz"] = fidelity_angle**count
+
+    fidelity_result["total"] = fidelity_result["cnot"] * fidelity_result["rz"]
+    return fidelity_result

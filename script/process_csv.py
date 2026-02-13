@@ -6,15 +6,25 @@ import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 import os
 
-mapping = {"True": 1, "False": 0, "2": 2}
 
 SETTINGS = [
-    (True, "naive", False),  # vanilla
-    (False, "naive", False),  # optimized return
-    (False, "matching", False),  # optimized return + matching TMR
-    (False, "matching", True),  # optimized return + matching TMR + skip partial RUS
-    (False, "matching", 2),
-]  # optimized return + matching TMR + skip
+    (True, "naive", 0, False),  # vanilla
+    (False, "naive", 0, False),  # optimized return
+    (False, "matching", 0, False),  # optimized return + matching TMR
+    (
+        False,
+        "matching",
+        1,
+        False,
+    ),  # optimized return + matching TMR + skip partial RUS
+    (False, "matching", 2, False),  # optimized return + matching TMR + skip whole RUS
+    (
+        False,
+        "matching",
+        2,
+        True,
+    ),  # optimized return + matching TMR + skip whole RUS + decompose move
+]
 
 # Configuration columns (experimental settings)
 CONFIG_COLS = [
@@ -26,6 +36,7 @@ CONFIG_COLS = [
     "consider_skip_rus",
     "tmr_assignment_method",
     "trivial_return",
+    "decompose_move",
 ]
 
 # Result columns
@@ -373,6 +384,7 @@ def plot_ablation(df, output_dir, placement):
         "optimized return + matching TMR",
         "optimized return + matching TMR + skip parital RUS",
         "optimized return + matching TMR + skip whole RUS",
+        "optimized decomposed return + matching TMR + skip whole RUS",
     ]
     df_list = []
     for setting in SETTINGS:
@@ -380,6 +392,7 @@ def plot_ablation(df, output_dir, placement):
             (df_col["trivial_return"] == setting[0])
             & (df_col["tmr_assignment_method"] == setting[1])
             & (df_col["consider_skip_rus"] == setting[2])
+            & (df_col["decompose_move"] == setting[3])
         ]
         df_list.append(df_tmp)
     gs = []
@@ -393,7 +406,6 @@ def plot_ablation(df, output_dir, placement):
         g.columns = [
             "_".join(c).strip("_") if isinstance(c, tuple) else c for c in g.columns
         ]
-
         gs.append(g)
 
     aods = sorted(gs[0]["n_aods"].unique())
@@ -409,12 +421,11 @@ def plot_ablation(df, output_dir, placement):
 def process_csv(csv_file: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     df = pd.read_csv(csv_file)
-    df["consider_skip_rus"] = df["consider_skip_rus"].map(mapping)
-    plot_microarch_comp_average_all(df, output_dir + "/microarch_all")
-    plot_microarch_comp_setting(df, output_dir + "/microarch_setting", setting_idx=4)
+    # plot_microarch_comp_average_all(df, output_dir + "/microarch_all")
+    # plot_microarch_comp_setting(df, output_dir + "/microarch_setting", setting_idx=4)
     plot_ablation(df, output_dir + "/ablation_checkerboard", "checkerboard")
-    plot_nAOD_placement_lines(df, output_dir, setting_idx=4, skip_placements=False)
-    plot_nAOD_placement_lines(df, output_dir, setting_idx=4)
+    # plot_nAOD_placement_lines(df, output_dir, setting_idx=4, skip_placements=False)
+    # plot_nAOD_placement_lines(df, output_dir, setting_idx=4)
 
     print("Saved plots to", output_dir)
 
