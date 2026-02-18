@@ -1,34 +1,33 @@
 from itertools import product
 import numpy as np
+from collections import defaultdict
 
-from .config import CNOT_TIME, SE_TIME
 from .simulation import (
     simulate_TMR_preparation,
     simulate_RUS_injection,
 )
 
 from .tmr import (
-    get_angles_for_preparation,
-    assign_factories_for_batch,
+    schedule_tmr_round,
     reassign_factories,
     build_angle_factory_index_from_tmr_results,
+    update_factory_states_post_tmr,
 )
 
 from .ds import FactoryPool, QubitAngleTracker
 from .rus import (
-    solve_return_move,
-    check_teleportation_worthiness,
     update_qubit_state_per_teleportation,
-    update_qubit_state_post_teleportation,
-    two_layer_routing,
-    assign_teleportation_with_sharing,
+    rus_teleportation,
+    rus_post_teleportation,
 )
 
 from .analog_rotation import (
-    write_execution_log,
     execute_movement,
     execute_rus_teleportation,
-    execute_tmr_preparation,
+    execute_tmr_preparation_pre_rz,
+    execute_tmr_preparation_rz,
+    write_tmr_result_log,
+    write_rus_result_log,
 )
 
 
@@ -107,7 +106,7 @@ def factory_angle_execution(
     magic_state_locations: list[tuple[int, int]],
     column_based_placement: bool = True,
     n_aods: int = 1,
-    consider_skip_rus: bool = True,
+    consider_skip_rus: int = 0,  # 0: no skip, 1: partial skip, 2: aggressive skip
     tmr_assignment_method: str = "matching",
     trivial_return: bool = True,
     decompose_move: bool = True,
@@ -139,11 +138,9 @@ def factory_angle_execution(
 
     factory_pool.set_locations(magic_state_locations)
 
-    # Track successfully completed qubits
-    successful_qubits = set()
-
     # Log for visualization: (start_time, end_time, factory_id, operation, qubit)
     execution_log = []
+    aod_earliest_available_time = [0.0] * n_aods
 
     circuit_moment = 0
 
@@ -151,169 +148,90 @@ def factory_angle_execution(
     # MAIN EXECUTION LOOP
     # ========================================================================
 
-    while len(target_qubits_angles) > len(successful_qubits):
-        # print("successful_qubits")
-        # print(successful_qubits)
+    while len(qubit_trackers):
         # PHASE 1: Assign idle factories to prepare angles
-        batch_angles = get_angles_for_preparation(
-            successful_qubits, qubit_trackers, factory_pool.get_num_idle_factories()
-        )
-        # if circuit_moment > 1000:
-        #     print(
-        #         f"circuit_moment: {circuit_moment}, successful_qubits: {len(successful_qubits)}/{len(target_qubits_angles)}"
-        #     )
-        #     print(f"batch_angles: {batch_angles}")
-        #     print(factory_pool)
-        #     factories = factory_pool.get_busy_factories()
-        #     print(f"Busy factories: {[str(factory) for factory in factories]}")
-        #     from .animator import plot_all_rus_rounds
-
-        #     plot_all_rus_rounds(
-        #         execution_log=execution_log,
-        #         logic_qubit_locations=logic_qubit_locations,
-        #         magic_state_locations=magic_state_locations,
-        #         base_path="output/debug",
-        #     )
-        #     input()
-        assign_factories_for_batch(
-            factory_pool,
-            qubit_trackers,
-            logic_qubit_locations,
-            batch_angles,
-            column=column_based_placement,
-            method=tmr_assignment_method,
-        )
+        factory_list = factory_pool.get_idle_factories()
 
         # PHASE 2: Execute TMR preparation
-        circuit_moment, execution_log = execute_tmr_preparation(
-            factory_pool,
+        circuit_moment, execution_log = execute_tmr_preparation_pre_rz(
+            factory_list,
             circuit_moment,
             execution_log,
         )
 
-        simulate_TMR_preparation(factory_pool, rng)
-        for factory in factory_pool.factories:
-            if not factory.tmr_state:
-                write_execution_log(
-                    execution_log, circuit_moment, factory.id, "TMR_fail"
-                )
-
-        # the current imeplementation iterates based on qubits to find the injection path.
-        # In reality, we should to a round of injection on all qubits and get the RUS results.
-        # Based on the RUS results, we do the next runs of injections. Therefore, we want to
-        # change phase_3_simulate_and_inject to the following psuedo-code:
-        #
-        # collect the maximum number of injections among all qubits
-        # qubit_factories_pair: tuple[int,list[int]:
-        # injection_sequence: list[list[qubit_factories_pair]]. A element is a list of qubits that can be
-        # injected at this injection round with the possible factories.
-        # Build angle-factory index from TMR results
-        angle_factory_index = build_angle_factory_index_from_tmr_results(
-            qubit_trackers, successful_qubits, factory_pool
+        schedule_tmr_round(
+            factory_pool,
+            qubit_trackers,
+            logic_qubit_locations,
+            column_based_placement,
+            tmr_assignment_method=tmr_assignment_method,
         )
-        successful_teleportation_qubits = set()
+        circuit_moment, execution_log = execute_tmr_preparation_rz(
+            factory_list,
+            circuit_moment,
+            execution_log,
+        )
+        simulate_TMR_preparation(factory_pool, rng)
+
+        update_factory_states_post_tmr(factory_list, factory_pool, qubit_trackers)
+
+        execution_log = write_tmr_result_log(
+            factory_pool,
+            circuit_moment,
+            execution_log,
+        )
+        angle_factory_index = build_angle_factory_index_from_tmr_results(factory_list)
         while True:
             # qubit_factory_pairs: list[tuple(qubit, factory_id)]
-            # Use enhanced assignment with factory sharing
-            qubit_factory_pairs = assign_teleportation_with_sharing(
-                successful_qubits,
+            # routing batch: list of tuple (qubit, x_q, y_q, factory_id, x_f, y_f, reverse)
+            qubit_factory_pairs, routing_batches = rus_teleportation(
                 qubit_trackers,
                 factory_pool,
                 logic_qubit_locations,
                 angle_factory_index,
+                consider_skip_rus=consider_skip_rus,
+                n_aods=n_aods,
+                total_qubits=len(target_qubits_angles),
             )
-            if not qubit_factory_pairs:
+
+            if not qubit_factory_pairs or not routing_batches:
                 break
-            # routing
-            # batch: list of tuple (qubit, x_q, y_q, factory_id, x_f, y_f, reverse)
-            routing_batches = two_layer_routing(
-                factory_pool, logic_qubit_locations, qubit_factory_pairs
-            )
-            # check if executing teleporation is worth it.
-            # if circuit_moment > 1000:
-            #     print(f"qubit_factory_pairs: {qubit_factory_pairs}")
-            #     print(f"routing_batches: {routing_batches}")
-            #     input()
-            if consider_skip_rus:
-                routing_batches = check_teleportation_worthiness(
-                    routing_batches,
-                    n_aods,
-                    qubit_factory_pairs,
-                    target_qubits_angles,
-                    successful_qubits,
-                )
-                if not routing_batches:
-                    break
-            # print("logic_qubit_locations")
-            # print(logic_qubit_locations)
-            # print("magic_state_locations")
-            # print(magic_state_locations)
-            # print("qubit_factory_pairs")
-            # print(qubit_factory_pairs)
-            # print("routing_batches")
-            # print(routing_batches)
+
             circuit_moment = execute_movement(
                 routing_batches,
                 execution_log,
                 circuit_moment,
-                n_aods=n_aods,
+                aod_earliest_available_time,
             )
 
-            execute_rus_teleportation(
+            circuit_moment = execute_rus_teleportation(
                 qubit_factory_pairs, circuit_moment, execution_log
             )
-            circuit_moment += CNOT_TIME
 
             # return factories qubit to empty spot
-            # trivial_return = True
-            if trivial_return:
-                return_routing_batches = []
-                for batches in routing_batches:
-                    return_routing_batches.append([])
-                    for _, x_q, y_q, factory_id, x_f, y_f in batches:
-                        return_routing_batches[-1].append(
-                            (-1, x_f, y_f, factory_id, x_q, y_q)
-                        )
-            else:
-                return_routing_batches = solve_return_move(
-                    routing_batches, factory_pool, decompose_move=decompose_move
-                )
+            return_routing_batches = rus_post_teleportation(
+                routing_batches,
+                factory_pool,
+                trivial_return=trivial_return,
+                decompose_move=decompose_move,
+            )
+
             circuit_moment = execute_movement(
                 return_routing_batches,
                 execution_log,
                 circuit_moment,
-                n_aods=n_aods,
+                aod_earliest_available_time,
                 move_type="return_move",
             )
             rus_simulation = simulate_RUS_injection(
                 qubit_factory_pairs, factory_pool, rng
             )
-            for (qubit, factory_id), injection_result in zip(
-                qubit_factory_pairs, rus_simulation
-            ):
-                write_execution_log(
-                    execution_log,
-                    circuit_moment,
-                    factory_id,
-                    "SE",
-                    qubit,
-                )
-                if injection_result:
-                    result = "RUS_success"
-                else:
-                    result = "RUS_fail"
-                write_execution_log(
-                    execution_log,
-                    circuit_moment + SE_TIME,
-                    factory_id,
-                    result,
-                    qubit,
-                )
-            circuit_moment += SE_TIME
+
+            execution_log = write_rus_result_log(
+                qubit_factory_pairs, rus_simulation, circuit_moment, execution_log
+            )
 
             circuit_moment = update_qubit_state_per_teleportation(
-                successful_qubits,
-                successful_teleportation_qubits,
                 qubit_factory_pairs,
                 rus_simulation,
                 qubit_trackers,
@@ -323,19 +241,12 @@ def factory_angle_execution(
                 circuit_moment,
             )
 
-            if len(target_qubits_angles) == len(successful_qubits):
+            if len(qubit_trackers) == 0:
                 break
 
-        update_qubit_state_post_teleportation(
-            successful_teleportation_qubits,
-            qubit_trackers,
-            factory_pool,
-            angle_factory_index,
-        )
         reassign_factories(
             factory_pool,
             qubit_trackers,
-            successful_qubits,
             logic_qubit_locations,
         )
 
@@ -350,6 +261,130 @@ def factory_angle_execution(
             )
         )
         # input()
+    return circuit_moment, execution_log
 
-    assert len(target_qubits_angles) == len(successful_qubits)
+
+def factory_angle_execution_parallel(
+    factory_pool: FactoryPool,
+    target_qubits_angles: dict[int, float],
+    logic_qubit_locations: list[tuple[int, int]],
+    magic_state_locations: list[tuple[int, int]],
+    column_based_placement: bool = True,
+    n_aods: int = 1,
+    consider_skip_rus: int = 0,  # 0: no skip, 1: partial skip, 2: aggressive skip
+    tmr_assignment_method: str = "matching",
+    trivial_return: bool = True,
+    decompose_move: bool = True,
+    rng: np.random.Generator | None = None,
+):
+    """
+    Execute angle preparation with parallel TMR and RUS operations using time-stepped simulation.
+
+    This version allows TMR and RUS to run concurrently on different AODs, reducing idle time.
+
+    Args:
+        target_qubits_angles: Dict mapping qubit_id -> target_rotation_angle
+        logic_qubit_locations: (x, y) location for each logical qubit
+        magic_state_locations: (x, y) location for each magic state factory
+        column_based_placement: Whether to use column-based placement
+        n_aods: Number of AODs available for parallel operations
+        consider_skip_rus: RUS skipping strategy (0: no skip, 1: partial, 2: aggressive)
+        tmr_assignment_method: Method for TMR assignment
+        trivial_return: Whether to use trivial return routing
+        decompose_move: Whether to decompose return moves
+        rng: Random number generator
+
+    Returns:
+        circuit_moment: Total circuit execution time
+        execution_log: List of (time, factory_id, operation, qubit) for visualization
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Initialize qubit trackers
+    qubit_trackers = {
+        qubit: QubitAngleTracker(qubit_id=qubit, target_angle=round(theta, 7))
+        for qubit, theta in target_qubits_angles.items()
+    }
+
+    factory_pool.set_locations(magic_state_locations)
+
+    execution_log = []
+    aod_earliest_available_time = [0.0] * n_aods
+    circuit_moment = 0.0
+
+    # Event queue: time -> list of events
+    events = defaultdict(list)
+
+    # ========================================================================
+    # MAIN EXECUTION LOOP (TIME-STEPPED)
+    # ========================================================================
+
+    # Initial TMR scheduling
+    circuit_moment, execution_log = execute_tmr_preparation_pre_rz(
+        factory_pool.get_idle_factories(),
+        circuit_moment,
+        execution_log,
+    )
+
+    while True:
+
+        # Find next event time
+        if circuit_moment in events:
+            # Process events at current time
+            current_events = events[circuit_moment]
+            for event in current_events:
+                if event["type"] == "TMR_completion":
+                    simulate_TMR_preparation(factory_pool, rng, event["factory_list"])
+
+                    # Update factory state
+                    update_factory_states_post_tmr(
+                        event["factory_id"], factory_pool, qubit_trackers
+                    )
+
+                    # todo
+                    # 1. start new round of TMR preparation for the facories that failed in the previous round
+
+                    # 2. schedule RUS teleportation for the factories that succeeded in the previous round
+                    #    - this can be done in parallel with the next round of TMR preparation
+
+                elif event["type"] == "TMR_pre_RZ_completion":
+                    factory_list = schedule_tmr_round(
+                        factory_pool,
+                        qubit_trackers,
+                        logic_qubit_locations,
+                        column_based_placement=column_based_placement,
+                        tmr_assignment_method=tmr_assignment_method,
+                    )
+                    execute_tmr_preparation_rz(
+                        factory_list, circuit_moment, execution_log, events=events
+                    )
+
+                elif event["type"] == "RUS_teleportation":
+                    # todo
+                    # 1. update qubit states based on teleportation results
+                    # 2. schedule return movement for factories
+
+                    raise NotImplementedError(
+                        "Parallel RUS teleportation execution not implemented yet."
+                    )
+
+                elif event["type"] == "RUS_finish":
+                    # todo
+                    # 1. continue to do the next round of RUS teleportation for the next batch of factories that are ready after TMR
+                    # 2. if no more factories are ready for RUS, start the next round of TMR preparation
+
+                    raise NotImplementedError(
+                        "Parallel RUS teleportation execution not implemented yet."
+                    )
+
+        if not qubit_trackers:
+            break  # All qubits completed
+        circuit_moment += 0.5
+
+    # Final cleanup: reassign any remaining factories
+    assert not qubit_trackers, "All qubits should be completed at this point"
+
+    circuit_moment = circuit_moment
+
     return circuit_moment, execution_log

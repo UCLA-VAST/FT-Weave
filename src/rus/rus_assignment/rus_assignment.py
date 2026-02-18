@@ -1,13 +1,12 @@
 from collections import defaultdict
 from typing import Dict, List, Tuple
 from src.ds import FactoryPool, QubitAngleTracker, move_duration
-from src.rus import AngleFactoryIndex
+from src.rus.rus_assignment.angle_factory_index import AngleFactoryIndex
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 
 def assign_teleportation_with_sharing(
-    successful_qubits: set[int],
     qubit_trackers: Dict[int, QubitAngleTracker],
     factory_pool: FactoryPool,
     logic_qubit_locations: List[Tuple[int, int]],
@@ -22,7 +21,6 @@ def assign_teleportation_with_sharing(
     3. Minimizing the total moving distance via vertex matching
 
     Args:
-        successful_qubits: Set of qubits that have already been successfully injected
         qubit_trackers: Dict mapping qubit_id to QubitAngleTracker with angle info
         factory_pool: Pool of available factories
         logic_qubit_locations: List of (x, y) locations for each logical qubit
@@ -37,9 +35,6 @@ def assign_teleportation_with_sharing(
     angle_to_qubits: Dict[float, List[int]] = defaultdict(list)
 
     for qubit in qubit_trackers:
-        if qubit in successful_qubits:
-            continue
-
         # Get the angle for this qubit (first generation ready for injection)
         tracker = qubit_trackers[qubit]
         angle = tracker.target_angle

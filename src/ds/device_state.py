@@ -1,5 +1,6 @@
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Optional
 
 import numpy as np
@@ -8,6 +9,16 @@ from ..config import PRECISION
 # ============================================================================
 # DATA STRUCTURES
 # ============================================================================
+
+
+class FactoryState(Enum):
+    """Represents the state of a factory during angle preparation."""
+
+    IDLE = 0
+    TMR_BEFORE_RZ = 1
+    TMR_AFTER_RZ = 2
+    WAIT_FOR_RUS = 3
+    # RUS = 3
 
 
 class QubitAngleTracker:
@@ -34,6 +45,12 @@ class QubitAngleTracker:
 
     def remove_factory(self, factory_id, angle):
         """Remove a factory from tracking."""
+        assert (
+            factory_id,
+            angle,
+        ) in self.factories, (
+            f"Factory {factory_id} with angle {angle} not found in {self.factories}"
+        )
         self.factories = [(fid, a) for fid, a in self.factories if fid != factory_id]
         self.angle_counts[angle] -= 1
         if self.angle_counts[angle] == 0:
@@ -84,7 +101,7 @@ class Factory:
     angle: Optional[float] = None
     qubit: Optional[int] = None
     success_rate: Optional[float] = None
-    state: int = 0  # 0: 'idle', 1: 'tmr', 2: 'wait', 3: 'rus'
+    state: FactoryState = FactoryState.IDLE
     tmr_state: Optional[bool] = None
     rus_state: Optional[bool] = None
     location: tuple[int, int] = (0, 0)  # (x, y) coordinates
@@ -96,30 +113,34 @@ class Factory:
         self.success_rate = None
         self.tmr_state = None
         self.rus_state = None
-        self.state = 0
+        self.state = FactoryState.IDLE
 
     def update(self, angle, qubit, success_rate):
         """Update the factory with new assignment."""
         self.angle = angle
         self.qubit = qubit
         self.success_rate = success_rate
-        self.state = 1
+        self.state = FactoryState.TMR_AFTER_RZ
         self.tmr_state = None
         self.rus_state = None
+
+    def update_qubit(self, qubit):
+        """Update the factory with new assignment."""
+        self.qubit = qubit
 
     def set_tmr_state(self, state: bool):
         """Set the TMR preparation state."""
         self.tmr_state = state
-        self.state = 2
+        self.state = FactoryState.WAIT_FOR_RUS
 
-    def set_to_rus(self):
-        """Set the factory state to RUS injection."""
-        self.state = 3
+    # def set_to_rus(self):
+    #     """Set the factory state to RUS injection."""
+    #     self.state = FactoryState.RUS
 
     def set_rus_state(self, state: bool):
         """Set the RUS injection state."""
         self.rus_state = state
-        self.state = 0
+        self.state = FactoryState.IDLE
 
     def set_location(self, loc: tuple[int, int]):
         self.location = loc
@@ -172,17 +193,21 @@ class FactoryPool:
         """Return a list of idle factories."""
         return [factory for factory in self.factories if factory.angle is not None]
 
-    def get_tmr_factories(self) -> list[Factory]:
+    def get_tmr_before_rz_factories(self) -> list[Factory]:
         """Return a list of active factories."""
-        return [f for f in self.factories if f.state == 1]
+        return [f for f in self.factories if f.state == FactoryState.TMR_BEFORE_RZ]
 
-    def get_wait_factories(self) -> list[Factory]:
+    def get_tmr_after_rz_factories(self) -> list[Factory]:
         """Return a list of active factories."""
-        return [f for f in self.factories if f.state == 2]
+        return [f for f in self.factories if f.state == FactoryState.TMR_AFTER_RZ]
 
-    def get_rus_factories(self) -> list[Factory]:
+    def get_wait_for_rus_factories(self) -> list[Factory]:
         """Return a list of active factories."""
-        return [f for f in self.factories if f.state == 3]
+        return [f for f in self.factories if f.state == FactoryState.WAIT_FOR_RUS]
+
+    # def get_rus_factories(self) -> list[Factory]:
+    #     """Return a list of active factories."""
+    #     return [f for f in self.factories if f.state == FactoryState.RUS]
 
     def get_factory_by_id(self, factory_id: int) -> Factory:
         """Get a factory by its ID."""

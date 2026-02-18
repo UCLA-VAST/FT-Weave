@@ -9,6 +9,7 @@ from scipy.optimize import linear_sum_assignment
 
 def assign_factories_for_batch_matching(
     factory_pool: FactoryPool,
+    factories: list,
     qubit_trackers: dict[int, QubitAngleTracker],
     logic_qubit_locations: list[tuple[int, int]],
     batch_angles: dict[int, dict[int, int]],
@@ -25,14 +26,12 @@ def assign_factories_for_batch_matching(
     Returns:
         None (modifies factory_pool and qubit_trackers in place)
     """
-    idle_factories = factory_pool.get_idle_factories()
-    assert len(idle_factories) == factory_pool.get_num_idle_factories()
-    cost_matrix = np.zeros((len(idle_factories), len(idle_factories)))
+    cost_matrix = np.zeros((len(factories), len(factories)))
     assignment_idx_to_qubit_anlge_pair = dict()
     # level_constant = 10  # constant to prioritize lower level angles
     # print("batch_angles:")
     # print(batch_angles)
-    for i, factory in enumerate(idle_factories):
+    for i, factory in enumerate(factories):
         x_src, y_src = factory.location
         idx = 0
         for qubit, demands in batch_angles.items():
@@ -62,7 +61,7 @@ def assign_factories_for_batch_matching(
     # input()
     # assign factory based on solution
     for i, j in zip(row_ind, col_ind):
-        factory = idle_factories[i]
+        factory = factories[i]
         qubit, angle = assignment_idx_to_qubit_anlge_pair[j]
         success_rate = calculate_success_rate(angle)
         qubit_trackers[qubit].add_factory(factory.id, angle)

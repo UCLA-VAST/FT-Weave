@@ -149,6 +149,7 @@ def test(
         consider_skip_rus=consider_skip_rus,
         tmr_assignment_method=tmr_assignment_method,
         trivial_return=trivial_return,
+        rng=np.random.default_rng(42),
     )
 
     profiling_result = analyze_execution_log(log, n_factories=n_factories)
@@ -218,8 +219,8 @@ if __name__ == "__main__":
         prefix="",
         n_aods=1,
         consider_skip_rus=False,
-        tmr_assignment_method="naive",
-        trivial_return=True,
+        tmr_assignment_method="matching",
+        trivial_return=False,
     )
 
     # test(

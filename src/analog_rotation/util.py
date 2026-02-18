@@ -6,6 +6,8 @@ from src.config import (
     TMR_Q,
 )
 from src.ds import move_duration
+from src.ds.device_state import FactoryPool
+from collections import defaultdict
 
 
 def write_execution_log(
@@ -54,16 +56,17 @@ def write_execution_log(
         )
 
 
-def execute_tmr_preparation(
-    factory_pool,
+def execute_tmr_preparation_pre_rz(
+    factories: list,
     circuit_moment,
     execution_log,
+    events: defaultdict[float, list] | None = None,
 ):
     """
     PHASE 2: Execute TMR preparation (2 SE + Rz + 3 SE).
 
     Args:
-        factory_pool: FactoryPool object containing all factories
+        factories: List of Factory objects undergoing TMR preparation
         circuit_moment: Current circuit execution time
         execution_log: List of execution events
 
@@ -71,19 +74,52 @@ def execute_tmr_preparation(
         Updated circuit_moment and execution_log
     """
     # Log TMR preparation for all active factories
-    for fac in factory_pool.get_tmr_factories():
-        if fac.angle is not None:
-            for p in range(TMR_P):
-                write_execution_log(
-                    execution_log,
-                    circuit_moment + p,
-                    fac.id,
-                    "SE",
-                    fac.qubit,
-                )
+    for fac in factories:
+        for p in range(TMR_P):
             write_execution_log(
                 execution_log,
-                circuit_moment + TMR_P,
+                circuit_moment + p,
+                fac.id,
+                "SE",
+                fac.qubit,
+            )
+
+    circuit_moment += TMR_P
+
+    if events is not None:
+        events[circuit_moment].append(
+            {
+                "type": "TMR_pre_RZ_completion",
+                "factory_list": [fac.id for fac in factories],
+            }
+        )
+
+    return circuit_moment, execution_log
+
+
+def execute_tmr_preparation_rz(
+    factories: list,
+    circuit_moment,
+    execution_log,
+    events: defaultdict[float, list] | None = None,
+):
+    """
+    PHASE 2: Execute TMR preparation (2 SE + Rz + 3 SE).
+
+    Args:
+        factories: List of Factory objects undergoing TMR preparation
+        circuit_moment: Current circuit execution time
+        execution_log: List of execution events
+
+    Returns:
+        Updated circuit_moment and execution_log
+    """
+    # Log TMR preparation for all active factories
+    for fac in factories:
+        if fac.angle is not None:
+            write_execution_log(
+                execution_log,
+                circuit_moment,
                 fac.id,
                 "Rz",
                 fac.angle,
@@ -91,13 +127,13 @@ def execute_tmr_preparation(
             for q in range(TMR_Q):
                 write_execution_log(
                     execution_log,
-                    circuit_moment + TMR_P + q + 1,
+                    circuit_moment + q + 1,
                     fac.id,
                     "SE",
                     fac.qubit,
                 )
 
-    circuit_moment += TMR_PREPARATION_TIME
+    circuit_moment += TMR_Q + 1
 
     write_execution_log(
         execution_log,
@@ -107,7 +143,66 @@ def execute_tmr_preparation(
         None,
     )
 
+    # Schedule completion event
+    if events is not None:
+        assert circuit_moment is not None
+        events[circuit_moment].append(
+            {
+                "type": "TMR_completion",
+                "factory_list": [fac.id for fac in factories],
+            }
+        )
     return circuit_moment, execution_log
+
+
+def write_tmr_result_log(
+    factory_pool: FactoryPool,
+    circuit_moment,
+    execution_log,
+    factory_id_list: list[int] | None = None,
+):
+    # Log TMR preparation for all active factories
+    if factory_id_list:
+        for factory_id in factory_id_list:
+            factory = factory_pool.get_factory_by_id(factory_id)
+            if not factory.tmr_state:
+                write_execution_log(
+                    execution_log, circuit_moment, factory.id, "TMR_fail"
+                )
+    else:
+        for factory in factory_pool.factories:
+            if not factory.tmr_state:
+                write_execution_log(
+                    execution_log, circuit_moment, factory.id, "TMR_fail"
+                )
+
+    circuit_moment += TMR_P
+
+    return execution_log
+
+
+def write_rus_result_log(
+    qubit_factory_pairs: list[tuple[int, int]],
+    rus_simulation: list[bool],
+    circuit_moment: float,
+    execution_log: list,
+):
+    for (qubit, factory_id), injection_result in zip(
+        qubit_factory_pairs, rus_simulation
+    ):
+        if injection_result:
+            result = "RUS_success"
+        else:
+            result = "RUS_fail"
+        write_execution_log(
+            execution_log,
+            circuit_moment,
+            factory_id,
+            result,
+            qubit,
+        )
+
+    return execution_log
 
 
 def execute_rus_teleportation(
@@ -123,13 +218,14 @@ def execute_rus_teleportation(
             "CNOT",
             qubit,
         )
+    return circuit_moment + CNOT_TIME
 
 
 def execute_movement(
     routing_batches: list,
     execution_log: list,
     circuit_moment: float,
-    n_aods: int = 1,
+    aod_earliest_available_time: list[float],
     move_type: str = "move",
 ) -> float:
     move_time_idx_pairs = []
@@ -147,12 +243,11 @@ def execute_movement(
     #     input()
     # Sort by movement time descending
     move_time_idx_pairs.sort(reverse=True)
-    aod_earliest_available_time = [circuit_moment] * n_aods
     for movement_time, idx in move_time_idx_pairs:
         # Assign to the earliest available AOD
         aod_idx = aod_earliest_available_time.index(min(aod_earliest_available_time))
-        start_time = aod_earliest_available_time[aod_idx]
-        aod_earliest_available_time[aod_idx] += movement_time
+        start_time = max(circuit_moment, aod_earliest_available_time[aod_idx])
+        aod_earliest_available_time[aod_idx] = start_time + movement_time
         for _, x_q, y_q, factory_id, x_f, y_f in routing_batches[idx]:
 
             movement_strs = [f"({x_f},{y_f})", f"({x_q},{y_q})"]

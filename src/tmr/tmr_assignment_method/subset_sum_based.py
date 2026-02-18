@@ -204,6 +204,7 @@ def tmr_assignment_subset_sum(
 
 def assign_factories_for_batch_naive(
     factory_pool: FactoryPool,
+    factories: list,
     qubit_trackers: dict[int, QubitAngleTracker],
     logic_qubit_locations: list[tuple[int, int]],
     batch_angles: dict[int, dict[int, int]],
@@ -223,7 +224,6 @@ def assign_factories_for_batch_naive(
     Returns:
         None (modifies factory_pool and qubit_trackers in place)
     """
-    idle_factories = factory_pool.get_idle_factories()
     required_angles_per_level_position = dict()
     available_factories_per_position = defaultdict(int)
     qubit_by_position = defaultdict(list)
@@ -243,7 +243,7 @@ def assign_factories_for_batch_naive(
     for pos in qubit_by_position.keys():
         qubit_by_position[pos] = sorted(qubit_by_position[pos], key=lambda x: x[0])
 
-    for factory in idle_factories:
+    for factory in factories:
         x, y = factory.location
         pos = x if column else y
         other_coord = y if column else x

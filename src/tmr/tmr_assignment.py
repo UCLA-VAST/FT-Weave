@@ -20,6 +20,7 @@ from src.config import (
 
 def assign_factories_for_batch(
     factory_pool: FactoryPool,
+    factories: list,
     qubit_trackers: dict[int, QubitAngleTracker],
     logic_qubit_locations: list[tuple[int, int]],
     batch_angles: dict[int, dict[int, int]],
@@ -43,6 +44,7 @@ def assign_factories_for_batch(
     if method == "naive":
         assign_factories_for_batch_naive(
             factory_pool,
+            factories,
             qubit_trackers,
             logic_qubit_locations,
             batch_angles,
@@ -51,6 +53,7 @@ def assign_factories_for_batch(
     elif method == "matching":
         assign_factories_for_batch_matching(
             factory_pool,
+            factories,
             qubit_trackers,
             logic_qubit_locations,
             batch_angles,
@@ -62,7 +65,6 @@ def assign_factories_for_batch(
 def reassign_factories(
     factory_pool: FactoryPool,
     qubit_trackers: dict[int, QubitAngleTracker],
-    successful_qubits: set[int],
     logic_qubit_locations: list[tuple[int, int]],
 ):
     """
@@ -71,10 +73,7 @@ def reassign_factories(
     # return
     busy_factories = factory_pool.get_busy_factories()
 
-    cost_matrix = np.zeros(
-        (len(busy_factories), len(qubit_trackers) - len(successful_qubits))
-    )
-
+    cost_matrix = np.zeros((len(busy_factories), len(qubit_trackers)))
     angles_to_factory = defaultdict(list)
     for i, factory in enumerate(busy_factories):
         angles_to_factory[factory.angle].append((i, factory.id))
@@ -86,8 +85,6 @@ def reassign_factories(
     assignment_idx_to_qubit_anlge_pair = dict()
     i = 0
     for qubit_idx, qubit in qubit_trackers.items():
-        if qubit_idx in successful_qubits:
-            continue
         x_dst, y_dst = logic_qubit_locations[qubit_idx]
         angle = qubit.target_angle
         assignment_idx_to_qubit_anlge_pair[i] = (qubit_idx, angle)
@@ -111,6 +108,7 @@ def reassign_factories(
         factory = busy_factories[i]
         used_factories[i] = True
         qubit, angle = assignment_idx_to_qubit_anlge_pair[j]
+        factory.update_qubit(qubit)
         # success_rate = calculate_success_rate(angle)
         qubit_trackers[qubit].add_factory(factory.id, angle)
         # print(

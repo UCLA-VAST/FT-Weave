@@ -13,7 +13,6 @@ from src.config import (
 
 
 def get_angles_for_preparation(
-    successful_qubits: set[int],
     qubit_trackers: dict[int, QubitAngleTracker],
     n_available_factories: int,
 ) -> dict[int, dict[int, int]]:
@@ -21,8 +20,6 @@ def get_angles_for_preparation(
     qubit_demands = defaultdict(int)
     sum_demands = 0
     for qubit, tracker in qubit_trackers.items():
-        if qubit in successful_qubits:
-            continue
         level_demand = 1
         for level in range(0, 2):
             angle = tracker.target_angle * pow(2, level)
@@ -51,8 +48,6 @@ def get_angles_for_preparation(
     # print("Allocating factories for qubits:")
     # print(allocation)
     for qubit, tracker in qubit_trackers.items():
-        if qubit in successful_qubits:
-            continue
         if allocation[qubit] < 1:
             continue
         level_demand = 1

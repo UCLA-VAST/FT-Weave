@@ -1,11 +1,9 @@
-from src.rus import AngleFactoryIndex
-from src.ds import FactoryPool, QubitAngleTracker
+from src.rus.rus_assignment import AngleFactoryIndex
+from src.ds import QubitAngleTracker, Factory, FactoryPool
 
 
 def build_angle_factory_index_from_tmr_results(
-    qubit_trackers: dict[int, QubitAngleTracker],
-    successful_qubits: set[int],
-    factory_pool: FactoryPool,
+    factory_list: list[Factory],
 ) -> AngleFactoryIndex:
     """
     Build an AngleFactoryIndex directly from TMR results.
@@ -22,22 +20,32 @@ def build_angle_factory_index_from_tmr_results(
     """
     angle_factory_index = AngleFactoryIndex()
 
-    # Iterate through all qubits and their factories
-    for qubit, tracker in qubit_trackers.items():
-        if qubit not in successful_qubits:
-            removed_factory = []
-            for factory_id, angle in tracker.factories:
-                # Only include factories that successfully passed TMR
-                factory = factory_pool.get_factory_by_id(factory_id)
-                if factory is not None:
-                    if factory.tmr_state:
-                        angle_factory_index.add_factory(factory_id, angle, qubit)
-                    else:
-                        factory_pool.free_factory(factory_id)
-                        removed_factory.append((factory_id, angle))
-            for factory_id, angle in removed_factory:
-                tracker.remove_factory(factory_id, angle)
-
-            angle_factory_index.add_qubit_for_angle(tracker.target_angle)
+    for factory in factory_list:
+        if factory.tmr_state:
+            qubit_id = factory.qubit
+            assert qubit_id is not None, f"Factory {factory.id} has no qubit assigned"
+            assert (
+                factory.angle is not None
+            ), f"Factory {factory.id} has no angle assigned"
+            angle_factory_index.add_factory(factory.id, factory.angle, qubit_id)
 
     return angle_factory_index
+
+
+def update_factory_states_post_tmr(
+    factory_list: list[Factory],
+    factory_pool: FactoryPool,
+    qubit_trackers: dict[int, QubitAngleTracker],
+) -> None:
+    """
+    Args:
+        qubit_trackers: Dict mapping qubit_id to QubitAngleTracker
+        factory_pool: FactoryPool containing Factory objects with TMR results
+    """
+    for factory in factory_list:
+        if factory.tmr_state is False:
+            qubit_id = factory.qubit
+            assert qubit_id is not None, f"Factory {factory.id} has no qubit assigned"
+            tracker = qubit_trackers[qubit_id]
+            tracker.remove_factory(factory.id, factory.angle)
+            factory_pool.free_factory(factory.id)
