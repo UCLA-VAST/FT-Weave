@@ -18,7 +18,7 @@ class FactoryState(Enum):
     TMR_BEFORE_RZ = 1
     TMR_AFTER_RZ = 2
     WAIT_FOR_RUS = 3
-    # RUS = 3
+    RUS = 4
 
 
 class QubitAngleTracker:
@@ -133,9 +133,9 @@ class Factory:
         self.tmr_state = state
         self.state = FactoryState.WAIT_FOR_RUS
 
-    # def set_to_rus(self):
-    #     """Set the factory state to RUS injection."""
-    #     self.state = FactoryState.RUS
+    def set_to_rus(self):
+        """Set the factory state to RUS injection."""
+        self.state = FactoryState.RUS
 
     def set_rus_state(self, state: bool):
         """Set the RUS injection state."""

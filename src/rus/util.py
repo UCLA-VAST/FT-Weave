@@ -12,7 +12,6 @@ from src.config import (
 )
 
 from src.ds import FactoryPool, QubitAngleTracker, move_duration
-from src.rus.rus_assignment import AngleFactoryIndex
 from src.analog_rotation import insert_s_gate
 
 
@@ -21,7 +20,6 @@ def update_qubit_state_per_teleportation(
     rus_simulation: list[bool],
     qubit_trackers: dict[int, QubitAngleTracker],
     factory_pool: FactoryPool,
-    angle_factory_index: AngleFactoryIndex,
     execution_log: list,
     start_time: float,
 ):
@@ -33,9 +31,7 @@ def update_qubit_state_per_teleportation(
         tracker = qubit_trackers[qubit]
         teleportation_angle = tracker.target_angle
         # update device state as the angle is consumed by teleportation
-        angle_factory_index.remove_qubit_for_angle(teleportation_angle)
         factory_pool.free_factory(factory_id)
-        angle_factory_index.remove_factory(factory_id)
         if success:
             tracker.clear_all()
             qubit_trackers.pop(qubit)
@@ -51,7 +47,6 @@ def update_qubit_state_per_teleportation(
                 is_s_gate_inserted = True
                 insert_s_gate(execution_log, start_time, -1, qubit)
                 tracker.set_target_angle(tracker.target_angle - ANGLE_S)
-            angle_factory_index.add_qubit_for_angle(tracker.target_angle)
 
     # for qubit in qubit_trackers.keys():
     #     tracker = qubit_trackers[qubit]

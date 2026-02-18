@@ -95,8 +95,9 @@ def decompose_return_move(
             decomposed = try_decompose_parallel_shift(
                 batch, all_factory_locations, move_vec
             )
-            # print("decomposed: ", decomposed)
             if decomposed and len(decomposed[0]) > 1:
+                # print("try_decompose_parallel_shift: ", batch)
+                # print("decomposed: ", decomposed)
                 # Successfully decomposed into multiple batches
                 new_routing_batches.extend(decomposed)
             else:

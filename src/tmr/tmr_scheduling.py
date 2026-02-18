@@ -1,7 +1,5 @@
-from src.tmr import (
-    get_angles_for_preparation,
-    assign_factories_for_batch,
-)
+from src.tmr.angle_collection import get_angles_for_preparation
+from src.tmr.tmr_assignment import assign_factories_for_batch
 from src.ds import FactoryPool, QubitAngleTracker, Factory
 
 

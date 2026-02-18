@@ -13,6 +13,3 @@ from src.rus.rus_routing import (
     chain_decomposition_matching,
     verify_chain_decomposition,
 )
-
-from src.rus.rus_teleportaion import rus_teleportation
-from src.rus.rus_post_teleportation import rus_post_teleportation

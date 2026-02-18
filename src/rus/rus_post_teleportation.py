@@ -16,6 +16,7 @@ def rus_post_teleportation(
             for _, x_q, y_q, factory_id, x_f, y_f in batches:
                 return_routing_batches[-1].append((-1, x_f, y_f, factory_id, x_q, y_q))
     else:
+        # print("Optimize return move.")
         return_routing_batches = solve_return_move(
             routing_batches, factory_pool, decompose_move=decompose_move
         )

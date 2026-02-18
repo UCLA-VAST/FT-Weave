@@ -1,9 +1,9 @@
 from src.rus.rus_assignment import AngleFactoryIndex
-from src.ds import QubitAngleTracker, Factory, FactoryPool
+from src.ds import QubitAngleTracker, Factory, FactoryPool, FactoryState
 
 
 def build_angle_factory_index_from_tmr_results(
-    factory_list: list[Factory],
+    factory_pool: FactoryPool,
 ) -> AngleFactoryIndex:
     """
     Build an AngleFactoryIndex directly from TMR results.
@@ -20,8 +20,9 @@ def build_angle_factory_index_from_tmr_results(
     """
     angle_factory_index = AngleFactoryIndex()
 
-    for factory in factory_list:
-        if factory.tmr_state:
+    for factory in factory_pool.factories:
+        # for factory in factory_list:
+        if factory.tmr_state and factory.state == FactoryState.WAIT_FOR_RUS:
             qubit_id = factory.qubit
             assert qubit_id is not None, f"Factory {factory.id} has no qubit assigned"
             assert (
