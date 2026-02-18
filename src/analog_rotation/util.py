@@ -76,6 +76,7 @@ def execute_tmr_preparation_pre_rz(
     # Log TMR preparation for all active factories
     for fac in factories:
         for p in range(TMR_P):
+            fac.set_pre_tmr_state()
             write_execution_log(
                 execution_log,
                 circuit_moment + p,

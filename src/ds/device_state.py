@@ -128,6 +128,10 @@ class Factory:
         """Update the factory with new assignment."""
         self.qubit = qubit
 
+    def set_pre_tmr_state(self):
+        """Set the TMR preparation state."""
+        self.state = FactoryState.TMR_BEFORE_RZ
+
     def set_tmr_state(self, state: bool):
         """Set the TMR preparation state."""
         self.tmr_state = state

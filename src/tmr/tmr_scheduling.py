@@ -11,7 +11,7 @@ def schedule_tmr_round(
     tmr_assignment_method: str = "matching",
 ) -> list[Factory]:
     """Schedule TMR preparation for idle factories."""
-    idle_factories = factory_pool.get_idle_factories()
+    idle_factories = factory_pool.get_tmr_before_rz_factories()
     if not idle_factories or not qubit_trackers:
         return []
 

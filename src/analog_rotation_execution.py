@@ -180,7 +180,6 @@ def factory_angle_execution(
             circuit_moment,
             execution_log,
         )
-        print("new rus iter")
         while True:
             # qubit_factory_pairs: list[tuple(qubit, factory_id)]
             # routing batch: list of tuple (qubit, x_q, y_q, factory_id, x_f, y_f)
@@ -344,9 +343,11 @@ def factory_angle_execution_parallel(
                     factory_list = factory_pool.get_idle_factories()
                     if factory_list:
                         # Execute next round of TMR preparation
-                        execute_tmr_preparation_rz(
+                        execute_tmr_preparation_pre_rz(
                             factory_list, circuit_moment, execution_log, events=events
                         )
+
+                    # invoke RUS teleportation
 
                 elif event["type"] == "TMR_pre_RZ_completion":
                     factory_list = schedule_tmr_round(
