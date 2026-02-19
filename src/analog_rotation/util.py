@@ -8,6 +8,8 @@ from src.config import (
 from src.ds import move_duration
 from src.ds.device_state import FactoryPool
 from collections import defaultdict
+import heapq
+from itertools import count
 
 
 def write_execution_log(
@@ -60,7 +62,9 @@ def execute_tmr_preparation_pre_rz(
     factories: list,
     circuit_moment,
     execution_log,
-    events: defaultdict[float, list] | None = None,
+    events: list | None = None,
+    event_counter: count | None = None,
+    aod_id: int = 0,
 ):
     """
     PHASE 2: Execute TMR preparation (2 SE + Rz + 3 SE).
@@ -88,12 +92,13 @@ def execute_tmr_preparation_pre_rz(
     circuit_moment += TMR_P
 
     if events is not None:
-        events[circuit_moment].append(
-            {
-                "type": "TMR_pre_RZ_completion",
-                "factory_list": [fac.id for fac in factories],
-            }
-        )
+        assert circuit_moment is not None and event_counter is not None
+        task = {
+            "type": "TMR_pre_RZ_completion",
+            "factory_list": [fac.id for fac in factories],
+            "aod_id": aod_id,
+        }
+        heapq.heappush(events, (circuit_moment, next(event_counter), task))
 
     return circuit_moment, execution_log
 
@@ -102,7 +107,9 @@ def execute_tmr_preparation_rz(
     factories: list,
     circuit_moment,
     execution_log,
-    events: defaultdict[float, list] | None = None,
+    events: list | None = None,
+    event_counter: count | None = None,
+    aod_id: int = 0,
 ):
     """
     PHASE 2: Execute TMR preparation (2 SE + Rz + 3 SE).
@@ -146,13 +153,14 @@ def execute_tmr_preparation_rz(
 
     # Schedule completion event
     if events is not None:
-        assert circuit_moment is not None
-        events[circuit_moment].append(
-            {
-                "type": "TMR_completion",
-                "factory_list": [fac.id for fac in factories],
-            }
-        )
+        assert circuit_moment is not None and event_counter is not None
+        task = {
+            "type": "TMR_completion",
+            "factory_list": [fac.id for fac in factories],
+            "aod_id": aod_id,
+        }
+        heapq.heappush(events, (circuit_moment, next(event_counter), task))
+
     return circuit_moment, execution_log
 
 
@@ -281,3 +289,25 @@ def insert_s_gate(
         "S",
         qubit,
     )
+
+
+def clean_up_execution_log(
+    execution_log: list[tuple],
+    circuit_moment: float,
+) -> list[tuple]:
+    """
+    Clean up execution log by removing completed qubits and inserting S gates if needed.
+
+    Args:
+        execution_log: List of (start, end, factory_id, operation
+        circuit_moment: current time in the circuit execution
+    Returns:
+        Updated execution_log with S gates inserted and completed qubits removed
+    """  # This function is now integrated into update_qubit_state_per_teleportation
+    new_log = []
+    for entry in execution_log:
+        start, end, factory_id, operation, value = entry[:5]
+        if end <= circuit_moment:
+            # This teleportation has completed; we will handle state updates separately
+            new_log.append(entry)
+    return new_log

@@ -11,12 +11,14 @@ def schedule_tmr_round(
     tmr_assignment_method: str = "matching",
 ) -> list[Factory]:
     """Schedule TMR preparation for idle factories."""
-    idle_factories = factory_pool.get_tmr_before_rz_factories()
-    if not idle_factories or not qubit_trackers:
+    factories_ready_for_rz = factory_pool.get_tmr_before_rz_factories()
+    if not factories_ready_for_rz or not qubit_trackers:
         return []
 
     # Get angles to prepare
-    batch_angles = get_angles_for_preparation(qubit_trackers, len(idle_factories))
+    batch_angles = get_angles_for_preparation(
+        qubit_trackers, len(factories_ready_for_rz)
+    )
 
     if not batch_angles:
         return []
@@ -24,7 +26,7 @@ def schedule_tmr_round(
     # Assign factories
     assign_factories_for_batch(
         factory_pool,
-        idle_factories,
+        factories_ready_for_rz,
         qubit_trackers,
         logic_qubit_locations,
         batch_angles,
@@ -32,4 +34,4 @@ def schedule_tmr_round(
         method=tmr_assignment_method,
     )
 
-    return idle_factories
+    return factories_ready_for_rz

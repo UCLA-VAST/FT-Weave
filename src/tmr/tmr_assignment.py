@@ -71,7 +71,7 @@ def reassign_factories(
     Release factories that are no longer needed.
     """
     # return
-    busy_factories = factory_pool.get_busy_factories()
+    busy_factories = factory_pool.get_wait_for_rus_factories()
 
     cost_matrix = np.zeros((len(busy_factories), len(qubit_trackers)))
     angles_to_factory = defaultdict(list)

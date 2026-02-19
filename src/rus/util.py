@@ -35,6 +35,9 @@ def update_qubit_state_per_teleportation(
         if success:
             tracker.clear_all()
             qubit_trackers.pop(qubit)
+            print(
+                f"[update_qubit_state_per_teleportation] Qubit {qubit} successfully teleported with angle {teleportation_angle:.4f} at time {start_time:.2f}"
+            )
         elif np.isclose(ANGLE_S - teleportation_angle, 0.0, atol=1e-8):
             insert_s_gate(execution_log, start_time, -1, qubit)
             is_s_gate_inserted = True

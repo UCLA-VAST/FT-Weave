@@ -10,7 +10,11 @@ np.random.seed(1234)
 # Ensure repository root is on sys.path so `src` is importable when running tests
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.analog_rotation_execution import factory_angle_execution, get_microarchitecture
+from src.analog_rotation_execution import (
+    factory_angle_execution,
+    get_microarchitecture,
+    factory_angle_execution_parallel,
+)
 from src.ds import FactoryPool
 from src.util import analyze_execution_log, print_execution_profile
 from src.animator import (
@@ -108,6 +112,7 @@ def test(
     consider_skip_rus: bool = False,
     tmr_assignment_method: str = "matching",
     trivial_return: bool = False,
+    parallel_execution: bool = False,
 ):
     target_qubits_angles = {}
     if same_angle:
@@ -139,18 +144,31 @@ def test(
 
     # Run simulation
     factory_pool = FactoryPool(num_factories=n_factories)
-    total_time, log = factory_angle_execution(
-        factory_pool,
-        target_qubits_angles,
-        logic_qubit_locations,
-        magic_state_locations,
-        column_based_placement=column_based_placement,
-        n_aods=n_aods,
-        consider_skip_rus=consider_skip_rus,
-        tmr_assignment_method=tmr_assignment_method,
-        trivial_return=trivial_return,
-        rng=np.random.default_rng(42),
-    )
+    if parallel_execution:
+        total_time, log = factory_angle_execution_parallel(
+            factory_pool,
+            target_qubits_angles,
+            logic_qubit_locations,
+            magic_state_locations,
+            column_based_placement=column_based_placement,
+            n_aods=n_aods,
+            consider_skip_rus=consider_skip_rus,
+            tmr_assignment_method=tmr_assignment_method,
+            trivial_return=trivial_return,
+        )
+    else:
+        total_time, log = factory_angle_execution(
+            factory_pool,
+            target_qubits_angles,
+            logic_qubit_locations,
+            magic_state_locations,
+            column_based_placement=column_based_placement,
+            n_aods=n_aods,
+            consider_skip_rus=consider_skip_rus,
+            tmr_assignment_method=tmr_assignment_method,
+            trivial_return=trivial_return,
+            rng=np.random.default_rng(42),
+        )
 
     profiling_result = analyze_execution_log(log, n_factories=n_factories)
     print_execution_profile(profile=profiling_result)
@@ -202,10 +220,31 @@ if __name__ == "__main__":
     #     consider_skip_rus=True,
     # )
 
+    # test(
+    #     n_qubits=25,
+    #     n_factories=25,
+    #     qubit_layout=(5, 5),
+    #     # n_qubits=9,
+    #     # n_factories=9,
+    #     # qubit_layout=(3, 3),
+    #     same_angle=True,
+    #     # placement="seperate_region_row",
+    #     # placement="seperate_region_col",
+    #     # placement="row_based",
+    #     # placement="col_based",
+    #     placement="checkerboard",
+    #     visualize_rus=True,
+    #     prefix="",
+    #     n_aods=1,
+    #     consider_skip_rus=False,
+    #     tmr_assignment_method="matching",
+    #     trivial_return=False,
+    # )
+
     test(
-        n_qubits=25,
-        n_factories=25,
-        qubit_layout=(5, 5),
+        n_qubits=16,
+        n_factories=16,
+        qubit_layout=(4, 4),
         # n_qubits=9,
         # n_factories=9,
         # qubit_layout=(3, 3),
@@ -221,19 +260,5 @@ if __name__ == "__main__":
         consider_skip_rus=False,
         tmr_assignment_method="matching",
         trivial_return=False,
+        parallel_execution=True,
     )
-
-    # test(
-    #     n_qubits=25,
-    #     n_factories=25,
-    #     qubit_layout=(5, 5),
-    #     # n_qubits=9,
-    #     # n_factories=9,
-    #     # qubit_layout=(3, 3),
-    #     same_angle=True,
-    #     # placement="seperate_region_row",
-    #     placement="seperate_region_col",
-    #     # placement="row_based",
-    #     # placement="col_based",
-    #     visualize_rus=True,
-    # )
