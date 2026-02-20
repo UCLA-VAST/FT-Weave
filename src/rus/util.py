@@ -3,12 +3,7 @@ import numpy as np
 from src.config import (
     CNOT_TIME,
     SE_TIME,
-    TMR_P,
-    TMR_Q,
-    ANGLE_S,
     TMR_PREPARATION_TIME,
-    # THRESHOLD_HIGH_TMR,
-    # THRESHOLD_HIGH_RUS,
 )
 
 from src.ds import FactoryPool, QubitAngleTracker, move_duration
@@ -26,30 +21,22 @@ def update_qubit_state_per_teleportation(
     """
     Update qubit states
     """
-    is_s_gate_inserted = False
     for (qubit, factory_id), success in zip(qubit_factory_pairs, rus_simulation):
         tracker = qubit_trackers[qubit]
         teleportation_angle = tracker.target_angle
         # update device state as the angle is consumed by teleportation
-        factory_pool.free_factory(factory_id)
+
+        success, s_gate_inserted = tracker.update_rus_state(success)
         if success:
-            tracker.clear_all()
             qubit_trackers.pop(qubit)
             print(
                 f"[update_qubit_state_per_teleportation] Qubit {qubit} successfully teleported with angle {teleportation_angle:.4f} at time {start_time:.2f}"
             )
-        elif np.isclose(ANGLE_S - teleportation_angle, 0.0, atol=1e-8):
+        if s_gate_inserted:
             insert_s_gate(execution_log, start_time, -1, qubit)
-            is_s_gate_inserted = True
+            start_time += SE_TIME
             tracker.clear_all()
             qubit_trackers.pop(qubit)
-        else:
-            _ = tracker.remove_angle(teleportation_angle)
-            tracker.double_target_angle()
-            if tracker.target_angle > ANGLE_S:
-                is_s_gate_inserted = True
-                insert_s_gate(execution_log, start_time, -1, qubit)
-                tracker.set_target_angle(tracker.target_angle - ANGLE_S)
 
     # for qubit in qubit_trackers.keys():
     #     tracker = qubit_trackers[qubit]
@@ -59,7 +46,7 @@ def update_qubit_state_per_teleportation(
     #         insert_s_gate(execution_log, start_time, -1, qubit)
     #         is_s_gate_inserted = True
 
-    return start_time + (SE_TIME if is_s_gate_inserted else 0)
+    return start_time
 
 
 def check_teleportation_worthiness(

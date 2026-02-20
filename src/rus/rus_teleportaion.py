@@ -30,6 +30,9 @@ def rus_teleportation(
     )
     if not qubit_factory_pairs:
         return [], []
+    for qubit, factory_id in qubit_factory_pairs:
+        factory = factory_pool.get_factory_by_id(factory_id)
+        factory.set_to_rus()
     # routing
     # batch: list of tuple (qubit, x_q, y_q, factory_id, x_f, y_f, reverse)
     routing_batches = two_layer_routing(

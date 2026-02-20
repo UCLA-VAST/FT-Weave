@@ -8,4 +8,5 @@ from src.analog_rotation.util import (
     write_tmr_result_log,
     write_rus_result_log,
     clean_up_execution_log,
+    validate_execution_log,
 )

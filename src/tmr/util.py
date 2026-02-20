@@ -46,7 +46,12 @@ def update_factory_states_post_tmr(
     for factory in factory_list:
         if factory.tmr_state is False:
             qubit_id = factory.qubit
-            assert qubit_id is not None, f"Factory {factory.id} has no qubit assigned"
-            tracker = qubit_trackers[qubit_id]
-            tracker.remove_factory(factory.id, factory.angle)
+            assert (
+                qubit_id is not None
+            ), f"Factory {factory.id} with angle {factory.angle} has no qubit assigned"
+            if qubit_id in qubit_trackers:
+                tracker = qubit_trackers[qubit_id]
+                print("qubit id: ", qubit_id)
+                print("tracker: ", tracker)
+                tracker.remove_factory(factory.id, factory.angle)
             factory_pool.free_factory(factory.id)

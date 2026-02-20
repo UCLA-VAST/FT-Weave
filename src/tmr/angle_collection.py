@@ -21,6 +21,9 @@ def get_angles_for_preparation(
     sum_demands = 0
     for qubit, tracker in qubit_trackers.items():
         level_demand = 1
+        if tracker.waiting_for_rus:
+            level_demand = 2
+
         for level in range(0, 2):
             angle = tracker.target_angle * pow(2, level)
             if np.isclose(angle, 0.0, atol=1e-8):
@@ -48,7 +51,7 @@ def get_angles_for_preparation(
     # print("Allocating factories for qubits:")
     # print(allocation)
     for qubit, tracker in qubit_trackers.items():
-        if allocation[qubit] < 1:
+        if qubit not in allocation or allocation[qubit] < 1:
             continue
         level_demand = 1
         demands = {}
@@ -86,8 +89,8 @@ def get_angles_for_preparation(
     count = 0
     for allocation in qubit_angle_factories.values():
         count += sum(allocation.values())
+    print(f"count: {count}, n_available_factories: {n_available_factories}")
     assert count == n_available_factories
-    # print(f"count: {count}, n_available_factories: {n_available_factories}")
     # input()
     return qubit_angle_factories
 

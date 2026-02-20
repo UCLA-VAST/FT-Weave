@@ -9,9 +9,15 @@ def schedule_tmr_round(
     logic_qubit_locations: list[tuple[int, int]],
     column_based_placement: bool = True,
     tmr_assignment_method: str = "matching",
+    factories_lists: list[int] | None = None,
 ) -> list[Factory]:
     """Schedule TMR preparation for idle factories."""
-    factories_ready_for_rz = factory_pool.get_tmr_before_rz_factories()
+    if factories_lists is None:
+        factories_ready_for_rz = factory_pool.get_tmr_before_rz_factories()
+    else:
+        factories_ready_for_rz = [
+            factory_pool.get_factory_by_id(factory_id) for factory_id in factories_lists
+        ]
     if not factories_ready_for_rz or not qubit_trackers:
         return []
 
@@ -22,7 +28,7 @@ def schedule_tmr_round(
 
     if not batch_angles:
         return []
-
+    print(f"Scheduling TMR for batch angles: {batch_angles}")
     # Assign factories
     assign_factories_for_batch(
         factory_pool,

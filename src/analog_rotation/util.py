@@ -252,11 +252,13 @@ def execute_movement(
     #     input()
     # Sort by movement time descending
     move_time_idx_pairs.sort(reverse=True)
+    end_time = 0
     for movement_time, idx in move_time_idx_pairs:
         # Assign to the earliest available AOD
         aod_idx = aod_earliest_available_time.index(min(aod_earliest_available_time))
         start_time = max(circuit_moment, aod_earliest_available_time[aod_idx])
         aod_earliest_available_time[aod_idx] = start_time + movement_time
+        end_time = max(end_time, aod_earliest_available_time[aod_idx])
         for _, x_q, y_q, factory_id, x_f, y_f in routing_batches[idx]:
 
             movement_strs = [f"({x_f},{y_f})", f"({x_q},{y_q})"]
@@ -270,7 +272,7 @@ def execute_movement(
                 move_vecs=movement_strs,
                 aod_assignment=aod_idx,
             )
-    return max(aod_earliest_available_time)
+    return end_time
 
 
 def insert_s_gate(
@@ -311,3 +313,58 @@ def clean_up_execution_log(
             # This teleportation has completed; we will handle state updates separately
             new_log.append(entry)
     return new_log
+
+
+def validate_execution_log(
+    execution_log: list[tuple],
+    magic_state_locations: list[tuple[int, int]],
+):
+    """
+    Validate the execution log to ensure all target qubits have been teleported with correct angles.
+
+    Args:
+        execution_log: List of execution event tuples with format:
+            (start_time, end_time, factory_id, operation, target, ...)
+        target_qubits_angles: List of target angles for each qubit
+        logic_qubit_locations: List of locations for logic qubits
+        magic_state_locations: List of locations for magic state factories
+
+    Raises:
+        AssertionError: If validation fails
+    """
+    # Check 1: At any time, one factory is involved in at most one operation
+    factory_time_intervals = [
+        [(-1, "init", None)] for _ in range(len(magic_state_locations))
+    ]
+
+    for entry in execution_log:
+        start_time = entry[0]
+        end_time = entry[1]
+        factory_id = entry[2]
+        operation = entry[3]
+        value = entry[4]
+
+        # Skip barrier and special operations
+        if operation in ["Barrier", "RUS_success", "RUS_fail"]:
+            continue
+
+        # Check for overlapping time intervals for the same factory
+        if start_time < factory_time_intervals[factory_id][-1][0]:
+            raise AssertionError(
+                f"Factory {factory_id} is involved in overlapping operations {operation} at time {start_time}"
+                f" and {factory_time_intervals[factory_id][-1][1]} at time {factory_time_intervals[factory_id][-1][0]}"
+            )
+
+        if operation == "Rz":
+            for _, fac_op, fac_val in factory_time_intervals[factory_id][-3:]:
+                assert (
+                    fac_op == "SE" and fac_val is None
+                ), f"Expected SE before Rz for factory {factory_id}, but got {fac_op} with value {fac_val}"
+
+        if operation == "tmr_fail" or operation == "move":
+            for _, fac_op, fac_val in factory_time_intervals[factory_id][-2:]:
+                assert (
+                    fac_op == "SE" and fac_val is not None
+                ), f"Expected SE before TMR failure for factory {factory_id}, but got {fac_op} with value {fac_val}"
+
+        factory_time_intervals[factory_id].append((end_time, operation, value))

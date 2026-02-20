@@ -6,6 +6,18 @@ from typing import Optional
 import numpy as np
 from ..config import PRECISION
 
+
+from src.config import (
+    CNOT_TIME,
+    SE_TIME,
+    TMR_P,
+    TMR_Q,
+    ANGLE_S,
+    TMR_PREPARATION_TIME,
+    # THRESHOLD_HIGH_TMR,
+    # THRESHOLD_HIGH_RUS,
+)
+
 # ============================================================================
 # DATA STRUCTURES
 # ============================================================================
@@ -37,6 +49,7 @@ class QubitAngleTracker:
         self.target_angle = target_angle
         self.factories: list[tuple[int, float]] = []  # List of (factory_id, angle)
         self.angle_counts = Counter()  # angle -> count
+        self.waiting_for_rus = False
 
     def add_factory(self, factory_id, angle):
         """Add a factory working on a specific angle."""
@@ -45,12 +58,6 @@ class QubitAngleTracker:
 
     def remove_factory(self, factory_id, angle):
         """Remove a factory from tracking."""
-        assert (
-            factory_id,
-            angle,
-        ) in self.factories, (
-            f"Factory {factory_id} with angle {angle} not found in {self.factories}"
-        )
         self.factories = [(fid, a) for fid, a in self.factories if fid != factory_id]
         self.angle_counts[angle] -= 1
         if self.angle_counts[angle] == 0:
@@ -90,6 +97,29 @@ class QubitAngleTracker:
 
     def set_target_angle(self, angle):
         self.target_angle = angle
+
+    def set_waiting_for_rus(self):
+        self.waiting_for_rus = True
+
+    def update_rus_state(self, success: bool) -> tuple[bool, bool]:
+        insert_s_gate = False
+        if success:
+            self.clear_all()
+        else:
+            _ = self.remove_angle(self.target_angle)
+            self.double_target_angle()
+            diff_s = self.target_angle - ANGLE_S
+            if np.isclose(diff_s, 0.0, atol=1e-8):
+                insert_s_gate = True
+                success = True  # Treat as successful teleportation for state tracking
+                self.clear_all()
+            elif diff_s > 0:
+                insert_s_gate = True
+                self.set_target_angle(self.target_angle - ANGLE_S)
+
+        self.waiting_for_rus = False
+
+        return success, insert_s_gate
 
     def __repr__(self):
         return f"QubitTracker(qubit={self.qubit_id}, target={self.target_angle}, factories={len(self.factories)})"
@@ -144,7 +174,7 @@ class Factory:
     def set_rus_state(self, state: bool):
         """Set the RUS injection state."""
         self.rus_state = state
-        self.state = FactoryState.IDLE
+        # self.state = FactoryState.IDLE
 
     def set_location(self, loc: tuple[int, int]):
         self.location = loc
@@ -161,21 +191,16 @@ class FactoryPool:
     Attributes:
         factories: List of Factory objects
         num_factories: Total number of factories
-        num_idle_factories: Number of idle factories
-        num_busy_factories: Number of busy factories
     """
 
     num_factories: int
     factories: list[Factory] = field(default_factory=list)
-    num_idle_factories: int = field(init=False)
-    num_busy_factories: int = 0
     avaliable_factories_per_row: defaultdict[int, int] = field(
         default_factory=defaultdict
     )
 
     def __post_init__(self):
         self.factories = [Factory(id=i) for i in range(self.num_factories)]
-        self.num_idle_factories = self.num_factories
         self.avaliable_factories_per_row = defaultdict(int)
 
     def set_locations(self, locations: list[tuple[int, int]]):
@@ -183,15 +208,11 @@ class FactoryPool:
             factory.set_location(loc)
             self.avaliable_factories_per_row[loc[1]] += 1
 
-    def get_num_idle_factories(self):
-        return self.num_idle_factories
-
-    def get_num_busy_factories(self):
-        return self.num_busy_factories
-
     def get_idle_factories(self) -> list[Factory]:
         """Return a list of idle factories."""
-        return [factory for factory in self.factories if factory.angle is None]
+        return [
+            factory for factory in self.factories if factory.state == FactoryState.IDLE
+        ]
 
     def get_busy_factories(self) -> list[Factory]:
         """Return a list of idle factories."""
@@ -223,8 +244,6 @@ class FactoryPool:
         factory = self.get_factory_by_id(factory_id)
         if factory and factory.angle is not None:
             factory.free()
-            self.num_idle_factories += 1
-            self.num_busy_factories -= 1
             loc = factory.location
             self.avaliable_factories_per_row[loc[1]] += 1
 
@@ -235,10 +254,8 @@ class FactoryPool:
         factory = self.get_factory_by_id(factory_id)
         if factory and factory.angle is None:
             factory.update(angle, qubit, success_rate)
-            self.num_idle_factories -= 1
-            self.num_busy_factories += 1
             loc = factory.location
             self.avaliable_factories_per_row[loc[1]] -= 1
 
     def __repr__(self):
-        return f"FactoryPool(num_factories={self.num_factories}, idle={self.num_idle_factories}, busy={self.num_busy_factories})"
+        return f"FactoryPool(num_factories={self.num_factories})"

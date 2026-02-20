@@ -109,6 +109,7 @@ def test(
     placement: str = "seperate_region",
     prefix: str = "",
     n_aods: int = 1,
+    n_aods_se: int = 1,
     consider_skip_rus: bool = False,
     tmr_assignment_method: str = "matching",
     trivial_return: bool = False,
@@ -152,9 +153,11 @@ def test(
             magic_state_locations,
             column_based_placement=column_based_placement,
             n_aods=n_aods,
+            n_aods_se=n_aods_se,
             consider_skip_rus=consider_skip_rus,
             tmr_assignment_method=tmr_assignment_method,
             trivial_return=trivial_return,
+            rng=np.random.default_rng(42),
         )
     else:
         total_time, log = factory_angle_execution(
@@ -182,7 +185,7 @@ def test(
     pdf_path = f"output/circuit_execution/{base_path}"
     plot_circuit_execution(log, n_factories, figure_width=50, save_path=pdf_path)
 
-    if visualize_rus:
+    if not parallel_execution and visualize_rus:
         # Generate RUS round visualizations
         pdf_path = os.path.join("output", f"rus_rounds_detailed/{base_path}")
         plot_all_rus_rounds(
@@ -256,7 +259,8 @@ if __name__ == "__main__":
         placement="checkerboard",
         visualize_rus=True,
         prefix="",
-        n_aods=1,
+        n_aods=3,
+        n_aods_se=3,
         consider_skip_rus=False,
         tmr_assignment_method="matching",
         trivial_return=False,

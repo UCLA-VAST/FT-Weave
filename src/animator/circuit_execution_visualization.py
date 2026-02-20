@@ -137,8 +137,10 @@ def plot_circuit_execution(
                     text = f"{operation}\nθ:{value}"
                 elif operation in ["move", "return_move"] and move_vecs:
                     text = f"{operation}\n{move_vecs[0]}\n->{move_vecs[1]}"
-                else:
+                elif value is not None:
                     text = f"{operation}\nQ{value}"
+                else:
+                    text = f"{operation}"
 
                 ax.text(
                     start_time + duration / 2,
@@ -319,8 +321,10 @@ def plot_circuit_execution_vertical(
                     text = f"{operation}\nθ:{value}"
                 elif operation in ["move", "return_move"] and move_vecs:
                     text = f"{operation}\n{move_vecs[0]}\n->{move_vecs[1]}"
-                else:
+                elif value is not None:
                     text = f"{operation}\nQ{value}"
+                else:
+                    text = f"{operation}"
 
                 ax.text(
                     factory_id,

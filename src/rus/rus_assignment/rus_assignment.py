@@ -37,11 +37,15 @@ def assign_teleportation_with_sharing(
     for qubit in qubit_trackers:
         # Get the angle for this qubit (first generation ready for injection)
         tracker = qubit_trackers[qubit]
-        angle = tracker.target_angle
-        angle_to_qubits[angle].append(qubit)
+        # if tracker is waiting for RUS,
+        # it means it has been assigned to use state from
+        # other factory so do not need to assign in this batch
+        if not tracker.waiting_for_rus:
+            angle = tracker.target_angle
+            angle_to_qubits[angle].append(qubit)
 
     qubit_factory_pairs = []
-    assigned_qubits = set()
+    # assigned_qubits = set()
     # print(f"angle_to_qubits: {angle_to_qubits}")
     # Process each angle group separately
     for angle, qubits_for_angle in angle_to_qubits.items():
@@ -70,7 +74,8 @@ def assign_teleportation_with_sharing(
         )
 
         qubit_factory_pairs.extend(matches)
-        assigned_qubits.update([q for q, _ in matches])
+        for q, _ in matches:
+            qubit_trackers[q].set_waiting_for_rus()
 
     # Handle any remaining qubits not in angle groups (shouldn't happen in normal flow)
     # for qubit in qubit_trackers:
