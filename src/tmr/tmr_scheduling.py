@@ -9,14 +9,14 @@ def schedule_tmr_round(
     logic_qubit_locations: list[tuple[int, int]],
     column_based_placement: bool = True,
     tmr_assignment_method: str = "matching",
-    factories_lists: list[int] | None = None,
+    factories_list: list[int] | None = None,
 ) -> list[Factory]:
     """Schedule TMR preparation for idle factories."""
-    if factories_lists is None:
+    if factories_list is None:
         factories_ready_for_rz = factory_pool.get_tmr_before_rz_factories()
     else:
         factories_ready_for_rz = [
-            factory_pool.get_factory_by_id(factory_id) for factory_id in factories_lists
+            factory_pool.get_factory_by_id(factory_id) for factory_id in factories_list
         ]
     if not factories_ready_for_rz or not qubit_trackers:
         return []

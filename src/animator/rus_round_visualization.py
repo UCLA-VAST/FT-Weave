@@ -33,6 +33,23 @@ def get_aod_border_color(aod_idx: int) -> str:
     return aod_colors[aod_idx % len(aod_colors)]
 
 
+def _normalize_entry_factories(factory_id):
+    """Convert factory_id to list for consistency."""
+    if isinstance(factory_id, int):
+        return [factory_id]
+    elif factory_id is None:
+        return []
+    else:
+        return list(factory_id)
+
+
+def _resolve_entry_value(values, idx: int):
+    """Resolve per-factory value from entry."""
+    if isinstance(values, list) and idx < len(values):
+        return values[idx]
+    return values
+
+
 def extract_rus_rounds(execution_log: List[Tuple]) -> List[List[Tuple]]:
     """
     Extract RUS rounds from execution log.
@@ -123,42 +140,48 @@ def extract_assignments_from_round(
         if len(entry) < 4:
             continue
         operation = entry[3]
-        factory_id = entry[2]
+        factory_ids = _normalize_entry_factories(entry[2])
         move_vecs = entry[5] if len(entry) > 5 else None
         qubit_value = entry[4] if len(entry) > 4 else None
 
         # Look for move operations or injection operations (CNOT/SE + RUS_success/RUS_fail)
-        if operation == "move" and move_vecs:
-            # move/return_move operations have move_vecs = [from_loc_str, to_loc_str]
-            # Extract destination location and find qubit_id
-            if len(move_vecs) >= 2:
-                to_loc_str = move_vecs[1]  # e.g., "(0,0)"
-                # Parse the location string
-                try:
-                    loc_str = to_loc_str.strip("()")
-                    x, y = map(int, loc_str.split(","))
-                    qubit_loc = (x, y)
-                    if qubit_loc in location_to_qubit:
-                        qubit_id = location_to_qubit[qubit_loc]
-                        assignments[factory_id] = qubit_id
-                except (ValueError, IndexError):
-                    pass
-        elif operation == "return_move" and move_vecs:
-            # move/return_move operations have move_vecs = [from_loc_str, to_loc_str]
-            # Extract destination location and find qubit_id
-            if len(move_vecs) >= 2:
-                to_loc_str = move_vecs[1]  # e.g., "(0,0)"
-                # Parse the location string
-                try:
-                    loc_str = to_loc_str.strip("()")
-                    x, y = map(int, loc_str.split(","))
-                    return_assignments[factory_id] = (x, y)
-                except (ValueError, IndexError):
-                    pass
-        elif operation in ["RUS_success", "RUS_fail"]:
-            # Use the qubit from RUS result marker (qubit_value)
-            if qubit_value is not None and factory_id is not None and factory_id >= 0:
-                assignments[factory_id] = qubit_value
+        for idx, factory_id in enumerate(factory_ids):
+            if operation == "move" and move_vecs:
+                # move/return_move operations have move_vecs = [[from, to], [from, to], ...]
+                factory_move_vecs = _resolve_entry_value(move_vecs, idx)
+                if factory_move_vecs and len(factory_move_vecs) >= 2:
+                    to_loc_str = factory_move_vecs[1]  # e.g., "(0,0)"
+                    # Parse the location string
+                    try:
+                        loc_str = to_loc_str.strip("()")
+                        x, y = map(int, loc_str.split(","))
+                        qubit_loc = (x, y)
+                        if qubit_loc in location_to_qubit:
+                            qubit_id = location_to_qubit[qubit_loc]
+                            assignments[factory_id] = qubit_id
+                    except (ValueError, IndexError):
+                        pass
+            elif operation == "return_move" and move_vecs:
+                # move/return_move operations have move_vecs = [[from, to], [from, to], ...]
+                factory_move_vecs = _resolve_entry_value(move_vecs, idx)
+                if factory_move_vecs and len(factory_move_vecs) >= 2:
+                    to_loc_str = factory_move_vecs[1]  # e.g., "(0,0)"
+                    # Parse the location string
+                    try:
+                        loc_str = to_loc_str.strip("()")
+                        x, y = map(int, loc_str.split(","))
+                        return_assignments[factory_id] = (x, y)
+                    except (ValueError, IndexError):
+                        pass
+            elif operation in ["RUS_success", "RUS_fail"]:
+                # Use the qubit from RUS result marker (qubit_value)
+                factory_qubit = _resolve_entry_value(qubit_value, idx)
+                if (
+                    factory_qubit is not None
+                    and factory_id is not None
+                    and factory_id >= 0
+                ):
+                    assignments[factory_id] = factory_qubit
 
     return (assignments, return_assignments)
 
@@ -179,12 +202,14 @@ def extract_rus_results(rus_round: List[Tuple]) -> Dict[int, bool]:
         if len(entry) < 4:
             continue
         operation = entry[3]
-        factory_id = entry[2]
+        factory_ids = _normalize_entry_factories(entry[2])
 
         if operation == "RUS_success":
-            results[factory_id] = True
+            for factory_id in factory_ids:
+                results[factory_id] = True
         elif operation == "RUS_fail":
-            results[factory_id] = False
+            for factory_id in factory_ids:
+                results[factory_id] = False
 
     return results
 
@@ -205,10 +230,11 @@ def extract_tmr_failures(rus_round: List[Tuple]) -> set:
         if len(entry) < 4:
             continue
         operation = entry[3]
-        factory_id = entry[2]
+        factory_ids = _normalize_entry_factories(entry[2])
 
         if operation == "TMR_fail":
-            tmr_failures.add(factory_id)
+            for factory_id in factory_ids:
+                tmr_failures.add(factory_id)
 
     return tmr_failures
 
@@ -232,23 +258,30 @@ def extract_angles_from_round(
 
     for entry in rus_round:
         if len(entry) == 5:
-            _, _, factory_id, operation, value = entry
+            _, _, factory_ids, operation, value = entry
         else:
             continue
+        factory_ids = _normalize_entry_factories(factory_ids)
         if operation == "Rz":
             # Rz operation shows angle preparation
-            factory_angles[factory_id] = value
+            for idx, factory_id in enumerate(factory_ids):
+                factory_value = _resolve_entry_value(value, idx)
+                factory_angles[factory_id] = factory_value
         elif operation in ["CNOT", "SE"]:
             # These operations have a qubit value
             if value is not None:
-                qubit = value
-                if factory_id in factory_angles:
-                    if qubit in qubit_angles:
-                        qubit_angles[qubit] = min(
-                            qubit_angles[qubit], factory_angles[factory_id]
-                        )
-                    else:
-                        qubit_angles[qubit] = factory_angles[factory_id]
+                for idx, factory_id in enumerate(factory_ids):
+                    factory_value = _resolve_entry_value(value, idx)
+                    if isinstance(factory_value, int):
+                        qubit = factory_value
+                        if factory_id in factory_angles:
+                            if qubit in qubit_angles:
+                                qubit_angles[qubit] = min(
+                                    qubit_angles[qubit],
+                                    factory_angles[factory_id],
+                                )
+                            else:
+                                qubit_angles[qubit] = factory_angles[factory_id]
     return qubit_angles, factory_angles
 
 

@@ -37,6 +37,39 @@ def get_aod_border_color(aod_idx: int) -> str:
     return aod_colors[aod_idx % len(aod_colors)]
 
 
+def _parse_execution_entry(entry: tuple) -> tuple:
+    if len(entry) == 6:
+        start_time, end_time, factory_id, operation, aod_assignment, value = entry
+        move_vecs = None
+    elif len(entry) == 7:
+        (
+            start_time,
+            end_time,
+            factory_id,
+            operation,
+            aod_assignment,
+            value,
+            move_vecs,
+        ) = entry
+    else:
+        raise ValueError(f"Unexpected log entry format: {entry}")
+
+    if isinstance(factory_id, int):
+        factories = [factory_id]
+    elif factory_id is None:
+        factories = []
+    else:
+        factories = list(factory_id)
+
+    return start_time, end_time, factories, operation, aod_assignment, value, move_vecs
+
+
+def _resolve_factory_value(values, idx: int):
+    if isinstance(values, list) and idx < len(values):
+        return values[idx]
+    return values
+
+
 # ============================================================================
 # VISUALIZATION FUNCTION
 # ============================================================================
@@ -62,23 +95,15 @@ def plot_circuit_execution(
 
     # Plot each operation as a rectangle
     for entry in execution_log:
-        if len(entry) == 5:
-            start_time, end_time, factory_id, operation, value = entry
-            move_vecs = None
-            aod_assignment = 0
-        elif len(entry) == 6:
-            start_time, end_time, factory_id, operation, value, move_vecs = entry
-            aod_assignment = 0
-        else:
-            (
-                start_time,
-                end_time,
-                factory_id,
-                operation,
-                value,
-                move_vecs,
-                aod_assignment,
-            ) = entry
+        (
+            start_time,
+            end_time,
+            factories,
+            operation,
+            aod_assignment,
+            value,
+            move_vecs,
+        ) = _parse_execution_entry(entry)
         duration = end_time - start_time
         if duration == 0:
             duration = 0.1
@@ -118,40 +143,44 @@ def plot_circuit_execution(
             else:
                 zorder = 0
 
-            rect = mpatches.Rectangle(
-                (start_time, factory_id - 0.4),
-                duration,
-                0.8,
-                facecolor=color,
-                edgecolor=border_color,
-                linewidth=border_width,
-                zorder=zorder,
-                alpha=alpha,
-            )
-            ax.add_patch(rect)
+            for idx, factory_id in enumerate(factories):
+                factory_value = _resolve_factory_value(value, idx)
+                factory_move_vecs = _resolve_factory_value(move_vecs, idx)
 
-            if operation not in no_text_operations:
-                if operation == "Rz":
-                    text = f"{operation}\nθ:{value}"
-                elif operation == "S":
-                    text = f"{operation}\nθ:{value}"
-                elif operation in ["move", "return_move"] and move_vecs:
-                    text = f"{operation}\n{move_vecs[0]}\n->{move_vecs[1]}"
-                elif value is not None:
-                    text = f"{operation}\nQ{value}"
-                else:
-                    text = f"{operation}"
-
-                ax.text(
-                    start_time + duration / 2,
-                    factory_id,
-                    text,
-                    ha="center",
-                    va="center",
-                    fontsize=7,
-                    fontweight="bold",
-                    color="black",
+                rect = mpatches.Rectangle(
+                    (start_time, factory_id - 0.4),
+                    duration,
+                    0.8,
+                    facecolor=color,
+                    edgecolor=border_color,
+                    linewidth=border_width,
+                    zorder=zorder,
+                    alpha=alpha,
                 )
+                ax.add_patch(rect)
+
+                if operation not in no_text_operations:
+                    if operation == "Rz":
+                        text = f"{operation}\nθ:{factory_value}"
+                    elif operation == "S":
+                        text = f"{operation}\nθ:{factory_value}"
+                    elif operation in ["move", "return_move"] and factory_move_vecs:
+                        text = f"{operation}\n{factory_move_vecs[0]}\n->{factory_move_vecs[1]}"
+                    elif factory_value is not None:
+                        text = f"{operation}\nQ{factory_value}"
+                    else:
+                        text = f"{operation}"
+
+                    ax.text(
+                        start_time + duration / 2,
+                        factory_id,
+                        text,
+                        ha="center",
+                        va="center",
+                        fontsize=7,
+                        fontweight="bold",
+                        color="black",
+                    )
 
     # Configure axes
     ax.set_xlim(0, max(max(e[1] for e in execution_log), ylim) * 1.01)
@@ -240,27 +269,19 @@ def plot_circuit_execution_vertical(
         return
 
     circuit_length = len(execution_log)
-    fig, ax = plt.subplots(figsize=(max(6, n_factories * 0.8), circuit_length / 10))
+    fig, ax = plt.subplots(figsize=(max(6, n_factories * 0.8), circuit_length / 5))
 
     # Plot each operation as a rectangle
     for entry in execution_log:
-        if len(entry) == 5:
-            start_time, end_time, factory_id, operation, value = entry
-            move_vecs = None
-            aod_assignment = 0
-        elif len(entry) == 6:
-            start_time, end_time, factory_id, operation, value, move_vecs = entry
-            aod_assignment = 0
-        else:
-            (
-                start_time,
-                end_time,
-                factory_id,
-                operation,
-                value,
-                move_vecs,
-                aod_assignment,
-            ) = entry
+        (
+            start_time,
+            end_time,
+            factories,
+            operation,
+            aod_assignment,
+            value,
+            move_vecs,
+        ) = _parse_execution_entry(entry)
 
         duration = end_time - start_time
         if duration == 0:
@@ -300,42 +321,46 @@ def plot_circuit_execution_vertical(
             else:
                 zorder = 0
 
-            # Swap coordinates: factory_id on x-axis, time on y-axis
-            # Rectangle: (x, y), width (horizontal = factory dimension), height (vertical = time dimension)
-            rect = mpatches.Rectangle(
-                (factory_id - 0.4, start_time),
-                0.8,
-                duration,
-                facecolor=color,
-                edgecolor=border_color,
-                alpha=alpha,  # Lighter for early moves, darker for later
-                linewidth=border_width,
-                zorder=zorder,
-            )
-            ax.add_patch(rect)
+            for idx, factory_id in enumerate(factories):
+                factory_value = _resolve_factory_value(value, idx)
+                factory_move_vecs = _resolve_factory_value(move_vecs, idx)
 
-            if operation not in no_text_operations:
-                if operation == "Rz":
-                    text = f"{operation}\nθ:{value}"
-                elif operation == "S":
-                    text = f"{operation}\nθ:{value}"
-                elif operation in ["move", "return_move"] and move_vecs:
-                    text = f"{operation}\n{move_vecs[0]}\n->{move_vecs[1]}"
-                elif value is not None:
-                    text = f"{operation}\nQ{value}"
-                else:
-                    text = f"{operation}"
-
-                ax.text(
-                    factory_id,
-                    start_time + duration / 2,
-                    text,
-                    ha="center",
-                    va="center",
-                    fontsize=7,
-                    fontweight="bold",
-                    color="black",
+                # Swap coordinates: factory_id on x-axis, time on y-axis
+                # Rectangle: (x, y), width (horizontal = factory dimension), height (vertical = time dimension)
+                rect = mpatches.Rectangle(
+                    (factory_id - 0.4, start_time),
+                    0.8,
+                    duration,
+                    facecolor=color,
+                    edgecolor=border_color,
+                    alpha=alpha,  # Lighter for early moves, darker for later
+                    linewidth=border_width,
+                    zorder=zorder,
                 )
+                ax.add_patch(rect)
+
+                if operation not in no_text_operations:
+                    if operation == "Rz":
+                        text = f"{operation}\nθ:{factory_value}"
+                    elif operation == "S":
+                        text = f"{operation}\nθ:{factory_value}"
+                    elif operation in ["move", "return_move"] and factory_move_vecs:
+                        text = f"{operation}\n{factory_move_vecs[0]}\n->{factory_move_vecs[1]}"
+                    elif factory_value is not None:
+                        text = f"{operation}\nQ{factory_value}"
+                    else:
+                        text = f"{operation}"
+
+                    ax.text(
+                        factory_id,
+                        start_time + duration / 2,
+                        text,
+                        ha="center",
+                        va="center",
+                        fontsize=7,
+                        fontweight="bold",
+                        color="black",
+                    )
 
     # Configure axes
     # Invert y-axis so time goes from top to bottom

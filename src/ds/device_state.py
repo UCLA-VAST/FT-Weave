@@ -44,20 +44,37 @@ class QubitAngleTracker:
         angle_counts: Counter tracking how many factories are preparing each angle
     """
 
-    def __init__(self, qubit_id, target_angle):
+    def __init__(self, qubit_id, target_angle, factory_limit):
         self.qubit_id = round(qubit_id, PRECISION)
         self.target_angle = target_angle
         self.factories: list[tuple[int, float]] = []  # List of (factory_id, angle)
         self.angle_counts = Counter()  # angle -> count
         self.waiting_for_rus = False
+        self.factory_limit = factory_limit
 
     def add_factory(self, factory_id, angle):
         """Add a factory working on a specific angle."""
+        # print(
+        #     "[QubitAngleTracker] Adding factory {} for qubit {} preparing angle {:.4f}".format(
+        #         factory_id, self.qubit_id, angle
+        #     )
+        # )
+        assert factory_id not in [
+            fid for fid, _ in self.factories
+        ], f"Factory {factory_id} already assigned to qubit {self.qubit_id}"
         self.factories.append((factory_id, angle))
         self.angle_counts[angle] += 1
+        assert (
+            len(self.factories) <= self.factory_limit
+        ), f"Factory limit exceeded for qubit {self.qubit_id}: {self.factories}"
 
     def remove_factory(self, factory_id, angle):
         """Remove a factory from tracking."""
+        print(
+            "[QubitAngleTracker] Removing factory {} for qubit {} that was preparing angle {:.4f}".format(
+                factory_id, self.qubit_id, angle
+            )
+        )
         self.factories = [(fid, a) for fid, a in self.factories if fid != factory_id]
         self.angle_counts[angle] -= 1
         if self.angle_counts[angle] == 0:

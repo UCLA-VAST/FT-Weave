@@ -1,14 +1,20 @@
 import os
 import sys
-
+import logging
 
 import numpy as np
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 np.random.seed(1234)
 
 # Ensure repository root is on sys.path so `src` is importable when running tests
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+logger = logging.getLogger(__name__)
 
 from src.analog_rotation_execution import (
     factory_angle_execution,
@@ -80,12 +86,12 @@ def test_small():
     for x, y in magic_state_locations:
         facoty_qubit_map[x][y] = 2
 
-    print("=" * 70)
-    print("MAGIC STATE FACTORY ANGLE EXECUTION SIMULATION")
-    print("=" * 70)
-    print(f"Number of factories: {n_factories}")
-    print(f"Target qubit angles: {target_qubits_angles}")
-    print("=" * 70 + "\n")
+    logger.info("=" * 70)
+    logger.info("MAGIC STATE FACTORY ANGLE EXECUTION SIMULATION")
+    logger.info("=" * 70)
+    logger.info(f"Number of factories: {n_factories}")
+    logger.info(f"Target qubit angles: {target_qubits_angles}")
+    logger.info("=" * 70 + "\n")
 
     # Run simulation
     factory_pool = FactoryPool(num_factories=n_factories)
@@ -136,12 +142,12 @@ def test(
         placement,
     )
 
-    print("=" * 70)
-    print("MAGIC STATE FACTORY ANGLE EXECUTION SIMULATION")
-    print("=" * 70)
-    print(f"Number of factories: {n_factories}")
-    print(f"Target qubit angles: {target_qubits_angles}")
-    print("=" * 70 + "\n")
+    logger.info("=" * 70)
+    logger.info("MAGIC STATE FACTORY ANGLE EXECUTION SIMULATION")
+    logger.info("=" * 70)
+    logger.info(f"Number of factories: {n_factories}")
+    logger.info(f"Target qubit angles: {target_qubits_angles}")
+    logger.info("=" * 70 + "\n")
 
     # Run simulation
     factory_pool = FactoryPool(num_factories=n_factories)
@@ -195,8 +201,8 @@ def test(
             base_path=pdf_path,
         )
 
-        print("\nVisualization complete!")
-        print(f"  Detailed PDF: {pdf_path}")
+        logger.info("Visualization complete!")
+        logger.info(f"  Detailed PDF: {pdf_path}")
 
 
 if __name__ == "__main__":
@@ -245,19 +251,12 @@ if __name__ == "__main__":
     # )
 
     test(
-        n_qubits=16,
-        n_factories=16,
-        qubit_layout=(4, 4),
-        # n_qubits=9,
-        # n_factories=9,
-        # qubit_layout=(3, 3),
+        n_qubits=25,
+        n_factories=25,
+        qubit_layout=(5, 5),
         same_angle=True,
-        # placement="seperate_region_row",
-        # placement="seperate_region_col",
-        # placement="row_based",
-        # placement="col_based",
-        placement="checkerboard",
-        visualize_rus=True,
+        placement="col_based",
+        visualize_rus=False,
         prefix="",
         n_aods=3,
         n_aods_se=3,

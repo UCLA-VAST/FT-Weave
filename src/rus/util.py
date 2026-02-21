@@ -6,7 +6,7 @@ from src.config import (
     TMR_PREPARATION_TIME,
 )
 
-from src.ds import FactoryPool, QubitAngleTracker, move_duration
+from src.ds import QubitAngleTracker, move_duration
 from src.analog_rotation import insert_s_gate
 
 
@@ -14,13 +14,14 @@ def update_qubit_state_per_teleportation(
     qubit_factory_pairs: list[tuple[int, int]],
     rus_simulation: list[bool],
     qubit_trackers: dict[int, QubitAngleTracker],
-    factory_pool: FactoryPool,
     execution_log: list,
     start_time: float,
+    aod_id: int,
 ):
     """
     Update qubit states
     """
+    qubit_with_s_gate = []
     for (qubit, factory_id), success in zip(qubit_factory_pairs, rus_simulation):
         tracker = qubit_trackers[qubit]
         teleportation_angle = tracker.target_angle
@@ -28,23 +29,16 @@ def update_qubit_state_per_teleportation(
 
         success, s_gate_inserted = tracker.update_rus_state(success)
         if success:
+            tracker.clear_all()
             qubit_trackers.pop(qubit)
             print(
                 f"[update_qubit_state_per_teleportation] Qubit {qubit} successfully teleported with angle {teleportation_angle:.4f} at time {start_time:.2f}"
             )
         if s_gate_inserted:
-            insert_s_gate(execution_log, start_time, -1, qubit)
-            start_time += SE_TIME
-            tracker.clear_all()
-            qubit_trackers.pop(qubit)
-
-    # for qubit in qubit_trackers.keys():
-    #     tracker = qubit_trackers[qubit]
-    #     if qubit in successful_teleportation_qubits:
-    #         continue
-    #     if np.isclose(ANGLE_S - tracker.target_angle, 0.0, atol=1e-8):
-    #         insert_s_gate(execution_log, start_time, -1, qubit)
-    #         is_s_gate_inserted = True
+            qubit_with_s_gate.append(qubit)
+    if qubit_with_s_gate:
+        insert_s_gate(execution_log, start_time, qubit_with_s_gate, aod_id)
+        start_time += SE_TIME
 
     return start_time
 

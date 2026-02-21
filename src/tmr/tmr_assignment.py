@@ -3,19 +3,14 @@ from collections import defaultdict
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from src.ds import FactoryPool, QubitAngleTracker, move_duration
+from src.ds import FactoryPool, QubitAngleTracker, move_duration, FactoryState
 
 from src.tmr.tmr_assignment_method import (
     assign_factories_for_batch_naive,
     assign_factories_for_batch_matching,
 )
 
-from src.config import (
-    TMR_P,
-    TMR_Q,
-    CNOT_TIME,
-    SE_TIME,
-)
+from src.config import TMR_P, TMR_Q, CNOT_TIME, SE_TIME, ANGLE_S
 
 
 def assign_factories_for_batch(
@@ -72,7 +67,6 @@ def reassign_factories(
     """
     # return
     busy_factories = factory_pool.get_wait_for_rus_factories()
-
     cost_matrix = np.zeros((len(busy_factories), len(qubit_trackers)))
     angles_to_factory = defaultdict(list)
     for i, factory in enumerate(busy_factories):
@@ -108,9 +102,12 @@ def reassign_factories(
         factory = busy_factories[i]
         used_factories[i] = True
         qubit, angle = assignment_idx_to_qubit_anlge_pair[j]
-        factory.update_qubit(qubit)
-        # success_rate = calculate_success_rate(angle)
-        qubit_trackers[qubit].add_factory(factory.id, angle)
+        if factory.qubit != qubit:
+            if factory.qubit in qubit_trackers:
+                qubit_trackers[factory.qubit].remove_factory(factory.id, factory.angle)
+            factory.update_qubit(qubit)
+            # success_rate = calculate_success_rate(angle)
+            qubit_trackers[qubit].add_factory(factory.id, angle)
         # print(
         #     f"Reassigning factory {factory.id} at location {factory.location} preparing angle {factory.angle} to qubit {qubit} who need angle {angle}"
         # )
@@ -124,3 +121,42 @@ def reassign_factories(
             #     f"Releasing factory {factory.id} at location {factory.location} preparing angle {factory.angle}"
             # )
     # input()
+
+
+def release_useless_factories(
+    factory_pool: FactoryPool,
+    qubit_trackers: dict[int, QubitAngleTracker],
+):
+    """
+    Release factories that are no longer needed.
+    """
+    # return
+    angles_required_by_qubits = set()
+    for qubit, tracker in qubit_trackers.items():
+        begin_level = 0
+        if tracker.waiting_for_rus:
+            begin_level = 1
+        for level in range(begin_level, 3):
+            angle = tracker.target_angle * pow(2, level)
+            if np.isclose(angle, 0.0, atol=1e-8):
+                continue
+            if ANGLE_S < angle:
+                angle -= ANGLE_S
+            angles_required_by_qubits.add(angle)
+
+    print(
+        "in release_useless_factories: angles_required_by_qubits: ",
+        angles_required_by_qubits,
+    )
+    print(factory_pool.get_factory_by_id(6))
+    for factory in factory_pool.factories:
+        if (
+            factory.state == FactoryState.WAIT_FOR_RUS
+            and factory.angle not in angles_required_by_qubits
+        ):
+            print(
+                f"Releasing factory {factory.id} preparing angle {factory.angle} which is not required by any qubit"
+            )
+            if factory.qubit is not None and factory.qubit in qubit_trackers:
+                qubit_trackers[factory.qubit].remove_factory(factory.id, factory.angle)
+            factory_pool.free_factory(factory.id)

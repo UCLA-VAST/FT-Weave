@@ -174,73 +174,104 @@ def analyze_execution_log(
     rotation_count = defaultdict(int)
     for e in execution_log:
         # Accept either 5-, 6-, or 7-element tuples (with optional aod_assignment)
-        if len(e) == 5:
-            start, end, factory_id, operation, value = e
+        if len(e) == 6:
+            start, end, factory_id, operation, aod_assignment, value = e
             move_vecs = None
-            aod_assignment = 0
-        elif len(e) == 6:
-            start, end, factory_id, operation, value, move_vecs = e
-            aod_assignment = 0
+        elif len(e) == 7:
+            start, end, factory_id, operation, aod_assignment, value, move_vecs = e
         else:
-            start, end, factory_id, operation, value, move_vecs, aod_assignment = e
+            raise ValueError(f"Unexpected log entry format: {e}")
 
         overall_end = max(overall_end, end)
 
+        if isinstance(factory_id, int):
+            factories = [factory_id]
+        elif factory_id is None:
+            factories = []
+        else:
+            factories = list(factory_id)
+
         # Record op stats
         if operation == "Rz":
-            rotation_count[value] += 1
+            if isinstance(value, list):
+                for angle in value:
+                    rotation_count[angle] += 1
+            else:
+                rotation_count[value] += 1
 
         dur = max(0, end - start)
         s = ops.setdefault(operation, {"count": 0, "total_time": 0, "max_time": 0})
-        s["count"] += 1
-        s["total_time"] += dur
+        op_count_inc = len(factories) if factories else 1
+        s["count"] += op_count_inc
+        s["total_time"] += dur * op_count_inc
         s["max_time"] = max(s["max_time"], dur)
 
         # Track intervals for circuit_time calculation
         op_intervals[operation].append((start, end))
 
         # Per-factory timeline
-        fid = factory_id
-        timeline = per_factory.setdefault(
-            fid, {"timeline": [], "busy_time": 0, "ops": {}}
-        )
-        timeline["timeline"].append((start, end, operation, value, move_vecs))
-        timeline["busy_time"] += dur
-        opf = timeline["ops"].setdefault(operation, {"count": 0, "total_time": 0})
-        opf["count"] += 1
-        opf["total_time"] += dur
+        for idx, fid in enumerate(factories):
+            if isinstance(value, list) and idx < len(value):
+                factory_value = value[idx]
+            else:
+                factory_value = value
 
-        if operation == "CNOT":
-            qubit_cnot_counts[value] += 1
+            if isinstance(move_vecs, list) and idx < len(move_vecs):
+                factory_move_vecs = move_vecs[idx]
+            else:
+                factory_move_vecs = move_vecs
+
+            timeline = per_factory.setdefault(
+                fid, {"timeline": [], "busy_time": 0, "ops": {}}
+            )
+            timeline["timeline"].append(
+                (start, end, operation, factory_value, factory_move_vecs)
+            )
+            timeline["busy_time"] += dur
+            opf = timeline["ops"].setdefault(operation, {"count": 0, "total_time": 0})
+            opf["count"] += 1
+            opf["total_time"] += dur
+
+            if operation == "CNOT":
+                if isinstance(factory_value, int) and 0 <= factory_value < len(
+                    qubit_cnot_counts
+                ):
+                    qubit_cnot_counts[factory_value] += 1
         # Movements grouping - separate move and return_move
         if operation == "move":
-            key = tuple(move_vecs) if move_vecs is not None else ("unknown",)
-            mv = movements.setdefault(key, {"count": 0, "total_time": 0, "max_time": 0})
-            mv["count"] += 1
-            mv["total_time"] += dur
-            mv["max_time"] = max(mv["max_time"], dur)
-            # Track AOD utilization
-            aod_utilization[aod_assignment]["move_intervals"].append((start, end))
-            aod_utilization[aod_assignment]["total_time"] += dur
+            for move_vec in move_vecs or []:
+                key = tuple(move_vec) if move_vec is not None else ("unknown",)
+                mv = movements.setdefault(
+                    key, {"count": 0, "total_time": 0, "max_time": 0}
+                )
+                mv["count"] += 1
+                mv["total_time"] += dur
+                mv["max_time"] = max(mv["max_time"], dur)
+                # Track AOD utilization
+                aod_utilization[aod_assignment]["move_intervals"].append((start, end))
+                aod_utilization[aod_assignment]["total_time"] += dur
         elif operation == "return_move":
-            key = tuple(move_vecs) if move_vecs is not None else ("unknown",)
-            mv = return_movements.setdefault(
-                key, {"count": 0, "total_time": 0, "max_time": 0}
-            )
-            mv["count"] += 1
-            mv["total_time"] += dur
-            mv["max_time"] = max(mv["max_time"], dur)
-            # Track AOD utilization
-            aod_utilization[aod_assignment]["move_intervals"].append((start, end))
-            aod_utilization[aod_assignment]["total_time"] += dur
+            for move_vec in move_vecs or []:
+                key = tuple(move_vec) if move_vec is not None else ("unknown",)
+                mv = return_movements.setdefault(
+                    key, {"count": 0, "total_time": 0, "max_time": 0}
+                )
+                mv["count"] += 1
+                mv["total_time"] += dur
+                mv["max_time"] = max(mv["max_time"], dur)
+                # Track AOD utilization
+                aod_utilization[aod_assignment]["move_intervals"].append((start, end))
+                aod_utilization[aod_assignment]["total_time"] += dur
 
         # Failures
         if operation == "RUS_fail":
-            rus_failures_total += 1
-            rus_failures_by_factory[fid] += 1
-        elif operation == "TMR_fail":
-            tmr_failures_total += 1
-            tmr_failures_by_factory[fid] += 1
+            rus_failures_total += len(factories)
+            for fid in factories:
+                rus_failures_by_factory[fid] += 1
+        elif operation in ["TMR_fail", "tmr_fail"]:
+            tmr_failures_total += len(factories)
+            for fid in factories:
+                tmr_failures_by_factory[fid] += 1
 
     # Compute circuit_time for each operation (merge overlapping intervals)
     def merge_intervals(intervals: list[tuple]) -> int:
