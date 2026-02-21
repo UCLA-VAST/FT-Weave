@@ -257,6 +257,15 @@ class FactoryPool:
             loc = factory.location
             self.avaliable_factories_per_row[loc[1]] += 1
 
+    def free_factories(self, factory_ids: list[int]):
+        """Free a factory by its ID."""
+        for factory_id in factory_ids:
+            factory = self.get_factory_by_id(factory_id)
+            if factory and factory.angle is not None:
+                factory.free()
+                loc = factory.location
+                self.avaliable_factories_per_row[loc[1]] += 1
+
     def assign_factory(
         self, factory_id: int, angle: float, qubit: int, success_rate: float
     ):

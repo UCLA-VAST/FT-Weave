@@ -16,7 +16,7 @@ from .tmr.util import (
     update_factory_states_post_tmr,
 )
 
-from .ds import FactoryPool, QubitAngleTracker
+from .ds import FactoryPool, QubitAngleTracker, Factory
 from .rus import (
     update_qubit_state_per_teleportation,
 )
@@ -121,13 +121,19 @@ def factory_angle_execution_parallel(
     # Event queue: priority queue with (time, event) tuples
     events = []
 
+    tmr_start_time = set()
+
     def add_event(time, count, task_type, **kwargs):
+        if task_type == "TMR_start" and time in tmr_start_time:
+            return  # Avoid scheduling duplicate TMR_start events at the same time
         task = {"type": task_type, **kwargs}
         heapq.heappush(events, (time, count, task))
+        logger.debug(
+            f"Added {task_type} event at t={time}, total events in queue: {len(events)}"
+        )
 
     add_event(0, next(counter), "TMR_start")
 
-    tmr_start_time = set()
     while len(qubit_trackers) > 0:
 
         if not events:
@@ -153,22 +159,20 @@ def factory_angle_execution_parallel(
             if not factory_list:
                 continue  # No idle factories, wait for next event
             # Execute next round of TMR preparation
-            aod_earliest_available_time[aod_id] = (
-                local_moment + TMR_PREPARATION_TIME
-            )  # TMR preparation takes fixed time. Block first to prevent scheduling conflicts.
-            local_moment, execution_log = execute_tmr_preparation_pre_rz(
-                factory_list,
-                local_moment,
-                execution_log,
-                events=events,
-                event_counter=counter,
-                aod_id=aod_id,
-            )
-            aod_in_use[aod_id] = True
-            logger.debug(
-                f"Added TMR_pre_RZ event at t={local_moment}, total events in queue: {len(events)}"
-            )
-            logger.debug(f"idle_factories: {[f.id for f in factory_list]}")
+
+            if len(factory_list):
+                aod_earliest_available_time[aod_id] = (
+                    local_moment + TMR_PREPARATION_TIME
+                )  # TMR preparation takes fixed time. Block first to prevent scheduling conflicts.
+                local_moment, execution_log = execute_tmr_preparation_pre_rz(
+                    factory_list,
+                    local_moment,
+                    execution_log,
+                    events=events,
+                    event_counter=counter,
+                    aod_id=aod_id,
+                )
+                aod_in_use[aod_id] = True
 
         elif event["type"] == "TMR_pre_RZ_completion":
             logger.debug(f"Event: TMR_pre_RZ_completion at t={local_moment}")
@@ -208,18 +212,10 @@ def factory_angle_execution_parallel(
                 factory_pool.get_factory_by_id(fid) for fid in factory_id_list
             ]
             update_factory_states_post_tmr(factory_list, factory_pool, qubit_trackers)
-            if local_moment not in tmr_start_time:
-                tmr_start_time.add(local_moment)
-                add_event(local_moment, next(counter), "TMR_start")
-                logger.debug(
-                    f"Added TMR_start event at t={local_moment}, total events in queue: {len(events)}"
-                )
+            add_event(local_moment, next(counter), "TMR_start")
 
             add_event(
-                local_moment, next(counter) / 3, "RUS_start", aod_id=event["aod_id"]
-            )
-            logger.debug(
-                f"Added RUS_start event at t={local_moment}, total events in queue: {len(events)}"
+                local_moment, next(counter) - 10, "RUS_start", aod_id=event["aod_id"]
             )
         elif event["type"] == "RUS_start":
             logger.debug(f"Event: RUS_start at t={local_moment}")
@@ -248,20 +244,15 @@ def factory_angle_execution_parallel(
                 # Schedule teleport event
                 add_event(
                     local_moment,
-                    next(counter) / 2,
+                    next(counter) - 5,
                     "RUS_teleportation",
                     qubit_factory_pairs=qubit_factory_pairs,
                     routing_batches=routing_batches,
                     aod_id=event["aod_id"],
                 )
-                logger.debug(
-                    f"Added RUS_teleportation event at t={local_moment}, total events in queue: {len(events)}, routing batches: {qubit_factory_pairs}"
-                )
             else:
                 aod_in_use[event["aod_id"]] = False
-                if local_moment not in tmr_start_time:
-                    tmr_start_time.add(local_moment)
-                    add_event(local_moment, next(counter), "TMR_start")
+                add_event(local_moment, next(counter), "TMR_start")
         elif event["type"] == "RUS_teleportation":
             logger.debug(f"Event: RUS_teleportation at t={local_moment}")
             qubit_factory_pairs = event["qubit_factory_pairs"]
@@ -314,44 +305,26 @@ def factory_angle_execution_parallel(
                 aod_id=event["aod_id"],
                 factory_list=[f for q, f in event["qubit_factory_pairs"]],
             )
-            logger.debug(
-                f"Added RUS_finish event at t={local_moment}, total events in queue: {len(events)}"
-            )
 
         elif event["type"] == "RUS_finish":
             logger.debug(
                 f"Event: RUS_finish at t={local_moment}, {len(qubit_trackers)} qubits remaining"
             )
-            for factory_id in event["factory_list"]:
-                factory_pool.free_factory(factory_id)
+            factory_pool.free_factories(event["factory_list"])
 
             release_useless_factories(
                 factory_pool,
                 qubit_trackers,
             )
 
-            # Check if there are more qubits to process
-            if len(qubit_trackers) == 0:
-                continue
-
             add_event(local_moment, next(counter), "RUS_start", aod_id=event["aod_id"])
-            logger.debug(
-                f"Added RUS_start event at t={local_moment}, total events in queue: {len(events)}"
-            )
-
-            if local_moment not in tmr_start_time:
-                tmr_start_time.add(local_moment)
-                add_event(local_moment, next(counter), "TMR_start")
-            logger.debug(
-                f"Added TMR_start event at t={local_moment}, total events in queue: {len(events)}"
-            )
+            add_event(local_moment, next(counter), "TMR_start")
 
         else:
             raise ValueError(f"Unknown event type: {event['type']}")
         # input()
 
     # Final cleanup: reassign any remaining factories
-    logger.debug(f"Main loop completed at t={circuit_moment}")
     assert not qubit_trackers, "All qubits should be completed at this point"
     execution_log = clean_up_execution_log(execution_log, circuit_moment)
     logger.debug(
