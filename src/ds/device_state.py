@@ -8,14 +8,7 @@ from ..config import PRECISION
 
 
 from src.config import (
-    CNOT_TIME,
-    SE_TIME,
-    TMR_P,
-    TMR_Q,
     ANGLE_S,
-    TMR_PREPARATION_TIME,
-    # THRESHOLD_HIGH_TMR,
-    # THRESHOLD_HIGH_RUS,
 )
 
 # ============================================================================

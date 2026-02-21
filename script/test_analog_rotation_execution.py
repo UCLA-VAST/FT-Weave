@@ -16,12 +16,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 logger = logging.getLogger(__name__)
 
-from src.analog_rotation_execution import (
-    factory_angle_execution,
-    get_microarchitecture,
-    factory_angle_execution_parallel,
-)
-from src.ds import FactoryPool
+from src.analog_rotation_execution import factory_angle_execution
+from src.analog_rotation_execution_parallel import factory_angle_execution_parallel
+from src.ds import FactoryPool, get_microarchitecture
 from src.util import analyze_execution_log, print_execution_profile
 from src.animator import (
     plot_all_rus_rounds,

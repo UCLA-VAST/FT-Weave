@@ -7,9 +7,10 @@ import numpy as np
 # Ensure repository root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.analog_rotation_execution import factory_angle_execution, get_microarchitecture
+from src.analog_rotation_execution import factory_angle_execution
+from src.analog_rotation_execution_parallel import factory_angle_execution_parallel
+from src.ds import FactoryPool, get_microarchitecture
 
-from src.ds import FactoryPool
 
 from src.util import analyze_execution_log
 from src.animator import (
