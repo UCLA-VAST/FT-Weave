@@ -113,7 +113,7 @@ def execute_tmr_preparation_rz(
     circuit_moment,
     execution_log,
     events: list | None = None,
-    event_counter: count | None = None,
+    event_count: int | None = None,
     aod_id: int = 0,
 ) -> tuple[float, list]:
     """
@@ -162,13 +162,13 @@ def execute_tmr_preparation_rz(
 
     # Schedule completion event
     if events is not None:
-        assert circuit_moment is not None and event_counter is not None
+        assert circuit_moment is not None and event_count is not None
         task = {
             "type": "TMR_completion",
             "factory_list": [fac.id for fac in factories],
             "aod_id": aod_id,
         }
-        heapq.heappush(events, (circuit_moment, next(event_counter), task))
+        heapq.heappush(events, (circuit_moment, event_count, task))
 
     return circuit_moment, execution_log
 
@@ -369,6 +369,7 @@ def validate_execution_log(
     aod_time_intervals = [0 for _ in range(n_aods)]
 
     for entry in execution_log:
+        # print(entry)
         start_time = entry[0]
         end_time = entry[1]
         factories = entry[2]
@@ -415,7 +416,7 @@ def validate_execution_log(
                         fac_op == "SE" and fac_val is not None
                     ), f"Expected SE before TMR failure for factory {factory_id}, but got {fac_op} with value {fac_val}"
 
-        if targets is not None:
+        if targets is not None and operation != "S":
             assert len(factories) == len(
                 targets
             ), f"Number of factories and targets must match for operation {operation} at time {start_time}"

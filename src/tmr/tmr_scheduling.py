@@ -28,7 +28,6 @@ def schedule_tmr_round(
 
     if not batch_angles:
         return []
-    print(f"Scheduling TMR for batch angles: {batch_angles}")
     # Assign factories
     assign_factories_for_batch(
         factory_pool,

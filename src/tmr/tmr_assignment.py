@@ -117,10 +117,6 @@ def reassign_factories(
         if not used:
             factory = busy_factories[i]
             factory_pool.free_factory(factory.id)
-            # print(
-            #     f"Releasing factory {factory.id} at location {factory.location} preparing angle {factory.angle}"
-            # )
-    # input()
 
 
 def release_useless_factories(
@@ -144,19 +140,11 @@ def release_useless_factories(
                 angle -= ANGLE_S
             angles_required_by_qubits.add(angle)
 
-    print(
-        "in release_useless_factories: angles_required_by_qubits: ",
-        angles_required_by_qubits,
-    )
-    print(factory_pool.get_factory_by_id(6))
     for factory in factory_pool.factories:
         if (
             factory.state == FactoryState.WAIT_FOR_RUS
             and factory.angle not in angles_required_by_qubits
         ):
-            print(
-                f"Releasing factory {factory.id} preparing angle {factory.angle} which is not required by any qubit"
-            )
             if factory.qubit is not None and factory.qubit in qubit_trackers:
                 qubit_trackers[factory.qubit].remove_factory(factory.id, factory.angle)
             factory_pool.free_factory(factory.id)

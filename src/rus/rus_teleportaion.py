@@ -32,7 +32,6 @@ def rus_teleportation(
         return [], []
     for qubit, factory_id in qubit_factory_pairs:
         factory = factory_pool.get_factory_by_id(factory_id)
-        factory.set_to_rus()
         if factory.qubit is not None and factory.qubit != qubit:
             factory_qubit_id = factory.qubit
             if factory_qubit_id in qubit_trackers:
@@ -56,4 +55,10 @@ def rus_teleportation(
             n_tmr_next_run=len(qubit_trackers),
             parital_skip=(consider_skip_rus == 1),
         )
+
+    for batch in routing_batches:
+        for qubit, _, _, factory_id, _, _ in batch:
+            factory = factory_pool.get_factory_by_id(factory_id)
+            factory.set_to_rus()
+            qubit_trackers[qubit].set_waiting_for_rus()
     return qubit_factory_pairs, routing_batches

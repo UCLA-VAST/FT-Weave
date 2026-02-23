@@ -89,7 +89,6 @@ def get_angles_for_preparation(
     count = 0
     for allocation in qubit_angle_factories.values():
         count += sum(allocation.values())
-    print(f"count: {count}, n_available_factories: {n_available_factories}")
     assert count == n_available_factories
     # input()
     return qubit_angle_factories

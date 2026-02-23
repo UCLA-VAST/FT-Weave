@@ -24,16 +24,10 @@ def update_qubit_state_per_teleportation(
     qubit_with_s_gate = []
     for (qubit, factory_id), success in zip(qubit_factory_pairs, rus_simulation):
         tracker = qubit_trackers[qubit]
-        teleportation_angle = tracker.target_angle
-        # update device state as the angle is consumed by teleportation
-
         success, s_gate_inserted = tracker.update_rus_state(success)
         if success:
             tracker.clear_all()
             qubit_trackers.pop(qubit)
-            print(
-                f"[update_qubit_state_per_teleportation] Qubit {qubit} successfully teleported with angle {teleportation_angle:.4f} at time {start_time:.2f}"
-            )
         if s_gate_inserted:
             qubit_with_s_gate.append(qubit)
     if qubit_with_s_gate:
@@ -50,7 +44,7 @@ def check_teleportation_worthiness(
     n_tmr_next_run: int,
     total_qubits: int,
     parital_skip: bool = False,
-) -> list:
+) -> list[list[tuple[int, int, int, int, int, int]]]:
     """
     Check if performing injection is worth it based on movement time and qubit counts.
     """

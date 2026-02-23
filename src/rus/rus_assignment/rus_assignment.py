@@ -74,8 +74,6 @@ def assign_teleportation_with_sharing(
         )
 
         qubit_factory_pairs.extend(matches)
-        for q, _ in matches:
-            qubit_trackers[q].set_waiting_for_rus()
 
     # Handle any remaining qubits not in angle groups (shouldn't happen in normal flow)
     # for qubit in qubit_trackers:

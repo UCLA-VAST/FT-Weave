@@ -47,11 +47,6 @@ class QubitAngleTracker:
 
     def add_factory(self, factory_id, angle):
         """Add a factory working on a specific angle."""
-        # print(
-        #     "[QubitAngleTracker] Adding factory {} for qubit {} preparing angle {:.4f}".format(
-        #         factory_id, self.qubit_id, angle
-        #     )
-        # )
         assert factory_id not in [
             fid for fid, _ in self.factories
         ], f"Factory {factory_id} already assigned to qubit {self.qubit_id}"
@@ -63,11 +58,6 @@ class QubitAngleTracker:
 
     def remove_factory(self, factory_id, angle):
         """Remove a factory from tracking."""
-        print(
-            "[QubitAngleTracker] Removing factory {} for qubit {} that was preparing angle {:.4f}".format(
-                factory_id, self.qubit_id, angle
-            )
-        )
         self.factories = [(fid, a) for fid, a in self.factories if fid != factory_id]
         self.angle_counts[angle] -= 1
         if self.angle_counts[angle] == 0:
@@ -132,7 +122,7 @@ class QubitAngleTracker:
         return success, insert_s_gate
 
     def __repr__(self):
-        return f"QubitTracker(qubit={self.qubit_id}, target={self.target_angle}, factories={len(self.factories)})"
+        return f"QubitTracker(qubit={self.qubit_id}, target={self.target_angle}, factories={len(self.factories)}, waiting_for_rus={self.waiting_for_rus})"
 
 
 @dataclass

@@ -40,6 +40,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         * len(params["trivial_return"])
         * params["trials_per_config"]
         * len(params["decompose_move"])
+        * len(params["parallel_execution"])
     )
 
     print("=" * 80)
@@ -59,6 +60,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         tmr_method,
         trivial_ret,
         decompose_move,
+        parallel_execution,
     ) in product(
         params["qubit_sizes"],
         params["placement_methods"],
@@ -67,6 +69,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         params["tmr_assignment_method"],
         params["trivial_return"],
         params["decompose_move"],
+        params["parallel_execution"],
     ):
         for trial in range(params["trials_per_config"]):
             rng = np.random.default_rng(42 + trial)
@@ -106,10 +109,19 @@ def run_evaluation(params: dict, plot_figure: bool = False):
             print(f"  Skip RUS: {skip_rus}")
             print(f"  TMR Method: {tmr_method}")
             print(f"  Trivial Return: {trivial_ret}")
-
-            total_time, log = factory_angle_execution(
-                **config,
-            )
+            if config_count < 6:
+                continue
+            if parallel_execution:
+                config["n_aods_se"] = (
+                    n_aods  # For simplicity, use same number of AODs for SE
+                )
+                total_time, log = factory_angle_execution_parallel(
+                    **config,
+                )
+            else:
+                total_time, log = factory_angle_execution(
+                    **config,
+                )
             profiling_result = analyze_execution_log(log, n_factories=n_factories)
             # print(profiling_result)
             result = {
@@ -121,10 +133,11 @@ def run_evaluation(params: dict, plot_figure: bool = False):
                 "qubit_rows": n_rows,
                 "placement": placement,
                 "n_aods": n_aods,
-                "consider_skip_rus": 2,  #!
+                "consider_skip_rus": skip_rus,  #!
                 "tmr_assignment_method": tmr_method,
                 "trivial_return": trivial_ret,
                 "decompose_move": decompose_move,
+                "parallel_execution": parallel_execution,
                 "total_time": profiling_result["total_time"],
                 "movement_time": profiling_result["ops"]["move"]["circuit_time"],
                 "return_movement_time": profiling_result["ops"]["return_move"][
@@ -139,6 +152,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
             results.append(result)
 
             if plot_figure:
+                # if True:
                 base_path = f"n{n_qubits}f{n_factories}_{placement}_naod_{n_aods}_tmr_{tmr_method}_skipRUS_{skip_rus}_trivial-return{trivial_ret}_trial_{trial}.pdf"
                 pdf_path = f"output/evaluation/circuit_execution_vertical/{base_path}"
                 plot_circuit_execution_vertical(
@@ -155,8 +169,9 @@ def run_evaluation(params: dict, plot_figure: bool = False):
                 #     magic_state_locations=magic_state_locations,
                 #     base_path=pdf_path,
                 # )
-
+            # input()
     # Save results to CSV
+    # return
     csv_path = os.path.join(output_dir, "evaluation_results.csv")
     if results:
         with open(csv_path, "a", newline="") as csvfile:
@@ -190,14 +205,14 @@ if __name__ == "__main__":
             "col_based",
             "checkerboard",
         ],
-        "n_aods": [1, 2, 3, 4, 5],
-        # "consider_skip_rus": [False, True],
-        "consider_skip_rus": [True],
+        "n_aods": [2, 3, 4, 5],
+        "consider_skip_rus": [0, 1, 2],
         # "tmr_assignment_method": ["naive", "matching"],
         "tmr_assignment_method": ["matching"],
         # "trivial_return": [False, True],
         "trivial_return": [False],
         "trials_per_config": 10,
-        "decompose_move": [True],
+        "decompose_move": [False],
+        "parallel_execution": [True],
     }
     run_evaluation(params=params, plot_figure=False)

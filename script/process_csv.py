@@ -8,22 +8,50 @@ import os
 
 
 SETTINGS = [
-    (True, "naive", 0, False),  # vanilla
-    (False, "naive", 0, False),  # optimized return
-    (False, "matching", 0, False),  # optimized return + matching TMR
+    (True, "matching", 0, False, False),  # vanilla
+    (False, "matching", 0, False, False),  # optimized return
     (
         False,
         "matching",
         1,
         False,
-    ),  # optimized return + matching TMR + skip partial RUS
-    (False, "matching", 2, False),  # optimized return + matching TMR + skip whole RUS
+        False,
+    ),  # optimized return + skip partial RUS
+    (
+        False,
+        "matching",
+        2,
+        False,
+        False,
+    ),  # optimized return + skip whole RUS
     (
         False,
         "matching",
         2,
         True,
-    ),  # optimized return + matching TMR + skip whole RUS + decompose move
+        False,
+    ),  # optimized decompose return + skip whole RUS
+    (
+        False,
+        "matching",
+        0,
+        False,
+        True,
+    ),  # optimized return  + decompose move + asynchronous RUS
+    # (
+    #     False,
+    #     "matching",
+    #     1,
+    #     False,
+    #     True,
+    # ),  # optimized return+ skip partial RUS + decompose move + asynchronous RUS
+    (
+        False,
+        "matching",
+        2,
+        False,
+        True,
+    ),  # optimized return+ skip whole RUS + decompose move + asynchronous RUS
 ]
 
 # Configuration columns (experimental settings)
@@ -37,6 +65,7 @@ CONFIG_COLS = [
     "tmr_assignment_method",
     "trivial_return",
     "decompose_move",
+    "parallel_execution",
 ]
 
 # Result columns
@@ -72,6 +101,44 @@ def _plot_ablation_total_time(gs, labels, prefix, output_dir):
             marker="o",
             capsize=4,
             label=label,
+        )
+
+    # print the average improvement percentage for each setting compared to the previous setting
+    # print compared with the vanilla setting
+    vanilla = gs[0].sort_values(SWEEP_COL)
+    for i in range(1, len(gs)):
+        prev = gs[i - 1].sort_values(SWEEP_COL)
+        curr = gs[i].sort_values(SWEEP_COL)
+        # Align by n_qubits
+        merged = pd.merge(
+            prev[[SWEEP_COL, "total_time_mean"]],
+            curr[[SWEEP_COL, "total_time_mean"]],
+            on=SWEEP_COL,
+            suffixes=("_prev", "_curr"),
+        )
+        merged["improvement"] = (
+            (merged["total_time_mean_prev"] - merged["total_time_mean_curr"])
+            / merged["total_time_mean_prev"]
+            * 100
+        )
+        avg_improvement = merged["improvement"].mean()
+        print(
+            f"Average improvement from '{labels[i-1]}' to '{labels[i]}': {avg_improvement:.2f}%"
+        )
+        merged = pd.merge(
+            vanilla[[SWEEP_COL, "total_time_mean"]],
+            curr[[SWEEP_COL, "total_time_mean"]],
+            on=SWEEP_COL,
+            suffixes=("_vanilla", "_curr"),
+        )
+        merged["improvement"] = (
+            (merged["total_time_mean_vanilla"] - merged["total_time_mean_curr"])
+            / merged["total_time_mean_vanilla"]
+            * 100
+        )
+        avg_improvement = merged["improvement"].mean()
+        print(
+            f"Average improvement from vanilla to '{labels[i]}': {avg_improvement:.2f}%"
         )
 
     plt.xlabel(SWEEP_COL)
@@ -250,6 +317,8 @@ def plot_nAOD_placement_lines(
         (df["trivial_return"] == setting[0])
         & (df["tmr_assignment_method"] == setting[1])
         & (df["consider_skip_rus"] == setting[2])
+        & (df["decompose_move"] == setting[3])
+        & (df["parallel_execution"] == setting[4])
     ].copy()
 
     # Normalize n_aods to int
@@ -299,6 +368,7 @@ def plot_nAOD_placement_lines(
 
     plt.xlabel(sweep_col)
     plt.ylabel("total_time")
+    plt.ylim(bottom=20, top=200)
     plt.title("Total time for placement × #aod")
     plt.legend(fontsize=7, ncol=2)
     os.makedirs(output_dir, exist_ok=True)
@@ -316,6 +386,7 @@ def plot_nAOD_placement_lines(
 # Fig 1 : placement comparison (average over settings)
 # ------------------------------------------------------------
 def plot_microarch_comp_average_all(df, output_dir):
+    raise NotImplementedError("Average across all elemtns may not work.")
     os.makedirs(output_dir, exist_ok=True)
     g = (
         df.groupby(["n_aods", "placement", "n_qubits"])[RESULT_COLS]
@@ -345,6 +416,8 @@ def plot_microarch_comp_setting(df, output_dir, setting_idx=1):
         (df["trivial_return"] == setting[0])
         & (df["tmr_assignment_method"] == setting[1])
         & (df["consider_skip_rus"] == setting[2])
+        & (df["decompose_move"] == setting[3])
+        & (df["parallel_execution"] == setting[4])
     ]
 
     g = (
@@ -380,11 +453,13 @@ def plot_ablation(df, output_dir, placement):
     df_col = df[df["placement"] == placement]
     labels = [
         "vanilla",
-        "optimized return",
-        "optimized return + matching TMR",
-        "optimized return + matching TMR + skip parital RUS",
-        "optimized return + matching TMR + skip whole RUS",
-        "optimized decomposed return + matching TMR + skip whole RUS",
+        "opt return",
+        "opt return + part. RUS",
+        "opt return + skip whole RUS",
+        "opt decomp return + skip whole RUS",
+        "opt return + async. RUS",
+        # "opt return + skip part. RUS + async. RUS",
+        "opt return + skip whole RUS + async. RUS",
     ]
     df_list = []
     for setting in SETTINGS:
@@ -393,6 +468,7 @@ def plot_ablation(df, output_dir, placement):
             & (df_col["tmr_assignment_method"] == setting[1])
             & (df_col["consider_skip_rus"] == setting[2])
             & (df_col["decompose_move"] == setting[3])
+            & (df_col["parallel_execution"] == setting[4])
         ]
         df_list.append(df_tmp)
     gs = []
@@ -409,7 +485,8 @@ def plot_ablation(df, output_dir, placement):
         gs.append(g)
 
     aods = sorted(gs[0]["n_aods"].unique())
-    for a in [aods[0], aods[-1]]:  # only plot for lowest and highest AODs
+    # for a in [aods[0], aods[-1]]:  # only plot for lowest and highest AODs
+    for a in [aods[1]]:  # only plot for lowest and highest AODs
         tmp_gs = [g[g["n_aods"] == a] for g in gs]
         _plot_ablation_total_time(tmp_gs, labels, f"ablation_nAOD{a}", output_dir)
         _plot_ablation_movement_bar(tmp_gs, labels, f"ablation_nAOD{a}", output_dir)
@@ -424,8 +501,8 @@ def process_csv(csv_file: str, output_dir: str):
     # plot_microarch_comp_average_all(df, output_dir + "/microarch_all")
     # plot_microarch_comp_setting(df, output_dir + "/microarch_setting", setting_idx=4)
     plot_ablation(df, output_dir + "/ablation_checkerboard", "checkerboard")
-    # plot_nAOD_placement_lines(df, output_dir, setting_idx=4, skip_placements=False)
-    # plot_nAOD_placement_lines(df, output_dir, setting_idx=4)
+    plot_nAOD_placement_lines(df, output_dir, setting_idx=6, skip_placements=True)
+    plot_nAOD_placement_lines(df, output_dir, setting_idx=4, skip_placements=True)
 
     print("Saved plots to", output_dir)
 

@@ -91,9 +91,10 @@ def plot_circuit_execution(
         print("No execution log to plot")
         return
     circuit_length = len(execution_log)
-    fig, ax = plt.subplots(figsize=(circuit_length / 15 + 4, max(6, n_factories * 0.8)))
+    fig, ax = plt.subplots(figsize=(circuit_length / 10 + 4, max(6, n_factories * 0.8)))
 
     # Plot each operation as a rectangle
+    max_time = 0
     for entry in execution_log:
         (
             start_time,
@@ -104,6 +105,7 @@ def plot_circuit_execution(
             value,
             move_vecs,
         ) = _parse_execution_entry(entry)
+        max_time = max(max_time, end_time)
         duration = end_time - start_time
         if duration == 0:
             duration = 0.1
@@ -183,7 +185,7 @@ def plot_circuit_execution(
                     )
 
     # Configure axes
-    ax.set_xlim(0, max(max(e[1] for e in execution_log), ylim) * 1.01)
+    ax.set_xlim(0, max_time * 1.01)
     ax.set_ylim(-0.5, n_factories - 0.5)
     ax.set_xlabel("Time (circuit moments)", fontsize=12, fontweight="bold")
     ax.set_ylabel("Magic State Factory ID", fontsize=12, fontweight="bold")
