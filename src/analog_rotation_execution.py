@@ -91,6 +91,7 @@ def factory_angle_execution(
     # ========================================================================
 
     while len(qubit_trackers):
+
         # PHASE 1: Assign idle factories to prepare angles
         factory_list = factory_pool.get_idle_factories()
 
@@ -179,6 +180,8 @@ def factory_angle_execution(
                 circuit_moment,
                 aod_id=0,
             )
+            factories = [factory for _, factory in qubit_factory_pairs]
+            factory_pool.free_factories(factories)
 
             if len(qubit_trackers) == 0:
                 break

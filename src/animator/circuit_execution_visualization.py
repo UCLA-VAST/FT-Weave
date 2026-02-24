@@ -38,7 +38,14 @@ def get_aod_border_color(aod_idx: int) -> str:
 
 
 def _parse_execution_entry(entry: tuple) -> tuple:
-    if len(entry) == 6:
+    if len(entry) == 5:
+        start_time, end_time, factory_id, operation, aod_assignment = entry
+        assert (
+            operation == "Barrier"
+        ), "Expected 5-element entry to be a Barrier operation"
+        value = None
+        move_vecs = None
+    elif len(entry) == 6:
         start_time, end_time, factory_id, operation, aod_assignment, value = entry
         move_vecs = None
     elif len(entry) == 7:

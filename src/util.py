@@ -180,6 +180,9 @@ def analyze_execution_log(
         elif len(e) == 7:
             start, end, factory_id, operation, aod_assignment, value, move_vecs = e
         else:
+            start, end, factory_id, operation = e[:4]
+            if operation == "Barrier":
+                continue
             raise ValueError(f"Unexpected log entry format: {e}")
 
         overall_end = max(overall_end, end)
