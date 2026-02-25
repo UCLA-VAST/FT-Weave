@@ -1,11 +1,12 @@
-from script.raw_fidelity_simulation import simluate_trotter_2d_tfim_fidelity
+from src.fidelity_simulation import (
+    simluate_trotter_2d_tfim_fidelity,
+)
 from src.error_model import PhysicalErrorModel
 from src.tfim_raw import generate_one_layer_2d_tfim_circuit_cz
-import json
 import os
 
 
-def run_evaluation_raw(params: dict):
+def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
     """Run comprehensive evaluation with different parameter combinations."""
 
     # Create output directory
@@ -13,26 +14,23 @@ def run_evaluation_raw(params: dict):
     os.makedirs(output_dir, exist_ok=True)
 
     results = []
-    total_configs = len(params["qubit_layout"]) * params["n_trotter_steps"]
     print("=" * 80)
     print("EVALUATION SCRIPT - RAW FIDELITY SIMULATION")
-    print("=" * 80)
-    print(f"Total configurations to test: {total_configs}")
     print("=" * 80 + "\n")
     # simulate raw physical fidelity for different qubit layouts and trotter steps
     for qubit_layout in params["qubit_layout"]:
         n_qubits = qubit_layout[0] * qubit_layout[1]
-        for J, h, dt in params["tfim"]:
+        for J, h, dt, n_trotter in params["tfim"]:
             qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
                 n_qubits=n_qubits, qubit_layout=qubit_layout, J=J, h=h, dt=dt
             )
-            for n_trotter_steps in params["n_trotter_steps"]:
+            for n_trotter_steps in range(1, n_trotter):
                 fidelity_profile = simluate_trotter_2d_tfim_fidelity(
                     n_qubits=n_qubits,
                     qubit_layout=qubit_layout,
                     n_trotter_steps=n_trotter_steps,
                     qc_one_layer=qc_one_layer,
-                    physical_error_model=PhysicalErrorModel(),
+                    physical_error_model=physical_error_model,
                 )
                 result = {
                     "qubit_layout": qubit_layout,
@@ -40,7 +38,6 @@ def run_evaluation_raw(params: dict):
                     **fidelity_profile,
                 }
                 results.append(result)
-                print(result)
 
     # simulate raw physical fidelity for different qubit layouts and trotter steps
 
@@ -49,11 +46,11 @@ def run_evaluation_raw(params: dict):
     with open(results_path, "w") as f:
         # Write header
         f.write(
-            "qubit_layout,n_trotter_steps,fidelity,fidelity_of_rz_layer,fidelity_cz,fidelity_1q,n_cz,n_h\n"
+            "qubit_layout,n_trotter_steps,fidelity,total_duration,fidelity_cz,fidelity_1q,fidelity_move,fidelity_idle,fidelity_init,fidelity_measurement\n"
         )
         for result in results:
             f.write(
-                f"{result['qubit_layout']},{result['n_trotter_steps']},{result['fidelity']},{result['fidelity_of_rz_layer']},{result['fidelity_cz']},{result['fidelity_1q']},{result['n_cz']},{result['n_h']}\n"
+                f"{result['qubit_layout']},{result['n_trotter_steps']},{result['fidelity']},{result['total_duration'],{result['fidelity_cz']},{result['fidelity_1q']},{result['fidelity_move']},{result['fidelity_idle']},{result['fidelity_init']},{result['fidelity_measurement']}}\n"
             )
 
 
@@ -82,6 +79,18 @@ def run_evaluation_star(params: dict):
     print("=" * 80)
     print(f"Total configurations to test: {total_configs}")
     print("=" * 80 + "\n")
+
+    # Save results to csv file
+    results_path = os.path.join(output_dir, "raw_fidelity_results.csv")
+    with open(results_path, "w") as f:
+        # Write header
+        f.write(
+            "qubit_layout,n_trotter_steps,fidelity,fidelity_of_rz_layer,fidelity_cz,fidelity_1q,n_cz,n_h\n"
+        )
+        for result in results:
+            f.write(
+                f"{result['qubit_layout']},{result['n_trotter_steps']},{result['fidelity']},{result['fidelity_of_rz_layer']},{result['fidelity_cz']},{result['fidelity_1q']},{result['n_cz']},{result['n_h']}\n"
+            )
     raise NotImplementedError("Star fidelity simulation is not implemented yet.")
 
 
@@ -96,16 +105,25 @@ if __name__ == "__main__":
         (9, 9),  # 81 qubits
         (10, 10),  # 100 qubits
     ]
+    physical_error_model: PhysicalErrorModel = PhysicalErrorModel()
+    p_ph = physical_error_model.get_error_rate("p_ph")
+    j_h = [(1.0, 1.0)]  # J, h, dt
+    tfim = []
+    l1 = 1
+    alpha = 2
+    omega = 1
+    for j, h in j_h:
+        dt = l1 * alpha * p_ph / omega
+        T = 10 / j
+        n_trotter = int(T / dt)
+        tfim.append((j, h, dt, n_trotter))
 
-    tfim = [(1.0, 1.0, 0.1)]  # J, h, dt
     params = {
         "qubit_layout": qubit_layout,
-        "n_trotter_steps": [1, 2, 3, 4, 5],
         "tfim": tfim,
     }
     star_params = {
         "qubit_layout": qubit_layout,
-        "n_trotter_steps": [1, 2, 3, 4, 5],
         "tfim": tfim,
         "placement_methods": [
             "col_based",
@@ -120,4 +138,4 @@ if __name__ == "__main__":
         "decompose_move": [False],
         "parallel_execution": [False, True],
     }
-    run_evaluation_raw(params=params)
+    run_evaluation_raw(params=params, physical_error_model=physical_error_model)

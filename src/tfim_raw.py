@@ -1,5 +1,5 @@
 def lattice_index(x, y, L):
-    return x * L + y
+    return x + y * L
 
 
 def add_zz_layer_cz_native(qc: list, pairs, theta, use_rz=False):
@@ -134,26 +134,25 @@ def generate_one_layer_2d_tfim_circuit_cz(
     horizontal_odd = []
     vertical_even = []
     vertical_odd = []
+    row, col = qubit_layout
+    for x in range(col):
+        for y in range(row):
 
-    for x in range(n_qubits):
-        for y in range(n_qubits):
-
-            if y < n_qubits - 1:
-                q1 = lattice_index(x, y, n_qubits)
-                q2 = lattice_index(x, y + 1, n_qubits)
-                if (x + y) % 2 == 0:
-                    horizontal_even.append((q1, q2))
-                else:
-                    horizontal_odd.append((q1, q2))
-
-            if x < n_qubits - 1:
-                q1 = lattice_index(x, y, n_qubits)
-                q2 = lattice_index(x + 1, y, n_qubits)
-                if (x + y) % 2 == 0:
+            if y < row - 1:
+                q1 = lattice_index(x, y, col)
+                q2 = lattice_index(x, y + 1, col)
+                if y % 2 == 0:
                     vertical_even.append((q1, q2))
                 else:
                     vertical_odd.append((q1, q2))
 
+            if x < col - 1:
+                q1 = lattice_index(x, y, col)
+                q2 = lattice_index(x + 1, y, col)
+                if x % 2 == 0:
+                    horizontal_even.append((q1, q2))
+                else:
+                    horizontal_odd.append((q1, q2))
     # ZZ layers (CZ-native)
     add_zz_layer_cz_native(qc, horizontal_even, theta_zz, use_rz)
     add_zz_layer_cz_native(qc, horizontal_odd, theta_zz, use_rz)

@@ -9,10 +9,10 @@ def simluate_trotter_2d_tfim_fidelity(
     n_trotter_steps: int,
     qc_one_layer: list[dict],
     physical_error_model: PhysicalErrorModel,
-    site_seperation: int = 10,  # um
-    trap_seperation: int = 2,  # um
-    a: float = 0.00275,
-    gate_duration_1q: float = 8e-6,  # !
+    site_seperation: float = 10 * 1e-6,  # m
+    trap_seperation: float = 2 * 1e-6,  # m
+    a: float = 5500,  # m/s^2
+    gate_duration_1q: float = 8e-6,  # seconds
     gate_duration_cz: float = 360 * 1e-9,  # seconds
     atom_transfer_duration: float = 15e-6,  # seconds
 ) -> dict:
@@ -44,7 +44,7 @@ def simluate_trotter_2d_tfim_fidelity(
                 qubit_busy_time_per_step[q0] += gate_duration_cz
                 qubit_busy_time_per_step[q1] += gate_duration_cz
         elif instruction["gate"] in ["H", "Rx"]:
-            # ! count h as one 1q gate
+            # count h as one 1q gate
             circuit_duration_per_step += gate_duration_1q
             n_1q_per_step += len(instruction["targets"])
             for q in instruction["targets"]:
@@ -54,10 +54,10 @@ def simluate_trotter_2d_tfim_fidelity(
     n_movement_per_step = (row + row // 2) * col + (col + col // 2) * row
 
     # compute idle time for each qubit in one trotter step
-    # ! movement assumption: single qubit gates does not require movement
-    # ! idle time includes movement time, atom transfer time and waiting time for gates to finish
-    cross_trap_movement_duration = math.sqrt(trap_seperation / a) * 1e-6
-    cross_site_movement_duration = math.sqrt(site_seperation / a) * 1e-6
+    # movement assumption: single qubit gates does not require movement
+    # idle time includes movement time, atom transfer time and waiting time for gates to finish
+    cross_trap_movement_duration = math.sqrt(trap_seperation / 2 / a) * 2  # s
+    cross_site_movement_duration = math.sqrt(site_seperation / 2 / a) * 2  # s
     idle_time_per_step = (
         cross_site_movement_duration  # move to first ZZ layer
         + cross_site_movement_duration  # move to second ZZ layer
@@ -67,17 +67,16 @@ def simluate_trotter_2d_tfim_fidelity(
         + cross_site_movement_duration  # move to fourth ZZ layer
         + cross_site_movement_duration  # return to init configuration
         + atom_transfer_duration * 2 * 6  # pick up and drop for 5 movement layers
-    ) * 1e-6
+    )
 
     # add atom transfer time for movement layers
     circuit_duration_per_step += idle_time_per_step
-    # todo: count the qubit idle time
 
     fidelity_init = physical_error_model.get_fidelity("init") ** n_qubits
     fidelity_measurement = physical_error_model.get_fidelity("measurement") ** n_qubits
     fidelity_cz = physical_error_model.get_fidelity("cz_loss") ** (
         n_cz_layer_per_step * n_trotter_steps * n_qubits
-    )  # ! cz loss is applied to all qubits in the layer
+    )  # cz loss is applied to all qubits in the layer
     fidelity_cz *= physical_error_model.get_fidelity("cz") ** (
         n_cz_per_step * n_trotter_steps
     )

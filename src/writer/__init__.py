@@ -1,1 +1,1 @@
-from src.writer.writer import Writer
+from .writer import Writer
