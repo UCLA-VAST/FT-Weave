@@ -42,6 +42,16 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         * len(params["decompose_move"])
         * len(params["parallel_execution"])
     )
+    if True in params["decompose_move"] and True in params["parallel_execution"]:
+        total_configs -= (
+            len(params["qubit_sizes"])
+            * len(params["placement_methods"])
+            * len(params["n_aods"])
+            * len(params["consider_skip_rus"])
+            * len(params["tmr_assignment_method"])
+            * len(params["trivial_return"])
+            * params["trials_per_config"]
+        )
 
     print("=" * 80)
     print("EVALUATION SCRIPT - MAGIC STATE FACTORY EXECUTION")
@@ -71,6 +81,9 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         params["decompose_move"],
         params["parallel_execution"],
     ):
+        if parallel_execution and decompose_move:
+            # For simplicity, we only evaluate parallel execution for non-decomposed movement
+            continue
         for trial in range(params["trials_per_config"]):
             rng = np.random.default_rng(42 + trial)
             config_count += 1
@@ -122,6 +135,13 @@ def run_evaluation(params: dict, plot_figure: bool = False):
                 total_time, log = factory_angle_execution(
                     **config,
                 )
+            # save log to file
+            log_dir = f"output/evaluation/logs/{n_rows}x{n_cols}/{placement}/naod_{n_aods}/skipRUS_{skip_rus}/trivial_return_{trivial_ret}/decompos_move_{decompose_move}/parallel_{parallel_execution}"
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, f"trial_{trial}.log")
+            with open(log_path, "w") as f:
+                for entry in log:
+                    f.write(str(entry) + "\n")
             profiling_result = analyze_execution_log(log, n_factories=n_factories)
             # print(profiling_result)
             result = {
@@ -205,14 +225,13 @@ if __name__ == "__main__":
             "col_based",
             "checkerboard",
         ],
-        "n_aods": [2, 3, 4, 5],
+        "n_aods": [1, 2, 3, 4, 5],
         "consider_skip_rus": [0, 1, 2],
         # "tmr_assignment_method": ["naive", "matching"],
         "tmr_assignment_method": ["matching"],
-        # "trivial_return": [False, True],
-        "trivial_return": [False],
-        "trials_per_config": 10,
-        "decompose_move": [False],
-        "parallel_execution": [True],
+        "trivial_return": [False, True],
+        "trials_per_config": 100,
+        "decompose_move": [False, True],
+        "parallel_execution": [False, True],
     }
     run_evaluation(params=params, plot_figure=False)
