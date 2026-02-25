@@ -399,19 +399,3 @@ def print_execution_profile(profile: dict[str, Any], top_n_pairs: int = 0) -> No
             )
         elif op_name in count_only_ops:
             print(f"  - {op_name}: count={s['count']}")
-
-
-def fidelity_simulation(log, n_factories, fidelity: dict) -> dict:
-    profiling_result = analyze_execution_log(log, n_factories=n_factories)
-    fidelity_result = {}
-    n_cnot = profiling_result["ops"]["cnot"]["total_time"]
-    rotation_count = profiling_result["rotation_count"]
-
-    fidelity_result["cnot"] = fidelity["cnot"] ** n_cnot
-    fidelity_result["rz"] = 1
-    for angle, count in rotation_count.items():
-        fidelity_angle = fidelity["rz"](angle)
-        fidelity_result["rz"] = fidelity_angle**count
-
-    fidelity_result["total"] = fidelity_result["cnot"] * fidelity_result["rz"]
-    return fidelity_result
