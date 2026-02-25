@@ -50,7 +50,7 @@ def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
         )
         for result in results:
             f.write(
-                f"{result['qubit_layout']},{result['n_trotter_steps']},{result['fidelity']},{result['total_duration'],{result['fidelity_cz']},{result['fidelity_1q']},{result['fidelity_move']},{result['fidelity_idle']},{result['fidelity_init']},{result['fidelity_measurement']}}\n"
+                f"{result['qubit_layout']},{result['n_trotter_steps']},{result['fidelity']},{result['total_duration']},{result['fidelity_cz']},{result['fidelity_1q']},{result['fidelity_move']},{result['fidelity_idle']},{result['fidelity_init']},{result['fidelity_measurement']}\n"
             )
 
 
