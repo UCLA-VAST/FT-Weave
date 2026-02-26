@@ -82,7 +82,7 @@ def run_evaluation_star(
         decompose_move,
         parallel_execution,
     ) in product(
-        params["qubit_sizes"],
+        params["qubit_layout"],
         params["tfim"],
         params["placement_methods"],
         params["n_aods"],
@@ -110,6 +110,7 @@ def run_evaluation_star(
                 generate_one_layer_2d_tfim_circuit_star(
                     n_qubits=n_cols * n_rows,
                     qubit_layout=(n_rows, n_cols),
+                    placement=placement,
                     J=J,
                     h=h,
                     dt=dt,
@@ -202,8 +203,27 @@ if __name__ == "__main__":
         "decompose_move": [False, True],
         "parallel_execution": [False, True],
     }
-    run_evaluation_raw(params=params, physical_error_model=physical_error_model)
+    # run_evaluation_raw(params=params, physical_error_model=physical_error_model)
 
     logical_error_model = LogicalErrorModel(
         physical_model=physical_error_model, code_distance=7
+    )
+
+    star_params = {
+        "qubit_layout": qubit_layout,
+        "tfim": tfim,
+        "placement_methods": [
+            "col_based",
+            "checkerboard",
+        ],
+        "n_aods": [1],
+        "consider_skip_rus": [0],
+        "trivial_return": [False],
+        "trials_per_config": 1,
+        "decompose_move": [False],
+        "parallel_execution": [False],
+    }
+
+    run_evaluation_star(
+        params=star_params, logical_error_model=logical_error_model, analyze_result=True
     )

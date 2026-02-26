@@ -54,7 +54,7 @@ def factory_angle_execution_parallel(
     trivial_return: bool = True,
     decompose_move: bool = False,
     rng: np.random.Generator | None = None,
-    write_log: bool = False,
+    save_log: bool = False,
     log_path: str | None = None,
 ):
     """
@@ -95,6 +95,7 @@ def factory_angle_execution_parallel(
             qubit_id=qubit,
             target_angle=round(theta, 7),
             factory_limit=len(magic_state_locations),
+            code_distance=code_distance,
         )
         for qubit, theta in target_qubits_angles.items()
     }
@@ -361,7 +362,7 @@ def factory_angle_execution_parallel(
     execution_log = sorted(execution_log, key=lambda x: x[:4])
 
     validate_execution_log(execution_log, magic_state_locations, n_aods)
-    if write_log and log_path is not None:
+    if save_log and log_path is not None:
         with open(log_path, "w") as f:
             for entry in execution_log:
                 f.write(str(entry) + "\n")

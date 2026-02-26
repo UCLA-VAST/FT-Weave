@@ -137,11 +137,9 @@ def release_useless_factories(
         if tracker.waiting_for_rus:
             begin_level = 1
         for level in range(begin_level, 3):
-            angle = tracker.target_angle * pow(2, level)
+            angle = tracker.get_angle_level(level)
             if np.isclose(angle, 0.0, atol=1e-8):
                 continue
-            if ANGLE_S < angle:
-                angle -= ANGLE_S
             angles_required_by_qubits.add(angle)
 
     for factory in factory_pool.factories:

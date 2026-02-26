@@ -26,11 +26,9 @@ def get_angles_for_preparation(
             level_demand = 2
 
         for level in range(0, 2):
-            angle = tracker.target_angle * pow(2, level)
+            angle = tracker.get_angle_level(level)
             if np.isclose(angle, 0.0, atol=1e-8):
                 continue
-            if ANGLE_S < angle:
-                angle -= ANGLE_S
             success_rate = calculate_success_rate(angle, code_distance)
             demand = level_demand / success_rate
             level_demand /= 2
@@ -58,12 +56,10 @@ def get_angles_for_preparation(
         demands = {}
         sum_demands = 0
         for level in range(0, level_threshold):
-            angle = tracker.target_angle * pow(2, level)
+            angle = tracker.get_angle_level(level)
             if np.isclose(angle, 0.0, atol=1e-8):
                 continue
-            if ANGLE_S < angle:
-                angle -= ANGLE_S
-            assert angle > 0
+            # assert angle > 0
             success_rate = calculate_success_rate(angle, code_distance)
             # if qubit == 7:
             #     print("angle")

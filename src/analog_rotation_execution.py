@@ -48,7 +48,7 @@ def factory_angle_execution(
     trivial_return: bool = True,
     decompose_move: bool = True,
     rng: np.random.Generator | None = None,
-    write_log: bool = False,
+    save_log: bool = False,
     log_path: str | None = None,
 ):
     """
@@ -73,6 +73,7 @@ def factory_angle_execution(
             qubit_id=qubit,
             target_angle=round(theta, 7),
             factory_limit=len(magic_state_locations),
+            code_distance=code_distance,
         )
         for qubit, theta in target_qubits_angles.items()
     }
@@ -92,10 +93,17 @@ def factory_angle_execution(
     # ========================================================================
 
     while len(qubit_trackers):
+        assert (
+            circuit_moment <= 5000
+        ), "Circuit execution taking too long, possible infinite loop. Qubit trackers: {}".format(
+            qubit_trackers
+        )
+        # print(f"Remaining qubits to prepare: {len(qubit_trackers)}")
         # print("new run")
         # PHASE 1: Assign idle factories to prepare angles
         factory_list = factory_pool.get_idle_factories()
-
+        # print(len(factory_list))
+        # input()
         # PHASE 2: Execute TMR preparation
         circuit_moment, execution_log = execute_tmr_preparation_pre_rz(
             factory_list,
@@ -245,7 +253,7 @@ def factory_angle_execution(
             )
         )
         # input()
-    if write_log and log_path is not None:
+    if save_log and log_path is not None:
         with open(log_path, "w") as f:
             for entry in execution_log:
                 f.write(str(entry) + "\n")

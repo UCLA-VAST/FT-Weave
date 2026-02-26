@@ -75,16 +75,6 @@ def assign_teleportation_with_sharing(
 
         qubit_factory_pairs.extend(matches)
 
-    # Handle any remaining qubits not in angle groups (shouldn't happen in normal flow)
-    # for qubit in qubit_trackers:
-    #     if qubit in successful_qubits or qubit in assigned_qubits:
-    #         continue
-    #     else:
-    #         tracker = qubit_trackers[qubit]
-    #         for factory, angle in tracker.factories:
-    #             if np.isclose(angle, tracker.target_angle):
-    #                 assert False
-
     return qubit_factory_pairs
 
 

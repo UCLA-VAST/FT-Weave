@@ -41,22 +41,22 @@ def simulate_TMR_preparation(
         factory_pool: FactoryPool object containing Factory objects
 
     """
-    if factory_id_list:
-        for factory_id in factory_id_list:
-            factory = factory_pool.get_factory_by_id(factory_id)
-            if factory.success_rate is not None:
-                outcome = simulate_angle_preparation(factory.success_rate, rng)
-                factory.set_tmr_state(outcome)
-            else:
-                factory.set_tmr_state(False)
-    else:
-        # use when TMR and RUS are executed in separate phases, so we can simulate all TMR outcomes at once
-        for factory in factory_pool.get_tmr_after_rz_factories():
-            if factory.success_rate is not None:
-                outcome = simulate_angle_preparation(factory.success_rate, rng)
-                factory.set_tmr_state(outcome)
-            else:
-                factory.set_tmr_state(False)
+    # count = 0
+    if not factory_id_list:
+        factory_id_list = [
+            factory.id for factory in factory_pool.get_tmr_after_rz_factories()
+        ]
+    for factory_id in factory_id_list:
+        factory = factory_pool.get_factory_by_id(factory_id)
+        if factory.success_rate is not None:
+            outcome = simulate_angle_preparation(factory.success_rate, rng)
+            factory.set_tmr_state(outcome)
+            # if outcome:
+            #     count += 1
+        else:
+            factory.set_tmr_state(False)
+    # n_total = len(factory_id_list)
+    # print(f"TMR preparation success count: {count} out of {n_total}")
 
 
 def simulate_RUS_injection(

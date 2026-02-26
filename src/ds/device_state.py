@@ -11,9 +11,50 @@ from src.config import (
     ANGLE_S,
 )
 
+from scipy.optimize import brentq
+
+
 # ============================================================================
 # DATA STRUCTURES
 # ============================================================================
+# -------------------------------------------------------
+# Forward mapping: physical -> logical
+# -------------------------------------------------------
+def logical_from_physical(physical_angle: float, d: int) -> float:
+    """
+    Compute logical angle θ from physical angle θ*.
+    """
+    s = np.sin(physical_angle / 2)
+    c = np.cos(physical_angle / 2)
+
+    numerator = s**d
+    denominator = np.sqrt(s ** (2 * d) + c ** (2 * d))
+
+    return 2 * np.arcsin(numerator / denominator)
+
+
+# -------------------------------------------------------
+# Inverse mapping: logical -> physical
+# -------------------------------------------------------
+def convert_logical_angle_to_physical_angle(
+    logical_angle: float, d: int, tol: float = 1e-12
+) -> float:
+    """
+    Numerically solve for physical angle θ*
+    given logical angle θ.
+    """
+
+    # Root function:
+    def root_fn(physical_angle):
+        return logical_from_physical(physical_angle, d) - logical_angle
+
+    # Physical angle lies in [0, π]
+    physical_angle, result = brentq(root_fn, 0.0, np.pi, xtol=tol, full_output=True)
+    recovered_logical_angle = logical_from_physical(physical_angle, d)
+    assert np.isclose(
+        logical_angle, recovered_logical_angle, atol=tol
+    ), f"Failed to recover logical angle: expected {logical_angle}, got {recovered_logical_angle}"
+    return physical_angle
 
 
 class FactoryState(Enum):
@@ -37,13 +78,20 @@ class QubitAngleTracker:
         angle_counts: Counter tracking how many factories are preparing each angle
     """
 
-    def __init__(self, qubit_id, target_angle, factory_limit):
-        self.qubit_id = round(qubit_id, PRECISION)
-        self.target_angle = target_angle
+    # Class-level cache for logical->physical angle conversions to avoid repeated computation
+    _angle_cache: dict[tuple[float, int], float] = {}
+
+    def __init__(self, qubit_id, target_angle, factory_limit, code_distance):
+        self.qubit_id = qubit_id
+        self.target_logical_angle = round(target_angle, PRECISION)  # logical angle
+        self.target_angle = self._get_physical_angle_cached(
+            target_angle, code_distance
+        )  # physical angle
         self.factories: list[tuple[int, float]] = []  # List of (factory_id, angle)
         self.angle_counts = Counter()  # angle -> count
         self.waiting_for_rus = False
         self.factory_limit = factory_limit
+        self.code_distance = code_distance
 
     def add_factory(self, factory_id, angle):
         """Add a factory working on a specific angle."""
@@ -92,8 +140,37 @@ class QubitAngleTracker:
         """Check if any factories are working on this qubit."""
         return len(self.factories) > 0
 
+    def _get_physical_angle_cached(
+        self, logical_angle: float, code_distance: int, tol: float = 1e-12
+    ) -> float:
+        """
+        Get physical angle from logical angle, using a lookup table to avoid repeated computation.
+        Since initial angles are typically the same across qubits, this cache is shared at class level.
+        """
+        # Round logical angle to PRECISION for cache key consistency
+        cache_key = (round(logical_angle, PRECISION), code_distance)
+
+        # Explicitly use class-level cache to ensure sharing across all instances
+        if cache_key in QubitAngleTracker._angle_cache:
+            return QubitAngleTracker._angle_cache[cache_key]
+
+        # Compute and cache the result
+        physical_angle = convert_logical_angle_to_physical_angle(
+            logical_angle, d=code_distance, tol=tol
+        )
+        physical_angle = round(physical_angle, PRECISION)  # Round for consistency
+        QubitAngleTracker._angle_cache[cache_key] = physical_angle
+        if self.qubit_id == 0:  # Only print for the first qubit to avoid clutter
+            print(
+                f"Qubit {self.qubit_id}: Logical angle {logical_angle:.6f} -> Physical angle {physical_angle:.6f}"
+            )
+        return physical_angle
+
     def double_target_angle(self):
-        self.target_angle *= 2
+        self.target_logical_angle *= 2
+        self.target_angle = self._get_physical_angle_cached(
+            self.target_logical_angle, self.code_distance
+        )  # physical angle
 
     def set_target_angle(self, angle):
         self.target_angle = angle
@@ -120,6 +197,18 @@ class QubitAngleTracker:
         self.waiting_for_rus = False
 
         return success, insert_s_gate
+
+    def get_angle_level(self, level):
+        """Get the angle corresponding to a specific level."""
+        logical_angle = self.target_logical_angle * pow(2, level)
+        if np.isclose(logical_angle, 0.0, atol=1e-8):
+            return 0.0
+        physical_angle = self._get_physical_angle_cached(
+            logical_angle, self.code_distance
+        )
+        if physical_angle > ANGLE_S:
+            physical_angle -= ANGLE_S
+        return physical_angle
 
     def __repr__(self):
         return f"QubitTracker(qubit={self.qubit_id}, target={self.target_angle}, factories={len(self.factories)}, waiting_for_rus={self.waiting_for_rus})"
