@@ -17,7 +17,7 @@ def simluate_trotter_2d_tfim_fidelity(
     atom_transfer_duration: float = 15e-6,  # seconds
 ) -> dict:
     """
-    H=-J\sum_{i,j} Z_iZ_j - h \sum_i X_i
+    H=-J sum_{i,j} Z_iZ_j - h sum_i X_i
     One trotter step consists of:
         [ZZ horizontal even]
         [ZZ horizontal odd]
@@ -99,9 +99,7 @@ def simluate_trotter_2d_tfim_fidelity(
             circuit_duration_per_step - qubit_busy_time_per_step[q]
         ) * n_trotter_steps
         # compute number of idle error events based on total idle time and coherence time
-        n_idle_time = total_idle_time / physical_error_model.get_error_rate(
-            "coherence_time"
-        )
+        n_idle_time = total_idle_time / physical_error_model.get_coherence_time()
         fidelity_idle *= math.exp(-n_idle_time)
 
     fidelity = (

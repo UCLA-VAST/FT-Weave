@@ -14,7 +14,6 @@ class PhysicalErrorModel:
 
     # Basic model error rates for physical operations
     _BASIC_ERROR_RATES = {
-        "coherence_time": 1.5,  # in seconds, for reference
         "init": 3e-3,
         "1q": 3e-3,
         "move": 2.8e-4,  # sum of 4e-5 + 4e-5 + 2e-4
@@ -27,7 +26,7 @@ class PhysicalErrorModel:
         # represents the combined error probability for implementing a CZ gate,
         # including transport operations and all associated error channels.
     }
-
+    coherence_time = 1.5  # in seconds, for reference
     model_type: str = "basic"  # "basic" or "lookahead"
     lookahead_improvement_ratio: float = 10.0  # Improvement factor for lookahead model
 
@@ -71,6 +70,10 @@ class PhysicalErrorModel:
                 f"Unknown operation: {operation}. Available: {list(rates.keys())}"
             )
         return rates[operation]
+
+    def get_coherence_time(self) -> float:
+        """Get the coherence time for idle error calculations."""
+        return self.coherence_time
 
     def get_fidelity(self, operation: str) -> float:
         """Get the fidelity (1 - error_rate) for a specific operation.
