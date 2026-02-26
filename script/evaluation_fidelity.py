@@ -8,6 +8,7 @@ import os
 from itertools import product
 from src.tfim_star import generate_one_layer_2d_tfim_circuit_star
 import numpy as np
+import csv
 
 
 # ! only consider 1 trotter for now
@@ -61,13 +62,16 @@ def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
             )
 
 
-def run_evaluation_star(params: dict, logical_error_model: LogicalErrorModel):
+def run_evaluation_star(
+    params: dict, logical_error_model: LogicalErrorModel, analyze_result: bool
+):
     """Run comprehensive evaluation with different parameter combinations."""
 
     # Create output directory
     output_dir = "output/evaluation/fidelity"
     os.makedirs(output_dir, exist_ok=True)
     results = []
+    profiling_results = []
     for (
         (n_cols, n_rows),
         (J, h, dt, n_trotter),
@@ -102,17 +106,21 @@ def run_evaluation_star(params: dict, logical_error_model: LogicalErrorModel):
                 "rng": rng,
                 "save_log": False,
             }
-            qc_one_layer, rz_logs = generate_one_layer_2d_tfim_circuit_star(
-                n_qubits=n_cols * n_rows,
-                qubit_layout=(n_rows, n_cols),
-                J=J,
-                h=h,
-                dt=dt,
-                code_distance=logical_error_model.code_distance,
-                config=config,
-                parallel_execution=parallel_execution,
-                result_path=log_dir + f"/trial_{trial}.pickle",
+            qc_one_layer, rz_logs, profiling_results_per_case = (
+                generate_one_layer_2d_tfim_circuit_star(
+                    n_qubits=n_cols * n_rows,
+                    qubit_layout=(n_rows, n_cols),
+                    J=J,
+                    h=h,
+                    dt=dt,
+                    code_distance=logical_error_model.code_distance,
+                    config=config,
+                    parallel_execution=parallel_execution,
+                    analyze_result=analyze_result,
+                    # result_path=log_dir + f"/trial_{trial}.pickle",
+                )
             )
+            profiling_results += profiling_results_per_case
             result = simluate_trotter_2d_tfim_fidelity_star(
                 n_qubits=n_cols * n_rows,
                 n_factories=n_cols * n_rows,
@@ -141,6 +149,15 @@ def run_evaluation_star(params: dict, logical_error_model: LogicalErrorModel):
             f.write(
                 f"{result['qubit_layout'][0]*result['qubit_layout'][1]},{result['n_trotter_steps']},{result['fidelity']},{result['fidelity_of_rz_layer']},{result['fidelity_cnot']},{result['fidelity_1q']},{result['n_cnot']},{result['n_h']}\n"
             )
+    if analyze_result:
+        profiling_results_path = os.path.join(
+            output_dir, "star_full_trotter_profiling_results.csv"
+        )
+        with open(profiling_results_path, "a", newline="") as csvfile:
+            fieldnames = profiling_results[0].keys()
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(profiling_results)
 
 
 if __name__ == "__main__":
