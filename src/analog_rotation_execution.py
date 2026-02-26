@@ -30,7 +30,6 @@ from .analog_rotation import (
 from .rus.rus_teleportaion import rus_teleportation
 from .rus.rus_post_teleportation import rus_post_teleportation
 
-
 # ============================================================================
 # MAIN EXECUTION FUNCTION
 # ============================================================================
@@ -41,6 +40,7 @@ def factory_angle_execution(
     target_qubits_angles: dict[int, float],
     logic_qubit_locations: list[tuple[int, int]],
     magic_state_locations: list[tuple[int, int]],
+    code_distance: int,
     column_based_placement: bool = True,
     n_aods: int = 1,
     consider_skip_rus: int = 0,  # 0: no skip, 1: partial skip, 2: aggressive skip
@@ -48,6 +48,8 @@ def factory_angle_execution(
     trivial_return: bool = True,
     decompose_move: bool = True,
     rng: np.random.Generator | None = None,
+    write_log: bool = False,
+    log_path: str | None = None,
 ):
     """
     Execute angle preparation on magic state factories with lookahead optimization.
@@ -115,7 +117,8 @@ def factory_angle_execution(
             factory_pool,
             qubit_trackers,
             logic_qubit_locations,
-            column_based_placement,
+            code_distance=code_distance,
+            column_based_placement=column_based_placement,
             tmr_assignment_method=tmr_assignment_method,
         )
         circuit_moment, execution_log = execute_tmr_preparation_rz(
@@ -242,4 +245,8 @@ def factory_angle_execution(
             )
         )
         # input()
+    if write_log and log_path is not None:
+        with open(log_path, "w") as f:
+            for entry in execution_log:
+                f.write(str(entry) + "\n")
     return circuit_moment, execution_log

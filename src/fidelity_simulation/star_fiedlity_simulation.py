@@ -13,7 +13,7 @@ def simluate_trotter_2d_tfim_fidelity(
     logical_error_model: LogicalErrorModel,
 ) -> dict:
     """
-    H=-J\sum_{i,j} Z_iZ_j - h \sum_i X_i
+    H=-J sum_{i,j} Z_iZ_j - h sum_i X_i
     One trotter step consists of:
         [ZZ horizontal even]
         [ZZ horizontal odd]
@@ -53,27 +53,27 @@ def simluate_trotter_2d_tfim_fidelity(
                     )
 
     # count the clifford gates in one trotter step
-    n_cz_per_step = 0
+    n_cnot_per_step = 0
     n_h_per_step = 0
     for instruction in qc_one_layer:
-        if instruction["gate"] == "CZ":
-            n_cz_per_step += len(instruction["targets"])
+        if instruction["gate"] == "CNOT":
+            n_cnot_per_step += len(instruction["targets"])
         elif instruction["gate"] == "H":
             n_h_per_step += len(instruction["targets"])
 
-    fidelity_cz = logical_error_model.get_logical_fidelity("CZ") ** (
-        n_cz_per_step * n_trotter_steps
+    fidelity_cnot = logical_error_model.get_logical_fidelity("CNOT") ** (
+        n_cnot_per_step * n_trotter_steps
     )
     fidelity_1q = logical_error_model.get_logical_fidelity("H") ** (
         n_h_per_step * n_trotter_steps
     )
-    fidelity = fidelity_of_rz_layer * fidelity_cz * fidelity_1q
+    fidelity = fidelity_of_rz_layer * fidelity_cnot * fidelity_1q
     fidelity_profile = {
         "fidelity": fidelity,
         "fidelity_of_rz_layer": fidelity_of_rz_layer,
-        "fidelity_cz": fidelity_cz,
+        "fidelity_cnot": fidelity_cnot,
         "fidelity_1q": fidelity_1q,
-        "n_cz": n_cz_per_step * n_trotter_steps,
+        "n_cnot": n_cnot_per_step * n_trotter_steps,
         "n_h": n_h_per_step * n_trotter_steps,
     }
     return fidelity_profile

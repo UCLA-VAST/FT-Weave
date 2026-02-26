@@ -9,10 +9,14 @@ from .ds.device_state import FactoryPool
 # ============================================================================
 # SIMULATION FUNCTIONS
 # ============================================================================
-def calculate_success_rate(angle):
+def calculate_success_rate(angle, code_distance):
     """Calculate success rate for angle preparation (decreases with angle)."""
-    assert 0.6 - angle // 100 > 0
-    return 0.6 - angle // 100
+
+    s = np.sin(angle / 2)
+    c = np.cos(angle / 2)
+    basic_success_rate = s ** (2 * code_distance) + c ** (2 * code_distance)
+    initialization_success_rate = 1  # ! to be extracted from the figure
+    return basic_success_rate
 
 
 def simulate_angle_preparation(success_rate, rng: np.random.Generator):

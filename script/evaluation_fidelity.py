@@ -1,11 +1,16 @@
 from src.fidelity_simulation import (
     simluate_trotter_2d_tfim_fidelity,
+    simluate_trotter_2d_tfim_fidelity_star,
 )
-from src.error_model import PhysicalErrorModel
-from src.tfim_raw import generate_one_layer_2d_tfim_circuit_cz
+from src.error_model import PhysicalErrorModel, LogicalErrorModel
+from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
 import os
+from itertools import product
+from src.tfim_star import generate_one_layer_2d_tfim_circuit_star
+import numpy as np
 
 
+# ! only consider 1 trotter for now
 def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
     """Run comprehensive evaluation with different parameter combinations."""
 
@@ -24,6 +29,7 @@ def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
             qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
                 n_qubits=n_qubits, qubit_layout=qubit_layout, J=J, h=h, dt=dt
             )
+
             # for n_trotter_steps in range(1, n_trotter):
             for n_trotter_steps in range(1, 2):
                 fidelity_profile = simluate_trotter_2d_tfim_fidelity(
@@ -55,44 +61,86 @@ def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
             )
 
 
-def run_evaluation_star(params: dict):
+def run_evaluation_star(params: dict, logical_error_model: LogicalErrorModel):
     """Run comprehensive evaluation with different parameter combinations."""
 
     # Create output directory
     output_dir = "output/evaluation/fidelity"
     os.makedirs(output_dir, exist_ok=True)
-
     results = []
-    total_configs = (
-        len(params["qubit_layout"])
-        * len(params["n_trotter_steps"])
-        * len(params["placement_methods"])
-        * len(params["n_aods"])
-        * len(params["consider_skip_rus"])
-        * len(params["tmr_assignment_method"])
-        * len(params["trivial_return"])
-        * params["trials_per_config"]
-        * len(params["decompose_move"])
-        * len(params["parallel_execution"])
-    )
-    print("=" * 80)
-    print("EVALUATION SCRIPT - STAR FIDELITY SIMULATION")
-    print("=" * 80)
-    print(f"Total configurations to test: {total_configs}")
-    print("=" * 80 + "\n")
+    for (
+        (n_cols, n_rows),
+        (J, h, dt, n_trotter),
+        placement,
+        n_aods,
+        skip_rus,
+        trivial_ret,
+        decompose_move,
+        parallel_execution,
+    ) in product(
+        params["qubit_sizes"],
+        params["tfim"],
+        params["placement_methods"],
+        params["n_aods"],
+        params["consider_skip_rus"],
+        params["trivial_return"],
+        params["decompose_move"],
+        params["parallel_execution"],
+    ):
+        if parallel_execution and decompose_move:
+            # For simplicity, we only evaluate parallel execution for non-decomposed movement
+            continue
+        for trial in range(params["trials_per_config"]):
+            rng = np.random.default_rng(42 + trial)
+            log_dir = f"output/evaluation/fidelty/results/{n_rows}x{n_cols}/{placement}/naod_{n_aods}/skipRUS_{skip_rus}/trivial_return_{trivial_ret}/decompos_move_{decompose_move}/parallel_{parallel_execution}"
+            os.makedirs(log_dir, exist_ok=True)
+            config = {
+                "n_aods": n_aods,
+                "consider_skip_rus": skip_rus,
+                "trivial_return": trivial_ret,
+                "decompose_move": decompose_move,
+                "rng": rng,
+                "save_log": False,
+            }
+            qc_one_layer, rz_logs = generate_one_layer_2d_tfim_circuit_star(
+                n_qubits=n_cols * n_rows,
+                qubit_layout=(n_rows, n_cols),
+                J=J,
+                h=h,
+                dt=dt,
+                code_distance=logical_error_model.code_distance,
+                config=config,
+                parallel_execution=parallel_execution,
+                result_path=log_dir + f"/trial_{trial}.pickle",
+            )
+            result = simluate_trotter_2d_tfim_fidelity_star(
+                n_qubits=n_cols * n_rows,
+                n_factories=n_cols * n_rows,
+                qubit_layout=(n_rows, n_cols),
+                n_trotter_steps=1,  # for simplicity, we only evaluate 1 trotter step for star compilation
+                qc_one_layer=qc_one_layer,
+                execution_logs=rz_logs,
+                logical_error_model=logical_error_model,
+            )
+            results.append(
+                {
+                    "qubit_layout": (n_rows, n_cols),
+                    "n_trotter_steps": 1,
+                    **result,
+                }
+            )
 
     # Save results to csv file
-    results_path = os.path.join(output_dir, "raw_fidelity_results.csv")
+    results_path = os.path.join(output_dir, "star_fidelity_results.csv")
     with open(results_path, "w") as f:
         # Write header
         f.write(
-            "qubit_layout,n_trotter_steps,fidelity,fidelity_of_rz_layer,fidelity_cz,fidelity_1q,n_cz,n_h\n"
+            "n_qubit,n_trotter_steps,fidelity,fidelity_of_rz_layer,fidelity_cnot,fidelity_1q,n_cnot,n_h\n"
         )
         for result in results:
             f.write(
-                f"{result['qubit_layout']},{result['n_trotter_steps']},{result['fidelity']},{result['fidelity_of_rz_layer']},{result['fidelity_cz']},{result['fidelity_1q']},{result['n_cz']},{result['n_h']}\n"
+                f"{result['qubit_layout'][0]*result['qubit_layout'][1]},{result['n_trotter_steps']},{result['fidelity']},{result['fidelity_of_rz_layer']},{result['fidelity_cnot']},{result['fidelity_1q']},{result['n_cnot']},{result['n_h']}\n"
             )
-    raise NotImplementedError("Star fidelity simulation is not implemented yet.")
 
 
 if __name__ == "__main__":
@@ -132,11 +180,13 @@ if __name__ == "__main__":
         ],
         "n_aods": [1, 2, 3, 4, 5],
         "consider_skip_rus": [0, 1, 2],
-        "tmr_assignment_method": ["matching"],
-        # "trivial_return": [False, True],
         "trivial_return": [False, True],
         "trials_per_config": 10,
-        "decompose_move": [False],
+        "decompose_move": [False, True],
         "parallel_execution": [False, True],
     }
     run_evaluation_raw(params=params, physical_error_model=physical_error_model)
+
+    logical_error_model = LogicalErrorModel(
+        physical_model=physical_error_model, code_distance=7
+    )

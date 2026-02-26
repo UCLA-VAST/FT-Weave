@@ -19,6 +19,7 @@ def assign_factories_for_batch(
     qubit_trackers: dict[int, QubitAngleTracker],
     logic_qubit_locations: list[tuple[int, int]],
     batch_angles: dict[int, dict[int, int]],
+    code_distance: int,
     column: bool = False,
     method: str = "matching",
 ):
@@ -43,6 +44,7 @@ def assign_factories_for_batch(
             qubit_trackers,
             logic_qubit_locations,
             batch_angles,
+            code_distance,
             column,
         )
     elif method == "matching":
@@ -52,6 +54,7 @@ def assign_factories_for_batch(
             qubit_trackers,
             logic_qubit_locations,
             batch_angles,
+            code_distance,
         )
     else:
         raise ValueError(f"Unknown assignment method: {method}")
@@ -106,7 +109,6 @@ def reassign_factories(
             if factory.qubit in qubit_trackers:
                 qubit_trackers[factory.qubit].remove_factory(factory.id, factory.angle)
             factory.update_qubit(qubit)
-            # success_rate = calculate_success_rate(angle)
             qubit_trackers[qubit].add_factory(factory.id, angle)
         # print(
         #     f"Reassigning factory {factory.id} at location {factory.location} preparing angle {factory.angle} to qubit {qubit} who need angle {angle}"

@@ -15,6 +15,7 @@ from src.config import (
 def get_angles_for_preparation(
     qubit_trackers: dict[int, QubitAngleTracker],
     n_available_factories: int,
+    code_distance: int,
 ) -> dict[int, dict[int, int]]:
     #  compute demand for qubits
     qubit_demands = defaultdict(int)
@@ -30,7 +31,7 @@ def get_angles_for_preparation(
                 continue
             if ANGLE_S < angle:
                 angle -= ANGLE_S
-            success_rate = calculate_success_rate(angle)
+            success_rate = calculate_success_rate(angle, code_distance)
             demand = level_demand / success_rate
             level_demand /= 2
             qubit_demands[qubit] += demand
@@ -63,7 +64,7 @@ def get_angles_for_preparation(
             if ANGLE_S < angle:
                 angle -= ANGLE_S
             assert angle > 0
-            success_rate = calculate_success_rate(angle)
+            success_rate = calculate_success_rate(angle, code_distance)
             # if qubit == 7:
             #     print("angle")
             #     print(angle)

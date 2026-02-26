@@ -13,6 +13,7 @@ def assign_factories_for_batch_matching(
     qubit_trackers: dict[int, QubitAngleTracker],
     logic_qubit_locations: list[tuple[int, int]],
     batch_angles: dict[int, dict[int, int]],
+    code_distance: int,
 ):
     """
     Assign factories to prepare the given batch of angles.
@@ -63,7 +64,7 @@ def assign_factories_for_batch_matching(
     for i, j in zip(row_ind, col_ind):
         factory = factories[i]
         qubit, angle = assignment_idx_to_qubit_anlge_pair[j]
-        success_rate = calculate_success_rate(angle)
+        success_rate = calculate_success_rate(angle, code_distance)
         # if factory.id == 15 and qubit == 3:
         #     print(factory)
         #     print(qubit_trackers[qubit].factories)

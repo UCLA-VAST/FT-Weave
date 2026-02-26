@@ -2,32 +2,18 @@ def lattice_index(x, y, L):
     return x + y * L
 
 
-def add_zz_layer_cz_native(qc: list, pairs, theta, use_rz=False):
+def add_zz_layer(qc: list, pairs, theta, logical=False):
     """
     Add ZZ layer using CZ and H decomposition of CX.
 
     CX-RZ-CX  →  H CZ RX CZ H
     """
     targets = [j for i, j in pairs]
-    qc.append(
-        {
-            "gate": "H",
-            "targets": targets,
-            "params": {},
-        }
-    )
-    qc.append(
-        {
-            "gate": "CZ",
-            "targets": pairs,
-            "params": {},
-        }
-    )
-    if use_rz:
+    if logical:
         qc.append(
             {
-                "gate": "H",
-                "targets": targets,
+                "gate": "CNOT",
+                "targets": pairs,
                 "params": {},
             }
         )
@@ -40,12 +26,26 @@ def add_zz_layer_cz_native(qc: list, pairs, theta, use_rz=False):
         )
         qc.append(
             {
+                "gate": "CNOT",
+                "targets": pairs,
+                "params": {},
+            }
+        )
+    else:
+        qc.append(
+            {
                 "gate": "H",
                 "targets": targets,
                 "params": {},
             }
         )
-    else:
+        qc.append(
+            {
+                "gate": "CZ",
+                "targets": pairs,
+                "params": {},
+            }
+        )
         qc.append(
             {
                 "gate": "Rx",
@@ -53,20 +53,20 @@ def add_zz_layer_cz_native(qc: list, pairs, theta, use_rz=False):
                 "params": {"theta": 2 * theta},
             }
         )
-    qc.append(
-        {
-            "gate": "CZ",
-            "targets": pairs,
-            "params": {},
-        }
-    )
-    qc.append(
-        {
-            "gate": "H",
-            "targets": targets,
-            "params": {},
-        }
-    )
+        qc.append(
+            {
+                "gate": "CZ",
+                "targets": pairs,
+                "params": {},
+            }
+        )
+        qc.append(
+            {
+                "gate": "H",
+                "targets": targets,
+                "params": {},
+            }
+        )
 
 
 def cancel_hadamard(qc: list) -> list:
@@ -118,7 +118,7 @@ def cancel_hadamard(qc: list) -> list:
 
 
 def generate_one_layer_2d_tfim_circuit_cz(
-    n_qubits: int, qubit_layout: tuple, J, h, dt, use_rz=False
+    n_qubits: int, qubit_layout: tuple, J, h, dt, logical=False
 ):
     """
     2D TFIM circuit using CZ-native interactions.
@@ -154,14 +154,14 @@ def generate_one_layer_2d_tfim_circuit_cz(
                 else:
                     horizontal_odd.append((q1, q2))
     # ZZ layers (CZ-native)
-    add_zz_layer_cz_native(qc, horizontal_even, theta_zz, use_rz)
-    add_zz_layer_cz_native(qc, horizontal_odd, theta_zz, use_rz)
-    add_zz_layer_cz_native(qc, vertical_even, theta_zz, use_rz)
-    add_zz_layer_cz_native(qc, vertical_odd, theta_zz, use_rz)
+    add_zz_layer(qc, horizontal_even, theta_zz, logical)
+    add_zz_layer(qc, horizontal_odd, theta_zz, logical)
+    add_zz_layer(qc, vertical_even, theta_zz, logical)
+    add_zz_layer(qc, vertical_odd, theta_zz, logical)
 
     # Transverse field layer
-    targets = ([q for q in range(n_qubits)],)
-    if use_rz:
+    targets = [q for q in range(n_qubits)]
+    if logical:
         qc.append(
             {
                 "gate": "H",
@@ -171,7 +171,7 @@ def generate_one_layer_2d_tfim_circuit_cz(
         )
         qc.append(
             {
-                "gate": "RZ",
+                "gate": "Rz",
                 "targets": targets,
                 "params": {"theta": 2 * theta_x},
             }
@@ -186,7 +186,7 @@ def generate_one_layer_2d_tfim_circuit_cz(
     else:
         qc.append(
             {
-                "gate": "RX",
+                "gate": "Rx",
                 "targets": targets,
                 "params": {"theta": 2 * theta_x},
             }

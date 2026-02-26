@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import json
 
-from src.tfim import tfim_trotter_plaquette
+from src.tfim_v1 import tfim_trotter_plaquette
 from src.ds import LogicalGridManager, Architecture
 from src.writer import Writer
 from src.instruction_scheduling import instruction_scheduling

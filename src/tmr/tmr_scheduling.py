@@ -7,6 +7,7 @@ def schedule_tmr_round(
     factory_pool: FactoryPool,
     qubit_trackers: dict[int, QubitAngleTracker],
     logic_qubit_locations: list[tuple[int, int]],
+    code_distance: int,
     column_based_placement: bool = True,
     tmr_assignment_method: str = "matching",
     factories_list: list[int] | None = None,
@@ -23,7 +24,7 @@ def schedule_tmr_round(
 
     # Get angles to prepare
     batch_angles = get_angles_for_preparation(
-        qubit_trackers, len(factories_ready_for_rz)
+        qubit_trackers, len(factories_ready_for_rz), code_distance=code_distance
     )
 
     if not batch_angles:
@@ -35,6 +36,7 @@ def schedule_tmr_round(
         qubit_trackers,
         logic_qubit_locations,
         batch_angles,
+        code_distance=code_distance,
         column=column_based_placement,
         method=tmr_assignment_method,
     )

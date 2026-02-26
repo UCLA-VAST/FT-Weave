@@ -97,6 +97,7 @@ def test_small():
         target_qubits_angles,
         logic_qubit_locations,
         magic_state_locations,
+        code_distance=7,
     )
 
     # Visualize
@@ -154,6 +155,7 @@ def test(
             target_qubits_angles,
             logic_qubit_locations,
             magic_state_locations,
+            code_distance=7,
             column_based_placement=column_based_placement,
             n_aods=n_aods,
             n_aods_se=n_aods_se,
@@ -168,6 +170,7 @@ def test(
             target_qubits_angles,
             logic_qubit_locations,
             magic_state_locations,
+            code_distance=7,
             column_based_placement=column_based_placement,
             n_aods=n_aods,
             consider_skip_rus=consider_skip_rus,

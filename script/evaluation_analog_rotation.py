@@ -41,6 +41,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         * params["trials_per_config"]
         * len(params["decompose_move"])
         * len(params["parallel_execution"])
+        * len(params["code_distance"])
     )
     if True in params["decompose_move"] and True in params["parallel_execution"]:
         total_configs -= (
@@ -51,6 +52,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
             * len(params["tmr_assignment_method"])
             * len(params["trivial_return"])
             * params["trials_per_config"]
+            * len(params["code_distance"])
         )
 
     print("=" * 80)
@@ -63,7 +65,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
 
     # Generate all parameter combinations
     for (
-        (n_cols, n_rows),
+        qubit_layout,
         placement,
         n_aods,
         skip_rus,
@@ -71,6 +73,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         trivial_ret,
         decompose_move,
         parallel_execution,
+        code_distance,
     ) in product(
         params["qubit_sizes"],
         params["placement_methods"],
@@ -80,6 +83,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         params["trivial_return"],
         params["decompose_move"],
         params["parallel_execution"],
+        params["code_distance"],
     ):
         if parallel_execution and decompose_move:
             # For simplicity, we only evaluate parallel execution for non-decomposed movement
@@ -87,43 +91,48 @@ def run_evaluation(params: dict, plot_figure: bool = False):
         for trial in range(params["trials_per_config"]):
             rng = np.random.default_rng(42 + trial)
             config_count += 1
-            n_qubits = n_cols * n_rows
+            n_qubits = qubit_layout[0] * qubit_layout[1]
             n_factories = n_qubits
 
             target_qubits_angles = {}
-            angle = 0.0001
             for i in range(n_qubits):
-                target_qubits_angles[i] = angle
+                target_qubits_angles[i] = params[
+                    "angle"
+                ]  # angle can be a parameter in the future
 
             logic_qubit_locations, magic_state_locations = get_microarchitecture(
                 n_qubits,
                 n_factories,
-                (n_cols, n_rows),
+                qubit_layout,
                 placement,
             )
             factory_pool = FactoryPool(num_factories=n_factories)
+
+            log_dir = f"output/evaluation/logs/{qubit_layout[0]}x{qubit_layout[1]}/{placement}/naod_{n_aods}/skipRUS_{skip_rus}/trivial_return_{trivial_ret}/decompos_move_{decompose_move}/parallel_{parallel_execution}"
+            os.makedirs(log_dir, exist_ok=True)
             config = {
                 "target_qubits_angles": target_qubits_angles,
                 "factory_pool": factory_pool,
                 "logic_qubit_locations": logic_qubit_locations,
                 "magic_state_locations": magic_state_locations,
+                "code_distance": code_distance,
                 "n_aods": n_aods,
                 "consider_skip_rus": skip_rus,
                 "tmr_assignment_method": tmr_method,
                 "trivial_return": trivial_ret,
                 "decompose_move": decompose_move,
                 "rng": rng,
+                "save_log": False,
+                "log_path": log_dir + f"/trial_{trial}.log",
             }
 
             print(f"[{config_count}/{total_configs}] Running configuration:")
-            print(f"  Qubits: {n_qubits} ({n_cols}x{n_rows})")
+            print(f"  Qubits: {n_qubits} ({qubit_layout[0]}x{qubit_layout[1]})")
             print(f"  Placement: {placement}")
             print(f"  AODs: {n_aods}")
             print(f"  Skip RUS: {skip_rus}")
             print(f"  TMR Method: {tmr_method}")
             print(f"  Trivial Return: {trivial_ret}")
-            if config_count < 6:
-                continue
             if parallel_execution:
                 config["n_aods_se"] = (
                     n_aods  # For simplicity, use same number of AODs for SE
@@ -135,13 +144,7 @@ def run_evaluation(params: dict, plot_figure: bool = False):
                 total_time, log = factory_angle_execution(
                     **config,
                 )
-            # save log to file
-            log_dir = f"output/evaluation/logs/{n_rows}x{n_cols}/{placement}/naod_{n_aods}/skipRUS_{skip_rus}/trivial_return_{trivial_ret}/decompos_move_{decompose_move}/parallel_{parallel_execution}"
-            os.makedirs(log_dir, exist_ok=True)
-            log_path = os.path.join(log_dir, f"trial_{trial}.log")
-            with open(log_path, "w") as f:
-                for entry in log:
-                    f.write(str(entry) + "\n")
+
             profiling_result = analyze_execution_log(log, n_factories=n_factories)
             # print(profiling_result)
             result = {
@@ -149,8 +152,8 @@ def run_evaluation(params: dict, plot_figure: bool = False):
                 # "status": "completed",
                 # "timestamp": datetime.now().isoformat(),
                 "n_qubits": n_qubits,
-                "qubit_cols": n_cols,
-                "qubit_rows": n_rows,
+                "qubit_cols": qubit_layout[0],
+                "qubit_rows": qubit_layout[1],
                 "placement": placement,
                 "n_aods": n_aods,
                 "consider_skip_rus": skip_rus,  #!
@@ -210,7 +213,9 @@ def run_evaluation(params: dict, plot_figure: bool = False):
 
 if __name__ == "__main__":
     # Define parameter grid
+    angle = 0.0001
     params = {
+        "angle": angle,
         "qubit_sizes": [
             (4, 4),  # 16 qubits
             (5, 5),  # 25 qubits
@@ -233,5 +238,6 @@ if __name__ == "__main__":
         "trials_per_config": 10,
         "decompose_move": [False, True],
         "parallel_execution": [False, True],
+        "code_distance": [7],
     }
     run_evaluation(params=params, plot_figure=False)
