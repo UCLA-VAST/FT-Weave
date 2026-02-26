@@ -116,6 +116,8 @@ def reassign_factories(
     for i, used in enumerate(used_factories):
         if not used:
             factory = busy_factories[i]
+            if factory.qubit is not None and factory.qubit in qubit_trackers:
+                qubit_trackers[factory.qubit].remove_factory(factory.id, factory.angle)
             factory_pool.free_factory(factory.id)
 
 

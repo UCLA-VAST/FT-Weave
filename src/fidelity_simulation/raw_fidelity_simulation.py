@@ -102,7 +102,7 @@ def simluate_trotter_2d_tfim_fidelity(
         n_idle_time = total_idle_time / physical_error_model.get_error_rate(
             "coherence_time"
         )
-        fidelity_idle *= math.exp(n_idle_time)
+        fidelity_idle *= math.exp(-n_idle_time)
 
     fidelity = (
         fidelity_init

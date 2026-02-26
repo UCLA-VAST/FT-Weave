@@ -1,4 +1,3 @@
-from itertools import product
 import logging
 
 import numpy as np
@@ -9,7 +8,7 @@ from .simulation import (
     simulate_RUS_injection,
 )
 from .tmr.tmr_scheduling import schedule_tmr_round
-from .tmr.tmr_assignment import reassign_factories
+from .tmr.tmr_assignment import reassign_factories, release_useless_factories
 from .tmr.util import (
     update_factory_states_post_tmr,
 )
@@ -91,7 +90,7 @@ def factory_angle_execution(
     # ========================================================================
 
     while len(qubit_trackers):
-
+        # print("new run")
         # PHASE 1: Assign idle factories to prepare angles
         factory_list = factory_pool.get_idle_factories()
 
@@ -101,6 +100,16 @@ def factory_angle_execution(
             circuit_moment,
             execution_log,
         )
+        # print(
+        #     "before TMR: factory 15 state: {}".format(
+        #         factory_pool.get_factory_by_id(15)
+        #     )
+        # )
+        # print(
+        #     "before TMR: qubit 3 state: {}".format(
+        #         qubit_trackers[3].factories if 3 in qubit_trackers else "N/A"
+        #     )
+        # )
 
         schedule_tmr_round(
             factory_pool,
@@ -123,6 +132,14 @@ def factory_angle_execution(
             circuit_moment,
             execution_log,
         )
+        # print(
+        #     "after TMR: factory 15 state: {}".format(factory_pool.get_factory_by_id(15))
+        # )
+        # print(
+        #     "after TMR: qubit 3 factories: {}".format(
+        #         qubit_trackers[3].factories if 3 in qubit_trackers else "N/A"
+        #     )
+        # )
         while True:
             # qubit_factory_pairs: list[tuple(qubit, factory_id)]
             # routing batch: list of tuple (qubit, x_q, y_q, factory_id, x_f, y_f)
@@ -144,11 +161,30 @@ def factory_angle_execution(
                 circuit_moment,
                 aod_earliest_available_time,
             )
-
             circuit_moment = execute_rus_teleportation(
                 qubit_factory_pairs, circuit_moment, execution_log, aod_id=0
             )
 
+            rus_simulation = simulate_RUS_injection(
+                qubit_factory_pairs, factory_pool, rng
+            )
+
+            execution_log = write_rus_result_log(
+                qubit_factory_pairs, rus_simulation, circuit_moment, execution_log
+            )
+            circuit_moment = update_qubit_state_per_teleportation(
+                qubit_factory_pairs,
+                rus_simulation,
+                qubit_trackers,
+                execution_log,
+                circuit_moment,
+                aod_id=0,
+            )
+            # print(
+            #     "after RUS: factory 15 state: {}".format(
+            #         factory_pool.get_factory_by_id(15)
+            #     )
+            # )
             # return factories qubit to empty spot
             return_routing_batches = rus_post_teleportation(
                 routing_batches,
@@ -164,33 +200,36 @@ def factory_angle_execution(
                 aod_earliest_available_time,
                 move_type="return_move",
             )
-            rus_simulation = simulate_RUS_injection(
-                qubit_factory_pairs, factory_pool, rng
-            )
 
-            execution_log = write_rus_result_log(
-                qubit_factory_pairs, rus_simulation, circuit_moment, execution_log
-            )
-
-            circuit_moment = update_qubit_state_per_teleportation(
-                qubit_factory_pairs,
-                rus_simulation,
-                qubit_trackers,
-                execution_log,
-                circuit_moment,
-                aod_id=0,
-            )
             factories = [factory for _, factory in qubit_factory_pairs]
             factory_pool.free_factories(factories)
-
+            # print(
+            #     "after free factories: factory 15 state: {}".format(
+            #         factory_pool.get_factory_by_id(15)
+            #     )
+            # )
             if len(qubit_trackers) == 0:
                 break
 
+        release_useless_factories(
+            factory_pool,
+            qubit_trackers,
+        )
+        # print(
+        #     "after release factories: factory 15 state: {}".format(
+        #         factory_pool.get_factory_by_id(15)
+        #     )
+        # )
         reassign_factories(
             factory_pool,
             qubit_trackers,
             logic_qubit_locations,
         )
+        # print(
+        #     "after reassign factories: factory 15 state: {}".format(
+        #         factory_pool.get_factory_by_id(15)
+        #     )
+        # )
 
         # Add time for injection attempts (CNOT + SE per injection)
         execution_log.append(
@@ -200,6 +239,11 @@ def factory_angle_execution(
                 -1,
                 "Barrier",
                 None,
+            )
+        )
+        print(
+            "before new run: factory 15 state: {}".format(
+                factory_pool.get_factory_by_id(15)
             )
         )
         # input()

@@ -30,16 +30,16 @@ def rus_teleportation(
     )
     if not qubit_factory_pairs:
         return [], []
-    for qubit, factory_id in qubit_factory_pairs:
-        factory = factory_pool.get_factory_by_id(factory_id)
-        if factory.qubit is not None and factory.qubit != qubit:
-            factory_qubit_id = factory.qubit
-            if factory_qubit_id in qubit_trackers:
-                tracker = qubit_trackers[factory_qubit_id]
-                tracker.remove_factory(factory_id, factory.angle)
-            tracker = qubit_trackers[qubit]
-            tracker.add_factory(factory_id, factory.angle)
-            factory.qubit = qubit
+    # for qubit, factory_id in qubit_factory_pairs:
+    #     factory = factory_pool.get_factory_by_id(factory_id)
+    #     if factory.qubit is not None and factory.qubit != qubit:
+    #         factory_qubit_id = factory.qubit
+    #         if factory_qubit_id in qubit_trackers:
+    #             tracker = qubit_trackers[factory_qubit_id]
+    #             tracker.remove_factory(factory_id, factory.angle)
+    #         tracker = qubit_trackers[qubit]
+    #         tracker.add_factory(factory_id, factory.angle)
+    #         factory.qubit = qubit
     # routing
     # batch: list of tuple (qubit, x_q, y_q, factory_id, x_f, y_f, reverse)
     routing_batches = two_layer_routing(
@@ -60,5 +60,15 @@ def rus_teleportation(
         for qubit, _, _, factory_id, _, _ in batch:
             factory = factory_pool.get_factory_by_id(factory_id)
             factory.set_to_rus()
-            qubit_trackers[qubit].set_waiting_for_rus()
+            tracker = qubit_trackers[qubit]
+            tracker.set_waiting_for_rus()
+            if factory.qubit is not None and factory.qubit != qubit:
+                factory_qubit_id = factory.qubit
+                if factory_qubit_id in qubit_trackers:
+                    qubit_trackers[factory_qubit_id].remove_factory(
+                        factory_id, factory.angle
+                    )
+                tracker.add_factory(factory_id, factory.angle)
+                factory.qubit = qubit
+
     return qubit_factory_pairs, routing_batches

@@ -24,7 +24,8 @@ def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
             qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
                 n_qubits=n_qubits, qubit_layout=qubit_layout, J=J, h=h, dt=dt
             )
-            for n_trotter_steps in range(1, n_trotter):
+            # for n_trotter_steps in range(1, n_trotter):
+            for n_trotter_steps in range(1, 2):
                 fidelity_profile = simluate_trotter_2d_tfim_fidelity(
                     n_qubits=n_qubits,
                     qubit_layout=qubit_layout,
@@ -46,11 +47,11 @@ def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
     with open(results_path, "w") as f:
         # Write header
         f.write(
-            "qubit_layout,n_trotter_steps,fidelity,total_duration,fidelity_cz,fidelity_1q,fidelity_move,fidelity_idle,fidelity_init,fidelity_measurement\n"
+            "n_qubit,n_trotter_steps,fidelity,total_duration,fidelity_cz,fidelity_1q,fidelity_move,fidelity_idle,fidelity_init,fidelity_measurement\n"
         )
         for result in results:
             f.write(
-                f"{result['qubit_layout']},{result['n_trotter_steps']},{result['fidelity']},{result['total_duration']},{result['fidelity_cz']},{result['fidelity_1q']},{result['fidelity_move']},{result['fidelity_idle']},{result['fidelity_init']},{result['fidelity_measurement']}\n"
+                f"{result['qubit_layout'][0]*result['qubit_layout'][1]},{result['n_trotter_steps']},{result['fidelity']},{result['total_duration']},{result['fidelity_cz']},{result['fidelity_1q']},{result['fidelity_move']},{result['fidelity_idle']},{result['fidelity_init']},{result['fidelity_measurement']}\n"
             )
 
 
