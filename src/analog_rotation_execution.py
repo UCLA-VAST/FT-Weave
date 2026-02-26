@@ -241,10 +241,5 @@ def factory_angle_execution(
                 None,
             )
         )
-        print(
-            "before new run: factory 15 state: {}".format(
-                factory_pool.get_factory_by_id(15)
-            )
-        )
         # input()
     return circuit_moment, execution_log

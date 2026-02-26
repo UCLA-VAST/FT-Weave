@@ -64,9 +64,9 @@ def assign_factories_for_batch_matching(
         factory = factories[i]
         qubit, angle = assignment_idx_to_qubit_anlge_pair[j]
         success_rate = calculate_success_rate(angle)
-        if factory.id == 15 and qubit == 3:
-            print(factory)
-            print(qubit_trackers[qubit].factories)
+        # if factory.id == 15 and qubit == 3:
+        #     print(factory)
+        #     print(qubit_trackers[qubit].factories)
 
         qubit_trackers[qubit].add_factory(factory.id, angle)
         factory_pool.assign_factory(factory.id, angle, qubit, success_rate)

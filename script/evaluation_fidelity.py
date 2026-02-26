@@ -106,7 +106,7 @@ if __name__ == "__main__":
         (9, 9),  # 81 qubits
         (10, 10),  # 100 qubits
     ]
-    physical_error_model: PhysicalErrorModel = PhysicalErrorModel()
+    physical_error_model: PhysicalErrorModel = PhysicalErrorModel("lookahead")
     p_ph = physical_error_model.get_error_rate("p_ph")
     j_h = [(1.0, 1.0)]  # J, h, dt
     tfim = []

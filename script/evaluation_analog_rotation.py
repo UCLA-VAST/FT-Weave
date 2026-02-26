@@ -230,7 +230,7 @@ if __name__ == "__main__":
         # "tmr_assignment_method": ["naive", "matching"],
         "tmr_assignment_method": ["matching"],
         "trivial_return": [False, True],
-        "trials_per_config": 100,
+        "trials_per_config": 10,
         "decompose_move": [False, True],
         "parallel_execution": [False, True],
     }
