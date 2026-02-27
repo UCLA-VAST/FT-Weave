@@ -32,13 +32,22 @@ def simluate_trotter_2d_tfim_fidelity(
     for log in execution_logs:
         for entry in log:
             if len(entry) == 6:
-                _, _, factory_id, operation, _, value = entry
-                assert operation in ["SE", "CNOT", "Rz", "S"]
+                _, _, factories, operation, _, values = entry
+                assert operation in [
+                    "SE",
+                    "CNOT",
+                    "Rz",
+                    "S",
+                    "Barrier",
+                    "TMR_fail",
+                    "RUS_success",
+                ], f"Unexpected operation {operation} in execution log"
                 if operation == "Rz":
                     # value is the angle of Rz gate, we assume the error is proportional to the angle
-                    factory_state_fidelity[factory_id] = (
-                        logical_error_model.get_rotation_fidelity(angle=value)
-                    )
+                    for factory_id, value in zip(factories, values):
+                        factory_state_fidelity[factory_id] = (
+                            logical_error_model.get_rotation_fidelity(angle=value)
+                        )
                 elif operation == "S":
                     # S gate has a fixed fidelity
                     # ! we don't need SE for S as S is in the middle of SE
@@ -47,10 +56,11 @@ def simluate_trotter_2d_tfim_fidelity(
                     )
                 elif operation == "CNOT":
                     # CNOT gate has a fixed fidelity
-                    fidelity_of_rz_layer *= factory_state_fidelity[factory_id]
-                    fidelity_of_rz_layer *= logical_error_model.get_logical_fidelity(
-                        "CNOT"
-                    )
+                    for factory_id, value in zip(factories, values):
+                        fidelity_of_rz_layer *= factory_state_fidelity[factory_id]
+                        fidelity_of_rz_layer *= (
+                            logical_error_model.get_logical_fidelity("CNOT")
+                        )
 
     # count the clifford gates in one trotter step
     n_cnot_per_step = 0

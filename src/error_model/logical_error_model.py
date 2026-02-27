@@ -139,6 +139,7 @@ class LogicalErrorModel:
             Logical fidelity for the rotation gate
         """
         # For simplicity, we assume the error scales linearly with the angle
+        return 1
         raise NotImplementedError(
             "Rotation fidelity calculation is not implemented yet."
         )

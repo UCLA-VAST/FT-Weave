@@ -166,11 +166,22 @@ class QubitAngleTracker:
             )
         return physical_angle
 
-    def double_target_angle(self):
+    def double_target_angle(self) -> bool:
         self.target_logical_angle *= 2
+        diff_s = self.target_logical_angle - ANGLE_S
+        insert_s_gate = False
+        if np.isclose(diff_s, 0.0, atol=1e-8):
+            insert_s_gate = True
+            self.target_logical_angle = 0.0
+            self.target_angle = 0.0
+        elif diff_s > 0:
+            insert_s_gate = True
+            self.target_logical_angle -= ANGLE_S
+
         self.target_angle = self._get_physical_angle_cached(
             self.target_logical_angle, self.code_distance
         )  # physical angle
+        return insert_s_gate
 
     def set_target_angle(self, angle):
         self.target_angle = angle
@@ -184,15 +195,9 @@ class QubitAngleTracker:
             self.clear_all()
         else:
             _ = self.remove_angle(self.target_angle)
-            self.double_target_angle()
-            diff_s = self.target_angle - ANGLE_S
-            if np.isclose(diff_s, 0.0, atol=1e-8):
-                insert_s_gate = True
-                success = True  # Treat as successful teleportation for state tracking
+            insert_s_gate = self.double_target_angle()
+            if np.isclose(self.target_logical_angle, 0.0, atol=1e-8):
                 self.clear_all()
-            elif diff_s > 0:
-                insert_s_gate = True
-                self.set_target_angle(self.target_angle - ANGLE_S)
 
         self.waiting_for_rus = False
 
