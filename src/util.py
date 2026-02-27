@@ -172,6 +172,8 @@ def analyze_execution_log(
     )
 
     rotation_count = defaultdict(int)
+    initial_angle = None
+    largest_angle = None
     for e in execution_log:
         # Accept either 5-, 6-, or 7-element tuples (with optional aod_assignment)
         if len(e) == 6:
@@ -199,8 +201,18 @@ def analyze_execution_log(
             if isinstance(value, list):
                 for angle in value:
                     rotation_count[angle] += 1
+                    # Track initial and largest angles
+                    if initial_angle is None:
+                        initial_angle = angle
+                    if largest_angle is None or abs(angle) > abs(largest_angle):
+                        largest_angle = angle
             else:
                 rotation_count[value] += 1
+                # Track initial and largest angles
+                if initial_angle is None:
+                    initial_angle = value
+                if largest_angle is None or abs(value) > abs(largest_angle):
+                    largest_angle = value
 
         dur = max(0, end - start)
         s = ops.setdefault(operation, {"count": 0, "total_time": 0, "max_time": 0})
@@ -344,6 +356,8 @@ def analyze_execution_log(
         },
         "qubit_cnot_counts": qubit_cnot_counts,
         "rotation_counts": rotation_count,
+        "initial_angle": initial_angle,
+        "largest_angle": largest_angle,
     }
 
     return profile

@@ -81,6 +81,9 @@ def generate_one_layer_2d_tfim_circuit_star(
                 "max_rus_per_qubit": max(profiling_result["qubit_cnot_counts"]),
                 "avg_rus_per_qubit": sum(profiling_result["qubit_cnot_counts"])
                 / len(profiling_result["qubit_cnot_counts"]),
+                "initial_angle": profiling_result["initial_angle"],
+                "largest_angle": profiling_result["largest_angle"],
+                "tmr_total": profiling_result["failures"]["tmr_total"],
             }
             profiling_results.append(csv_result)
     if result_path is not None:
