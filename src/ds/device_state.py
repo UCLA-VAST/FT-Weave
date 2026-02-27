@@ -20,17 +20,21 @@ from scipy.optimize import brentq
 # -------------------------------------------------------
 # Forward mapping: physical -> logical
 # -------------------------------------------------------
-def logical_from_physical(physical_angle: float, d: int) -> float:
-    """
-    Compute logical angle θ from physical angle θ*.
-    """
+
+
+def logical_from_physical(physical_angle: float, k: int) -> float:
     s = np.sin(physical_angle / 2)
     c = np.cos(physical_angle / 2)
 
-    numerator = s**d
-    denominator = np.sqrt(s ** (2 * d) + c ** (2 * d))
+    num = s**k
+    den = np.sqrt(s ** (2 * k) + c ** (2 * k))
 
-    return 2 * np.arcsin(numerator / denominator)
+    x = num / den
+
+    # numerical safety (VERY important)
+    x = np.clip(x, -1.0, 1.0)
+
+    return 2 * np.arcsin(x)
 
 
 # -------------------------------------------------------
@@ -43,10 +47,26 @@ def convert_logical_angle_to_physical_angle(
     Numerically solve for physical angle θ*
     given logical angle θ.
     """
+    if not (0 <= logical_angle <= np.pi):
+        raise ValueError(f"Logical angle must lie in [0, π] but got {logical_angle}")
 
     # Root function:
     def root_fn(physical_angle):
         return logical_from_physical(physical_angle, d) - logical_angle
+
+    # avoid exact endpoints (numerical issue)
+    eps = 1e-12
+    a = eps
+    b = np.pi - eps
+
+    fa = root_fn(a)
+    fb = root_fn(b)
+
+    # sanity check
+    if fa * fb > 0:
+        raise RuntimeError(
+            "Root not bracketed — logical angle may be numerically unreachable."
+        )
 
     # Physical angle lies in [0, π]
     physical_angle, result = brentq(root_fn, 0.0, np.pi, xtol=tol, full_output=True)
@@ -205,7 +225,11 @@ class QubitAngleTracker:
 
     def get_angle_level(self, level):
         """Get the angle corresponding to a specific level."""
-        logical_angle = self.target_logical_angle * pow(2, level)
+        logical_angle = self.target_logical_angle
+        for i in range(level):
+            logical_angle *= 2
+            if logical_angle > ANGLE_S:
+                logical_angle -= ANGLE_S
         if np.isclose(logical_angle, 0.0, atol=1e-8):
             return 0.0
         physical_angle = self._get_physical_angle_cached(
