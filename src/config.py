@@ -14,7 +14,7 @@ TMR_Q = 2
 TMR_PREPARATION_TIME = TMR_P + TMR_Q + 1  # 2 SE + Rz + 3 SE
 CNOT_TIME = 1
 SE_TIME = 1
-INJECTION_SUCCESS_RATE = 0.5
+TELEPORTATION_SUCCESS_RATE = 0.5
 LOOKAHEAD_THRESHOLD = 2  # Max factories working on same angle
 LOOKAHEAD_LEVEL = 2
 PRECISION = 8
@@ -32,18 +32,18 @@ def update_config(**kwargs):
     Parameters:
         **kwargs: Configuration key-value pairs to update.
                  Valid keys: TMR_P, TMR_Q, CNOT_TIME, SE_TIME,
-                            INJECTION_SUCCESS_RATE, LOOKAHEAD_THRESHOLD,
+                            INITIALIZATION_SUCCESS_RATE, LOOKAHEAD_THRESHOLD,
                             LOOKAHEAD_LEVEL, PRECISION
 
     Example:
-        update_config(TMR_P=4, INJECTION_SUCCESS_RATE=0.7)
+        update_config(TMR_P=4, INITIALIZATION_SUCCESS_RATE=0.7)
 
     Note:
         - TMR_PREPARATION_TIME is automatically recalculated if TMR_P or TMR_Q change
         - LARGE_ANGLE_LIMIT is automatically recalculated if PRECISION changes
     """
     global TMR_P, TMR_Q, TMR_PREPARATION_TIME, CNOT_TIME, SE_TIME
-    global INJECTION_SUCCESS_RATE, LOOKAHEAD_THRESHOLD, LOOKAHEAD_LEVEL
+    global TELEPORTATION_SUCCESS_RATE, LOOKAHEAD_THRESHOLD, LOOKAHEAD_LEVEL
     global PRECISION, LARGE_ANGLE_LIMIT
 
     valid_keys = {
@@ -51,7 +51,7 @@ def update_config(**kwargs):
         "TMR_Q",
         "CNOT_TIME",
         "SE_TIME",
-        "INJECTION_SUCCESS_RATE",
+        "TELEPORTATION_SUCCESS_RATE",
         "LOOKAHEAD_THRESHOLD",
         "LOOKAHEAD_LEVEL",
         "PRECISION",
@@ -71,8 +71,8 @@ def update_config(**kwargs):
         CNOT_TIME = kwargs["CNOT_TIME"]
     if "SE_TIME" in kwargs:
         SE_TIME = kwargs["SE_TIME"]
-    if "INJECTION_SUCCESS_RATE" in kwargs:
-        INJECTION_SUCCESS_RATE = kwargs["INJECTION_SUCCESS_RATE"]
+    if "TELEPORTATION_SUCCESS_RATE" in kwargs:
+        TELEPORTATION_SUCCESS_RATE = kwargs["TELEPORTATION_SUCCESS_RATE"]
     if "LOOKAHEAD_THRESHOLD" in kwargs:
         LOOKAHEAD_THRESHOLD = kwargs["LOOKAHEAD_THRESHOLD"]
     if "LOOKAHEAD_LEVEL" in kwargs:
@@ -98,7 +98,7 @@ def get_config():
         "TMR_PREPARATION_TIME": TMR_PREPARATION_TIME,
         "CNOT_TIME": CNOT_TIME,
         "SE_TIME": SE_TIME,
-        "INJECTION_SUCCESS_RATE": INJECTION_SUCCESS_RATE,
+        "TELEPORTATION_SUCCESS_RATE": TELEPORTATION_SUCCESS_RATE,
         "LOOKAHEAD_THRESHOLD": LOOKAHEAD_THRESHOLD,
         "LOOKAHEAD_LEVEL": LOOKAHEAD_LEVEL,
         "PRECISION": PRECISION,
@@ -113,7 +113,7 @@ def reset_config():
         TMR_Q=2,
         CNOT_TIME=1,
         SE_TIME=1,
-        INJECTION_SUCCESS_RATE=0.5,
+        TELEPORTATION_SUCCESS_RATE=1,
         LOOKAHEAD_THRESHOLD=2,
         LOOKAHEAD_LEVEL=2,
         PRECISION=8,

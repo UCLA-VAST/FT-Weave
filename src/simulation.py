@@ -1,6 +1,6 @@
 import numpy as np
 from .config import (
-    INJECTION_SUCCESS_RATE,
+    TELEPORTATION_SUCCESS_RATE,
 )
 
 from .ds.device_state import FactoryPool
@@ -26,7 +26,7 @@ def simulate_angle_preparation(success_rate, rng: np.random.Generator):
 
 def simulate_injection(rng: np.random.Generator):
     """Simulate injection success (50% probability)."""
-    return rng.random() < INJECTION_SUCCESS_RATE
+    return rng.random() < TELEPORTATION_SUCCESS_RATE
 
 
 def simulate_TMR_preparation(

@@ -51,8 +51,10 @@ def convert_logical_angle_to_physical_angle(
         raise ValueError(f"Logical angle must lie in [0, π] but got {logical_angle}")
 
     # Root function:
+    k = d // 2
+
     def root_fn(physical_angle):
-        return logical_from_physical(physical_angle, d) - logical_angle
+        return logical_from_physical(physical_angle, k) - logical_angle
 
     # avoid exact endpoints (numerical issue)
     eps = 1e-12
@@ -70,7 +72,7 @@ def convert_logical_angle_to_physical_angle(
 
     # Physical angle lies in [0, π]
     physical_angle, result = brentq(root_fn, 0.0, np.pi, xtol=tol, full_output=True)
-    recovered_logical_angle = logical_from_physical(physical_angle, d)
+    recovered_logical_angle = logical_from_physical(physical_angle, d // 2)
     assert np.isclose(
         logical_angle, recovered_logical_angle, atol=tol
     ), f"Failed to recover logical angle: expected {logical_angle}, got {recovered_logical_angle}"
