@@ -11,12 +11,28 @@ from .ds.device_state import FactoryPool
 # ============================================================================
 def calculate_success_rate(angle, code_distance):
     """Calculate success rate for angle preparation (decreases with angle)."""
+    angle = abs(angle)  # !
+    if code_distance == 3:
+        a = -8.937874e-01
+        b = 0.469195
+        c = 0.931988
+    elif code_distance == 5:
+        a = -6.750004e-01
+        b = 0.469195
+        c = 0.703842
+    elif code_distance == 7:
+        a = -4.743114e-01
+        b = 0.469195
+        c = 0.494559
+    else:
+        raise ValueError(f"Unsupported code distance: {code_distance}")
 
-    s = np.sin(angle / 2)
-    c = np.cos(angle / 2)
-    basic_success_rate = s ** (2 * code_distance) + c ** (2 * code_distance)
-    initialization_success_rate = 1  # ! to be extracted from the figure
-    return basic_success_rate
+    success_rate = a * angle**b + c
+    # assert angle <= 1e-1, f"Angle {angle} is out of expected range (should be <= 0.1)"
+    assert (
+        0 <= success_rate <= 1
+    ), f"Calculated success rate {success_rate} is out of bounds for angle {angle} and code distance {code_distance}"
+    return success_rate
 
 
 def simulate_angle_preparation(success_rate, rng: np.random.Generator):

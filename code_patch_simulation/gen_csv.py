@@ -83,7 +83,7 @@ def logical_rotation(physical_theta: float, k: int) -> float:
 
 
 def collect_angles(
-    code_distance: int, target_logical_angles: list[float], pauli_weight: int
+    code_distance: int, target_logica_angles: list[float], pauli_weight: int
 ) -> list[tuple[int, float, float]]:
     angle_pairs = []
     k = math.ceil(code_distance / pauli_weight)

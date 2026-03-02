@@ -28,7 +28,9 @@ def simluate_trotter_2d_tfim_fidelity(
     ), f"Expected {n_rz_layer} layers of RZ gates, but got {len(execution_logs)}"
 
     factory_state_fidelity = [0.0 for _ in range(n_factories)]
-    fidelity_of_rz_layer = 1
+    fidelity_of_rz_injection = 1
+    fidelity_of_rz_teleportaion = 1
+    fidelity_of_rz_s = 1
     for log in execution_logs:
         for entry in log:
             if len(entry) == 6:
@@ -51,14 +53,12 @@ def simluate_trotter_2d_tfim_fidelity(
                 elif operation == "S":
                     # S gate has a fixed fidelity
                     # ! we don't need SE for S as S is in the middle of SE
-                    fidelity_of_rz_layer *= logical_error_model.get_logical_fidelity(
-                        "S"
-                    )
+                    fidelity_of_rz_s *= logical_error_model.get_logical_fidelity("S")
                 elif operation == "CNOT":
                     # CNOT gate has a fixed fidelity
                     for factory_id, value in zip(factories, values):
-                        fidelity_of_rz_layer *= factory_state_fidelity[factory_id]
-                        fidelity_of_rz_layer *= (
+                        fidelity_of_rz_injection *= factory_state_fidelity[factory_id]
+                        fidelity_of_rz_teleportaion *= (
                             logical_error_model.get_logical_fidelity("CNOT")
                         )
 
@@ -77,10 +77,16 @@ def simluate_trotter_2d_tfim_fidelity(
     fidelity_1q = logical_error_model.get_logical_fidelity("H") ** (
         n_h_per_step * n_trotter_steps
     )
+    fidelity_of_rz_layer = (
+        fidelity_of_rz_injection * fidelity_of_rz_teleportaion * fidelity_of_rz_s
+    )
     fidelity = fidelity_of_rz_layer * fidelity_cnot * fidelity_1q
     fidelity_profile = {
         "fidelity": fidelity,
         "fidelity_of_rz_layer": fidelity_of_rz_layer,
+        "fidelity_of_rz_injection": fidelity_of_rz_injection,
+        "fidelity_of_rz_teleportaion": fidelity_of_rz_teleportaion,
+        "fidelity_of_rz_s": fidelity_of_rz_s,
         "fidelity_cnot": fidelity_cnot,
         "fidelity_1q": fidelity_1q,
         "n_cnot": n_cnot_per_step * n_trotter_steps,

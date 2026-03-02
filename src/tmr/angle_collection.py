@@ -7,10 +7,6 @@ from src.simulation import (
     calculate_success_rate,
 )
 
-from src.config import (
-    ANGLE_S,
-)
-
 
 def get_angles_for_preparation(
     qubit_trackers: dict[int, QubitAngleTracker],

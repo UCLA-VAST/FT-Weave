@@ -39,7 +39,7 @@ def assign_factories_for_batch_matching(
             x_dst, y_dst = logic_qubit_locations[qubit]
             for level, demand in demands.items():
                 # Manhattan distance as cost
-                angle = qubit_trackers[qubit].target_angle * pow(2, level)
+                angle = qubit_trackers[qubit].get_angle_level(level)
                 for _ in range(demand):
                     cost_matrix[i, idx] = move_duration(x_src, y_src, x_dst, y_dst) / (
                         level + 1

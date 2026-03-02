@@ -9,6 +9,7 @@ from ..config import PRECISION
 
 from src.config import (
     ANGLE_S,
+    ANGLE_T,
 )
 
 from scipy.optimize import brentq
@@ -105,10 +106,11 @@ class QubitAngleTracker:
 
     def __init__(self, qubit_id, target_angle, factory_limit, code_distance):
         self.qubit_id = qubit_id
-        self.target_logical_angle = round(target_angle, PRECISION)  # logical angle
-        self.target_angle = self._get_physical_angle_cached(
-            target_angle, code_distance
-        )  # physical angle
+        self.target_physical_angle = None
+        # self.target_physical_angle = self._get_physical_angle_cached(
+        #     target_angle, code_distance
+        # )  # physical angle
+        self.target_angle = round(target_angle, PRECISION)  # logical angle
         self.factories: list[tuple[int, float]] = []  # List of (factory_id, angle)
         self.angle_counts = Counter()  # angle -> count
         self.waiting_for_rus = False
@@ -189,24 +191,25 @@ class QubitAngleTracker:
         return physical_angle
 
     def double_target_angle(self) -> bool:
-        self.target_logical_angle *= 2
-        diff_s = self.target_logical_angle - ANGLE_S
+        self.target_angle *= 2
+        # diff_s = self.target_angle - ANGLE_S
+        diff_s = abs(self.target_angle) - ANGLE_T
         insert_s_gate = False
         if np.isclose(diff_s, 0.0, atol=1e-8):
             insert_s_gate = True
-            self.target_logical_angle = 0.0
             self.target_angle = 0.0
+            self.target_physical_angle = 0.0
         elif diff_s > 0:
             insert_s_gate = True
-            self.target_logical_angle -= ANGLE_S
+            if self.target_angle > 0:
+                self.target_angle -= ANGLE_S
+            else:
+                self.target_angle += ANGLE_S
 
-        self.target_angle = self._get_physical_angle_cached(
-            self.target_logical_angle, self.code_distance
-        )  # physical angle
+        # self.target_physical_angle = self._get_physical_angle_cached(
+        #     self.target_angle, self.code_distance
+        # )  # physical angle
         return insert_s_gate
-
-    def set_target_angle(self, angle):
-        self.target_angle = angle
 
     def set_waiting_for_rus(self):
         self.waiting_for_rus = True
@@ -218,20 +221,26 @@ class QubitAngleTracker:
         else:
             _ = self.remove_angle(self.target_angle)
             insert_s_gate = self.double_target_angle()
-            if np.isclose(self.target_logical_angle, 0.0, atol=1e-8):
+            if np.isclose(self.target_angle, 0.0, atol=1e-8):
                 self.clear_all()
 
         self.waiting_for_rus = False
 
         return success, insert_s_gate
 
-    def get_angle_level(self, level):
+    def get_angle_level(self, level, logical=True) -> float:
         """Get the angle corresponding to a specific level."""
-        logical_angle = self.target_logical_angle
+        logical_angle = self.target_angle
         for i in range(level):
             logical_angle *= 2
-            if logical_angle > ANGLE_S:
-                logical_angle -= ANGLE_S
+            diff_s = abs(logical_angle) - ANGLE_T
+            if diff_s > 0:
+                if logical_angle > 0:
+                    logical_angle -= ANGLE_S
+                else:
+                    logical_angle += ANGLE_S
+        if logical:
+            return logical_angle
         if np.isclose(logical_angle, 0.0, atol=1e-8):
             return 0.0
         physical_angle = self._get_physical_angle_cached(

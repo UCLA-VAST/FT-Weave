@@ -30,7 +30,6 @@ def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
             qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
                 n_qubits=n_qubits, qubit_layout=qubit_layout, J=J, h=h, dt=dt
             )
-
             # for n_trotter_steps in range(1, n_trotter):
             for n_trotter_steps in range(1, 2):
                 fidelity_profile = simluate_trotter_2d_tfim_fidelity(
@@ -135,6 +134,12 @@ def run_evaluation_star(
                 {
                     "qubit_layout": (n_rows, n_cols),
                     "n_trotter_steps": 1,
+                    "placement": placement,
+                    "n_aods": n_aods,
+                    "skip_rus": skip_rus,
+                    "trivial_return": trivial_ret,
+                    "decompose_move": decompose_move,
+                    "parallel_execution": parallel_execution,
                     **result,
                 }
             )
@@ -142,14 +147,10 @@ def run_evaluation_star(
     # Save results to csv file
     results_path = os.path.join(output_dir, "star_fidelity_results.csv")
     with open(results_path, "w") as f:
-        # Write header
-        f.write(
-            "n_qubit,n_trotter_steps,fidelity,fidelity_of_rz_layer,fidelity_cnot,fidelity_1q,n_cnot,n_h\n"
-        )
-        for result in results:
-            f.write(
-                f"{result['qubit_layout'][0]*result['qubit_layout'][1]},{result['n_trotter_steps']},{result['fidelity']},{result['fidelity_of_rz_layer']},{result['fidelity_cnot']},{result['fidelity_1q']},{result['n_cnot']},{result['n_h']}\n"
-            )
+        fieldnames = results[0].keys()
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(results)
     if analyze_result:
         profiling_results_path = os.path.join(
             output_dir, "star_full_trotter_profiling_results.csv"

@@ -139,11 +139,22 @@ class LogicalErrorModel:
             Logical fidelity for the rotation gate
         """
         # For simplicity, we assume the error scales linearly with the angle
-        return 1
-        raise NotImplementedError(
-            "Rotation fidelity calculation is not implemented yet."
-        )
-        # base_fidelity = self.get_logical_f
+        if self.code_distance == 3:
+            a = 8.038298e-04
+            b = 1.453911
+            c = 0.000013
+        elif self.code_distance == 5:
+            a = 3.827042e-04
+            b = 1.463395
+            c = 0.000000
+        elif self.code_distance == 7:
+            a = 3.136180e-04
+            b = 1.464970
+            c = 0.000000
+        else:
+            raise ValueError(f"Unsupported code distance: {self.code_distance}")
+        angle = abs(angle)  # !
+        return 1 - a * angle**b + c
 
     def get_summary(self) -> Dict:
         """Get a summary of the current logical error model configuration.

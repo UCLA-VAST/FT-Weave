@@ -95,8 +95,8 @@ def factory_angle_execution(
     while len(qubit_trackers):
         assert (
             circuit_moment <= 5000
-        ), "Circuit execution taking too long, possible infinite loop. Qubit trackers: {}".format(
-            qubit_trackers
+        ), "Circuit execution taking too long, possible infinite loop. #idle factories: {}, Qubit trackers: {}".format(
+            len(factory_pool.get_idle_factories()), qubit_trackers
         )
         # print(f"Remaining qubits to prepare: {len(qubit_trackers)}")
         # print("new run")

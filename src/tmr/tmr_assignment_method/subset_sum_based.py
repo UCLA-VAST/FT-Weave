@@ -286,7 +286,7 @@ def assign_factories_for_batch_naive(
                     _, factory_id = factories_at_pos[idx]
 
                     # Assign this angle to the factory
-                    angle = qubit_trackers[qubit].target_angle * pow(2, level)
+                    angle = qubit_trackers[qubit].get_angle_level(level)
                     success_rate = calculate_success_rate(angle, code_distance)
                     qubit_trackers[qubit].add_factory(factory_id, angle)
                     factory_pool.assign_factory(factory_id, angle, qubit, success_rate)
