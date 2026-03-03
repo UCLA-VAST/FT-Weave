@@ -120,6 +120,7 @@ def run_evaluation_star(
                     # result_path=log_dir + f"/trial_{trial}.pickle",
                 )
             )
+
             profiling_results += profiling_results_per_case
             result = simluate_trotter_2d_tfim_fidelity_star(
                 n_qubits=n_cols * n_rows,
@@ -209,21 +210,6 @@ if __name__ == "__main__":
     logical_error_model = LogicalErrorModel(
         physical_model=physical_error_model, code_distance=7
     )
-
-    star_params = {
-        "qubit_layout": qubit_layout,
-        "tfim": tfim,
-        "placement_methods": [
-            "col_based",
-            "checkerboard",
-        ],
-        "n_aods": [1],
-        "consider_skip_rus": [0],
-        "trivial_return": [False],
-        "trials_per_config": 1,
-        "decompose_move": [False],
-        "parallel_execution": [False],
-    }
 
     run_evaluation_star(
         params=star_params, logical_error_model=logical_error_model, analyze_result=True

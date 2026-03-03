@@ -359,7 +359,6 @@ def analyze_execution_log(
         "initial_angle": initial_angle,
         "largest_angle": largest_angle,
     }
-
     return profile
 
 

@@ -348,10 +348,10 @@ def factory_angle_execution_parallel(
 
             add_event(local_moment, next(counter), "RUS_start", aod_id=event["aod_id"])
             add_event(local_moment, next(counter), "TMR_start")
-
         else:
             raise ValueError(f"Unknown event type: {event['type']}")
         # input()
+        circuit_moment = local_moment
 
     # Final cleanup: reassign any remaining factories
     assert not qubit_trackers, "All qubits should be completed at this point"

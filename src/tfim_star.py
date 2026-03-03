@@ -59,6 +59,12 @@ def generate_one_layer_2d_tfim_circuit_star(
     if analyze_result:
         for i, log in enumerate(rz_logs):
             profiling_result = analyze_execution_log(log, n_factories=n_qubits)
+            # if "return_move" not in profiling_result["ops"]:
+            #     for l in log:
+            #         print(l)
+            #     for key, value in profiling_result["ops"].items():
+            #         print(f"{key}: {value}")
+            #     raise ValueError("Missing return movement time in profiling result")
             csv_result = {
                 "n_qubits": n_qubits,
                 "qubit_cols": qubit_layout[0],
