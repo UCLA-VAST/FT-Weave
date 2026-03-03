@@ -101,7 +101,7 @@ success_data_6d = {
     "suc7": data_6d["suc7"],
 }
 
-fitted_params_6d = fit_data_series(success_data_6d, "fig_6_d (suc3, suc5, suc7)")
+# fitted_params_6d = fit_data_series(success_data_6d, "fig_6_d (suc3, suc5, suc7)")
 
 # ============================================================================
 # Process fig_6_b
@@ -114,5 +114,5 @@ success_data_6b = {
     "inf5": data_6b["inf5"],
     "inf7": data_6b["inf7"],
 }
-
-# fitted_params_6b = fit_data_series(success_data_6b, "fig_6_b (inf3, inf5, inf7)")
+print(data_6b)
+fitted_params_6b = fit_data_series(success_data_6b, "fig_6_b (inf3, inf5, inf7)")

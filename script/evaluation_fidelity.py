@@ -95,8 +95,8 @@ def run_evaluation_star(
             continue
         for trial in range(params["trials_per_config"]):
             rng = np.random.default_rng(42 + trial)
-            log_dir = f"output/evaluation/fidelty/results/{n_rows}x{n_cols}/{placement}/naod_{n_aods}/skipRUS_{skip_rus}/trivial_return_{trivial_ret}/decompos_move_{decompose_move}/parallel_{parallel_execution}"
-            os.makedirs(log_dir, exist_ok=True)
+            # log_dir = f"output/evaluation/fidelity/results/{n_rows}x{n_cols}/{placement}/naod_{n_aods}/skipRUS_{skip_rus}/trivial_return_{trivial_ret}/decompos_move_{decompose_move}/parallel_{parallel_execution}"
+            # os.makedirs(log_dir, exist_ok=True)
             config = {
                 "n_aods": n_aods,
                 "consider_skip_rus": skip_rus,
