@@ -1,10 +1,10 @@
 # analyze_results.py
-import io
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 import os
+from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
 
 
 SETTINGS = [
@@ -81,6 +81,9 @@ RESULT_COLS = [
 
 # ----- IMPORTANT SETTINGS -----
 SWEEP_COL = "n_qubits"  # x-axis
+EXPECTED_TRIALS_PER_CONFIG = 10
+
+_RZ_ANGLE_COUNT_CACHE: dict[tuple[int, int, int], list[int]] = {}
 
 
 # ------------------------------
@@ -224,8 +227,8 @@ def _plot_total_time(df, line_col, prefix, output_dir):
 
     plt.figure(figsize=(7, 5))
 
-    for l in lines:
-        sub = df[df[line_col] == l].sort_values(SWEEP_COL)
+    for line_name in lines:
+        sub = df[df[line_col] == line_name].sort_values(SWEEP_COL)
 
         plt.errorbar(
             sub[SWEEP_COL],
@@ -233,7 +236,7 @@ def _plot_total_time(df, line_col, prefix, output_dir):
             yerr=sub["total_time_std"],
             marker="o",
             capsize=4,
-            label=str(l),
+            label=str(line_name),
         )
 
     plt.xlabel(SWEEP_COL)
@@ -243,6 +246,139 @@ def _plot_total_time(df, line_col, prefix, output_dir):
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f"{prefix}_total_time.pdf"))
     plt.close()
+
+
+def _aggregate_microarch_trials(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate microarch metrics across trials and keep sample counts for validation."""
+    g = (
+        df.groupby(["n_aods", "placement", "n_qubits"])
+        .agg(
+            total_time_mean=("total_time", "mean"),
+            total_time_std=("total_time", "std"),
+            total_time_count=("total_time", "count"),
+            movement_time_mean=("movement_time", "mean"),
+            movement_time_std=("movement_time", "std"),
+            movement_time_count=("movement_time", "count"),
+            return_movement_time_mean=("return_movement_time", "mean"),
+            return_movement_time_std=("return_movement_time", "std"),
+            return_movement_time_count=("return_movement_time", "count"),
+        )
+        .reset_index()
+    )
+
+    std_cols = [
+        "total_time_std",
+        "movement_time_std",
+        "return_movement_time_std",
+    ]
+    for col in std_cols:
+        if col in g.columns:
+            g[col] = g[col].fillna(0.0)
+
+    if "total_time_count" in g.columns:
+        unique_counts = sorted(g["total_time_count"].dropna().astype(int).unique())
+        if len(unique_counts) > 0 and any(
+            c != EXPECTED_TRIALS_PER_CONFIG for c in unique_counts
+        ):
+            print(
+                "[microarch] Warning: trial counts per point are",
+                unique_counts,
+                f"(expected {EXPECTED_TRIALS_PER_CONFIG}).",
+            )
+
+    return g
+
+
+def _get_round_angle_counts(
+    n_qubits: int, qubit_rows: int, qubit_cols: int
+) -> list[int]:
+    key = (int(n_qubits), int(qubit_rows), int(qubit_cols))
+    if key in _RZ_ANGLE_COUNT_CACHE:
+        return _RZ_ANGLE_COUNT_CACHE[key]
+
+    qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
+        n_qubits=int(n_qubits),
+        qubit_layout=(int(qubit_rows), int(qubit_cols)),
+        J=1.0,
+        h=1.0,
+        dt=1.0,
+        logical=True,
+    )
+    counts = [len(inst["targets"]) for inst in qc_one_layer if inst.get("gate") == "Rz"]
+    _RZ_ANGLE_COUNT_CACHE[key] = counts
+    return counts
+
+
+def _build_round_angle_lookup(
+    dfs_dict: dict[str, pd.DataFrame],
+) -> dict[str, dict[int, int]]:
+    round_angle_lookup: dict[str, dict[int, int]] = {}
+
+    for round_name, df in dfs_dict.items():
+        if df.empty:
+            round_angle_lookup[round_name] = {}
+            continue
+
+        layout_rows = (
+            df[["n_qubits", "qubit_rows", "qubit_cols"]]
+            .dropna()
+            .drop_duplicates()
+            .sort_values("n_qubits")
+        )
+        if layout_rows.empty:
+            round_angle_lookup[round_name] = {}
+            continue
+
+        per_qubit_angles: dict[int, int] = {}
+        if str(round_name).startswith("round_"):
+            try:
+                round_idx = int(str(round_name).split("_")[-1])
+            except (TypeError, ValueError):
+                round_idx = None
+
+            if round_idx is not None:
+                for _, row in layout_rows.iterrows():
+                    n_qubits = int(row["n_qubits"])
+                    counts = _get_round_angle_counts(
+                        n_qubits,
+                        int(row["qubit_rows"]),
+                        int(row["qubit_cols"]),
+                    )
+                    if 0 <= round_idx < len(counts):
+                        per_qubit_angles[n_qubits] = int(counts[round_idx])
+        elif str(round_name) == "full_trotter":
+            for _, row in layout_rows.iterrows():
+                n_qubits = int(row["n_qubits"])
+                counts = _get_round_angle_counts(
+                    n_qubits,
+                    int(row["qubit_rows"]),
+                    int(row["qubit_cols"]),
+                )
+                per_qubit_angles[n_qubits] = int(sum(counts))
+
+        round_angle_lookup[round_name] = per_qubit_angles
+
+    return round_angle_lookup
+
+
+def _format_nqubit_ticklabels(
+    x_vals: list, round_name: str, round_angle_lookup: dict[str, dict[int, int]] | None
+) -> list[str]:
+    if round_angle_lookup is None:
+        return [str(int(x)) if pd.notna(x) else "" for x in x_vals]
+
+    angle_map = round_angle_lookup.get(round_name, {})
+    labels = []
+    for x in x_vals:
+        if pd.isna(x):
+            labels.append("")
+            continue
+        n_qubits = int(x)
+        if n_qubits in angle_map:
+            labels.append(f"{n_qubits} ({angle_map[n_qubits]})")
+        else:
+            labels.append(str(n_qubits))
+    return labels
 
 
 def _plot_movement_bar(df, line_col, prefix, output_dir):
@@ -255,8 +391,8 @@ def _plot_movement_bar(df, line_col, prefix, output_dir):
 
     plt.figure(figsize=(7, 5))
     handles = []
-    for i, l in enumerate(lines):
-        sub = df[df[line_col] == l].sort_values(SWEEP_COL)
+    for i, line_name in enumerate(lines):
+        sub = df[df[line_col] == line_name].sort_values(SWEEP_COL)
 
         x = [v + i * width for v in range(len(x_vals))]
 
@@ -284,7 +420,7 @@ def _plot_movement_bar(df, line_col, prefix, output_dir):
             color=lighter,
             # label=f"{l} return",
         )
-        patch = mpatches.Patch(color=base_color, label=l)
+        patch = mpatches.Patch(color=base_color, label=line_name)
         handles.append(patch)
 
     plt.xticks([r + width for r in range(len(x_vals))], x_vals)
@@ -303,7 +439,12 @@ def _plot_movement_bar(df, line_col, prefix, output_dir):
 
 
 def plot_nAOD_placement_lines(
-    df, output_dir, sweep_col="n_qubits", setting_idx=3, skip_placements=True
+    df,
+    output_dir,
+    sweep_col="n_qubits",
+    setting_idx=3,
+    skip_placements=True,
+    tag="",
 ):
     """
     df: full dataframe
@@ -373,10 +514,11 @@ def plot_nAOD_placement_lines(
     plt.legend(fontsize=7, ncol=2)
     os.makedirs(output_dir, exist_ok=True)
     plt.tight_layout()
+    suffix = f"_{tag}" if tag else ""
     plt.savefig(
         os.path.join(
             output_dir,
-            f"total_time_placement_nAOD_setting_{setting_idx}_skip_placements-{skip_placements}.pdf",
+            f"total_time_placement_nAOD_setting_{setting_idx}_skip_placements-{skip_placements}{suffix}.pdf",
         )
     )
     plt.close()
@@ -409,7 +551,7 @@ def plot_microarch_comp_average_all(df, output_dir):
 # ------------------------------------------------------------
 # Fig 2 : controlled placement comparison
 # ------------------------------------------------------------
-def plot_microarch_comp_setting(df, output_dir, setting_idx=1):
+def plot_microarch_comp_setting(df, output_dir, setting_idx=1, tag=""):
     os.makedirs(output_dir, exist_ok=True)
     setting = SETTINGS[setting_idx]
     df_ctrl = df[
@@ -420,27 +562,29 @@ def plot_microarch_comp_setting(df, output_dir, setting_idx=1):
         & (df["parallel_execution"] == setting[4])
     ]
 
-    g = (
-        df_ctrl.groupby(["n_aods", "placement", "n_qubits"])[RESULT_COLS]
-        .agg(["mean", "std"])
-        .reset_index()
-    )
+    if df_ctrl.empty:
+        print(f"No data for microarch setting_idx={setting_idx} (tag={tag}), skipping.")
+        return
 
-    g.columns = [
-        "_".join(c).strip("_") if isinstance(c, tuple) else c for c in g.columns
-    ]
+    g = _aggregate_microarch_trials(df_ctrl)
     aods = sorted(g["n_aods"].unique())
+    if len(aods) == 0:
+        print(
+            f"No AOD values for microarch setting_idx={setting_idx} (tag={tag}), skipping."
+        )
+        return
+    suffix = f"_{tag}" if tag else ""
     for a in [aods[0], aods[-1]]:  # only plot for lowest and highest AODs
         _plot_total_time(
             g[g["n_aods"] == a],
             "placement",
-            f"fig2_nAOD{a}_setting_{setting_idx}",
+            f"fig2_nAOD{a}_setting_{setting_idx}{suffix}",
             output_dir,
         )
         _plot_movement_bar(
             g[g["n_aods"] == a],
             "placement",
-            f"fig2_nAOD{a}_setting_{setting_idx}",
+            f"fig2_nAOD{a}_setting_{setting_idx}{suffix}",
             output_dir,
         )
 
@@ -448,7 +592,7 @@ def plot_microarch_comp_setting(df, output_dir, setting_idx=1):
 # ------------------------------------------------------------
 # Ablation study (col-based placement)
 # ------------------------------------------------------------
-def plot_ablation(df, output_dir, placement):
+def plot_ablation(df, output_dir, placement, tag=""):
     os.makedirs(output_dir, exist_ok=True)
     df_col = df[df["placement"] == placement]
     labels = [
@@ -461,35 +605,636 @@ def plot_ablation(df, output_dir, placement):
         # "opt return + skip part. RUS + async. RUS",
         "opt return + skip whole RUS + async. RUS",
     ]
-    df_list = []
-    for setting in SETTINGS:
-        df_tmp = df_col[
+
+    gs = []
+    labels_used = []
+    for label, setting in zip(labels, SETTINGS):
+        subdf = df_col[
             (df_col["trivial_return"] == setting[0])
             & (df_col["tmr_assignment_method"] == setting[1])
             & (df_col["consider_skip_rus"] == setting[2])
             & (df_col["decompose_move"] == setting[3])
             & (df_col["parallel_execution"] == setting[4])
         ]
-        df_list.append(df_tmp)
-    gs = []
-    for subdf in df_list:
+        if subdf.empty:
+            continue
+
         g = (
             subdf.groupby(["n_aods", "n_qubits"])[RESULT_COLS]
             .agg(["mean", "std"])
             .reset_index()
         )
-
         g.columns = [
             "_".join(c).strip("_") if isinstance(c, tuple) else c for c in g.columns
         ]
-        gs.append(g)
+        if not g.empty:
+            gs.append(g)
+            labels_used.append(label)
 
-    aods = sorted(gs[0]["n_aods"].unique())
-    # for a in [aods[0], aods[-1]]:  # only plot for lowest and highest AODs
-    for a in [aods[1]]:  # only plot for lowest and highest AODs
-        tmp_gs = [g[g["n_aods"] == a] for g in gs]
-        _plot_ablation_total_time(tmp_gs, labels, f"ablation_nAOD{a}", output_dir)
-        _plot_ablation_movement_bar(tmp_gs, labels, f"ablation_nAOD{a}", output_dir)
+    if len(gs) == 0:
+        print(f"No data found for ablation ({placement}, tag={tag}), skipping.")
+        return
+
+    all_aods = sorted(
+        set().union(*[set(g["n_aods"].unique()) for g in gs if "n_aods" in g.columns])
+    )
+    if len(all_aods) == 0:
+        print(f"No AOD data found for ablation ({placement}, tag={tag}), skipping.")
+        return
+
+    suffix = f"_{tag}" if tag else ""
+    target_aod = all_aods[1] if len(all_aods) > 1 else all_aods[0]
+
+    tmp_gs = []
+    tmp_labels = []
+    for g, lbl in zip(gs, labels_used):
+        sub = g[g["n_aods"] == target_aod]
+        if not sub.empty:
+            tmp_gs.append(sub)
+            tmp_labels.append(lbl)
+
+    if len(tmp_gs) == 0:
+        print(
+            f"No data for target AOD={target_aod} in ablation ({placement}, tag={tag}), skipping."
+        )
+        return
+
+    _plot_ablation_total_time(
+        tmp_gs, tmp_labels, f"ablation_nAOD{target_aod}{suffix}", output_dir
+    )
+    _plot_ablation_movement_bar(
+        tmp_gs, tmp_labels, f"ablation_nAOD{target_aod}{suffix}", output_dir
+    )
+
+
+def aggregate_full_trotter(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate 5 consecutive Rz rounds (0-4) into one full-trotter-step row."""
+    if "round" not in df.columns:
+        raise ValueError(
+            "Input dataframe must contain 'round' column for full trotter."
+        )
+
+    config_cols = [
+        "n_qubits",
+        "qubit_cols",
+        "qubit_rows",
+        "placement",
+        "n_aods",
+        "consider_skip_rus",
+        "tmr_assignment_method",
+        "trivial_return",
+        "decompose_move",
+        "parallel_execution",
+    ]
+
+    work = df.copy().reset_index(drop=False).rename(columns={"index": "_row_order"})
+
+    # each new full trotter step starts when round == 0 within the same configuration
+    work["trotter_id"] = work.groupby(config_cols)["round"].transform(
+        lambda s: (s == 0).cumsum() - 1
+    )
+
+    value_cols_sum = [
+        "total_time",
+        "movement_time",
+        "return_movement_time",
+        "TMR_round",
+        "RUS_round",
+    ]
+    value_cols_avg = ["max_rus_per_qubit", "avg_rus_per_qubit"]
+
+    agg_spec = {col: "sum" for col in value_cols_sum if col in work.columns}
+    agg_spec.update({col: "mean" for col in value_cols_avg if col in work.columns})
+
+    full = (
+        work.groupby(config_cols + ["trotter_id"], as_index=False)
+        .agg(agg_spec)
+        .sort_values(config_cols + ["trotter_id"])
+    )
+    full["round"] = "full"
+    return full
+
+
+def plot_microarch_comp_setting_combined(
+    dfs_dict, output_dir, setting_idx=1, round_angle_lookup=None
+):
+    """Create combined microarch plots with rows for each round.
+
+    dfs_dict: dict of {round_name -> dataframe}
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    setting = SETTINGS[setting_idx]
+
+    # Filter and aggregate data for each round
+    agg_data = {}
+    for round_name, df in dfs_dict.items():
+        df_ctrl = df[
+            (df["trivial_return"] == setting[0])
+            & (df["tmr_assignment_method"] == setting[1])
+            & (df["consider_skip_rus"] == setting[2])
+            & (df["decompose_move"] == setting[3])
+            & (df["parallel_execution"] == setting[4])
+        ]
+
+        if df_ctrl.empty:
+            continue
+
+        g = _aggregate_microarch_trials(df_ctrl)
+        agg_data[round_name] = g
+
+    if not agg_data:
+        print(
+            f"No data for microarch setting_idx={setting_idx}, skipping combined plot."
+        )
+        return
+
+    # Get AODs from first round
+    aods = sorted(agg_data[list(agg_data.keys())[0]]["n_aods"].unique())
+    if len(aods) == 0:
+        print(f"No AOD values for microarch setting_idx={setting_idx}, skipping.")
+        return
+
+    round_names = list(agg_data.keys())
+
+    aods_to_plot = [aods[0], aods[-1]]
+    if 5 in aods and 5 not in aods_to_plot:
+        aods_to_plot.append(5)
+
+    # Create combined figure for each AOD
+    for aod_val in aods_to_plot:
+        fig, axes = plt.subplots(
+            len(round_names), 2, figsize=(14, 4.5 * len(round_names))
+        )
+        if len(round_names) == 1:
+            axes = axes.reshape(1, 2)
+
+        for row_idx, round_name in enumerate(round_names):
+            g = agg_data[round_name]
+            g_aod = g[g["n_aods"] == aod_val]
+            if g_aod.empty:
+                continue
+            round_title = round_name
+
+            # Total time plot
+            lines = sorted(g_aod["placement"].unique())
+            for line_name in lines:
+                sub = g_aod[g_aod["placement"] == line_name].sort_values(SWEEP_COL)
+                axes[row_idx, 0].errorbar(
+                    sub[SWEEP_COL],
+                    sub["total_time_mean"],
+                    yerr=sub["total_time_std"],
+                    marker="o",
+                    capsize=4,
+                    label=str(line_name),
+                )
+
+            total_x_vals = sorted(g_aod[SWEEP_COL].unique())
+            axes[row_idx, 0].set_xticks(total_x_vals)
+            axes[row_idx, 0].set_xticklabels(
+                _format_nqubit_ticklabels(total_x_vals, round_name, round_angle_lookup)
+            )
+            axes[row_idx, 0].set_xlabel("n_qubits (angles)")
+            axes[row_idx, 0].set_ylabel("total_time")
+            axes[row_idx, 0].legend(title="microarchitecture")
+            axes[row_idx, 0].set_title(f"Total Execution Time - {round_title}")
+
+            # Movement plot
+            x_vals = sorted(g_aod[SWEEP_COL].unique())
+            width = 0.8 / len(lines)
+            cmap = plt.get_cmap("tab10")
+            base_colors = [cmap(i) for i in range(10)]
+            handles = []
+
+            for i, line_name in enumerate(lines):
+                sub = g_aod[g_aod["placement"] == line_name].sort_values(SWEEP_COL)
+                x = [v + i * width for v in range(len(x_vals))]
+                move = sub["movement_time_mean"].values
+                ret = sub["return_movement_time_mean"].values
+                base_color = base_colors[i % len(base_colors)]
+                lighter = mcolors.to_rgba(base_color, alpha=0.35)
+
+                axes[row_idx, 1].bar(
+                    x,
+                    move,
+                    width=width,
+                    color=base_color,
+                )
+                axes[row_idx, 1].bar(
+                    x,
+                    ret,
+                    width=width,
+                    bottom=move,
+                    color=lighter,
+                )
+                patch = mpatches.Patch(color=base_color, label=line_name)
+                handles.append(patch)
+
+            axes[row_idx, 1].set_xticks(
+                [r + width * (len(lines) / 2) for r in range(len(x_vals))]
+            )
+            axes[row_idx, 1].set_xticklabels(
+                _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup)
+            )
+            axes[row_idx, 1].set_xlabel("n_qubits (angles)")
+            axes[row_idx, 1].set_ylabel("movement time")
+            axes[row_idx, 1].set_ylim(bottom=0, top=1100)
+            axes[row_idx, 1].set_title(f"Movement Time Breakdown - {round_title}")
+
+            move_patch = mpatches.Patch(color="black", label="Move")
+            return_patch = mpatches.Patch(color="grey", label="Return")
+            handles.extend([move_patch, return_patch])
+            axes[row_idx, 1].legend(
+                title="microarch/move type", handles=handles, fontsize=8
+            )
+
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(
+                output_dir, f"fig2_nAOD{aod_val}_setting_{setting_idx}_combined.pdf"
+            )
+        )
+        plt.close()
+
+
+def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=None):
+    """Create combined ablation plots with rows for each round."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    labels = [
+        "vanilla",
+        "opt return",
+        "opt return + skip whole RUS",
+        "opt decomp return + skip whole RUS",
+        "opt return + skip whole RUS + async. RUS",
+    ]
+    setting_indices = [0, 1, 3, 4, 6]
+
+    # Process each round
+    agg_data = {}
+    for round_name, df in dfs_dict.items():
+        df_col = df[df["placement"] == placement]
+
+        gs = []
+        labels_used = []
+        for label, setting_idx in zip(labels, setting_indices):
+            setting = SETTINGS[setting_idx]
+            # print(df_col)
+            # input()
+            subdf = df_col[
+                (df_col["trivial_return"] == setting[0])
+                & (df_col["tmr_assignment_method"] == setting[1])
+                & (df_col["consider_skip_rus"] == setting[2])
+                & (df_col["decompose_move"] == setting[3])
+                & (df_col["parallel_execution"] == setting[4])
+            ]
+            if subdf.empty:
+                continue
+
+            g = (
+                subdf.groupby(["n_aods", "n_qubits"])[RESULT_COLS]
+                .agg(["mean", "std"])
+                .reset_index()
+            )
+            g.columns = [
+                "_".join(c).strip("_") if isinstance(c, tuple) else c for c in g.columns
+            ]
+            if not g.empty:
+                gs.append(g)
+                labels_used.append(label)
+
+        if len(gs) > 0:
+            agg_data[round_name] = (gs, labels_used)
+
+    if not agg_data:
+        print(f"No data found for ablation ({placement}), skipping combined plot.")
+        return
+
+    # Get all AODs across all settings/rounds
+    all_aods = sorted(
+        {aod for gs, _ in agg_data.values() for g in gs for aod in g["n_aods"].unique()}
+    )
+    if len(all_aods) == 0:
+        print(f"No AOD data found for ablation ({placement}), skipping.")
+        return
+
+    # Pick AOD with most setting coverage on full_trotter (fallback: all rounds)
+    def _coverage_for_aod(round_name, aod):
+        gs_labels = agg_data.get(round_name)
+        if gs_labels is None:
+            return 0
+        gs, _ = gs_labels
+        return sum(1 for g in gs if not g[g["n_aods"] == aod].empty)
+
+    if "full_trotter" in agg_data:
+        primary_target_aod = max(
+            all_aods, key=lambda a: (_coverage_for_aod("full_trotter", a), -a)
+        )
+    else:
+        primary_target_aod = max(
+            all_aods,
+            key=lambda a: (
+                sum(_coverage_for_aod(round_name, a) for round_name in agg_data.keys()),
+                -a,
+            ),
+        )
+
+    target_aods = [primary_target_aod]
+    if 5 in all_aods and 5 not in target_aods:
+        target_aods.append(5)
+
+    for target_aod in target_aods:
+        # Create combined figure
+        fig, axes = plt.subplots(len(agg_data), 2, figsize=(14, 4.5 * len(agg_data)))
+        if len(agg_data) == 1:
+            axes = axes.reshape(1, -1)
+
+        for row_idx, (round_name, (gs, labels_used)) in enumerate(agg_data.items()):
+            # Filter to target AOD
+            tmp_gs = []
+            tmp_labels = []
+            for g, lbl in zip(gs, labels_used):
+                sub = g[g["n_aods"] == target_aod]
+                if not sub.empty:
+                    tmp_gs.append(sub)
+                    tmp_labels.append(lbl)
+
+            if len(tmp_gs) == 0:
+                continue
+            round_title = round_name
+
+            # Total time plot
+            for g, label in zip(tmp_gs, tmp_labels):
+                sub = g.sort_values(SWEEP_COL)
+                axes[row_idx, 0].errorbar(
+                    sub[SWEEP_COL],
+                    sub["total_time_mean"],
+                    yerr=sub["total_time_std"],
+                    marker="o",
+                    capsize=4,
+                    label=label,
+                )
+
+            total_x_vals = sorted(tmp_gs[0][SWEEP_COL].unique())
+            axes[row_idx, 0].set_xticks(total_x_vals)
+            axes[row_idx, 0].set_xticklabels(
+                _format_nqubit_ticklabels(total_x_vals, round_name, round_angle_lookup)
+            )
+            axes[row_idx, 0].set_xlabel("n_qubits (angles)")
+            axes[row_idx, 0].set_ylabel("total_time")
+            axes[row_idx, 0].legend(title="settings", fontsize=8)
+            axes[row_idx, 0].set_title(
+                f"Ablation Study: Total Execution Time - {round_title}"
+            )
+
+            # Movement plot
+            x_vals = sorted(tmp_gs[0][SWEEP_COL].unique())
+            n_lines = len(tmp_gs)
+            width = 0.8 / n_lines
+
+            cmap = plt.get_cmap("tab10")
+            base_colors = [cmap(i) for i in range(10)]
+            handles = []
+
+            for i, (g, label) in enumerate(zip(tmp_gs, tmp_labels)):
+                sub = g.sort_values("n_qubits")
+                x = [v + i * width for v in range(len(x_vals))]
+                move = sub["movement_time_mean"].values
+                ret = sub["return_movement_time_mean"].values
+                base_color = base_colors[i % len(base_colors)]
+                lighter = mcolors.to_rgba(base_color, alpha=0.35)
+
+                axes[row_idx, 1].bar(
+                    x,
+                    move,
+                    width=width,
+                    color=base_color,
+                )
+                axes[row_idx, 1].bar(
+                    x,
+                    ret,
+                    width=width,
+                    bottom=move,
+                    color=lighter,
+                )
+                patch = mpatches.Patch(color=base_color, label=label)
+                handles.append(patch)
+
+            axes[row_idx, 1].set_xticks(
+                [r + width * (n_lines / 2) for r in range(len(x_vals))]
+            )
+            axes[row_idx, 1].set_xticklabels(
+                _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup)
+            )
+            axes[row_idx, 1].set_xlabel("n_qubits (angles)")
+            axes[row_idx, 1].set_ylabel("movement time")
+            axes[row_idx, 1].set_title(
+                f"Ablation Study: Movement Time Breakdown - {round_title}"
+            )
+
+            move_patch = mpatches.Patch(color="black", label="Move")
+            return_patch = mpatches.Patch(color="grey", label="Return")
+            handles.extend([move_patch, return_patch])
+            axes[row_idx, 1].legend(
+                title="settings/move type", handles=handles, fontsize=8
+            )
+
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(
+                output_dir, f"ablation_nAOD{target_aod}_{placement}_combined.pdf"
+            )
+        )
+        plt.close()
+
+
+def plot_nAOD_placement_lines_combined(
+    dfs_dict, output_dir, setting_idx=4, round_angle_lookup=None
+):
+    """Create combined AOD study plots with rows for each round."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    agg_data = {}
+    for round_name, df in dfs_dict.items():
+        setting = SETTINGS[setting_idx]
+        df_col = df[
+            (df["trivial_return"] == setting[0])
+            & (df["tmr_assignment_method"] == setting[1])
+            & (df["consider_skip_rus"] == setting[2])
+            & (df["decompose_move"] == setting[3])
+            & (df["parallel_execution"] == setting[4])
+        ].copy()
+
+        if df_col.empty:
+            continue
+
+        df_col["n_aods"] = df_col["n_aods"].astype(int)
+
+        grouped = (
+            df_col.groupby(["placement", "n_aods", "n_qubits"])[["total_time"]]
+            .agg(["mean", "std"])
+            .reset_index()
+        )
+        grouped.columns = [
+            "_".join(c).strip("_") if isinstance(c, tuple) else c
+            for c in grouped.columns
+        ]
+
+        if not grouped.empty:
+            agg_data[round_name] = grouped
+
+    if not agg_data:
+        print(
+            f"No data for AOD study setting_idx={setting_idx}, skipping combined plot."
+        )
+        return
+
+    # Get placements and AODs
+    first_grouped = list(agg_data.values())[0]
+    placements = sorted(first_grouped["placement"].unique())
+    min_aods = first_grouped["n_aods"].min()
+    max_aods = first_grouped["n_aods"].max()
+
+    # Create combined figure
+    fig, axes = plt.subplots(len(agg_data), 1, figsize=(8, 4.5 * len(agg_data)))
+    if len(agg_data) == 1:
+        axes = [axes]
+
+    cmap_placement = plt.get_cmap("tab10")
+    base_colors = [cmap_placement(i) for i in range(10)]
+
+    for row_idx, (round_name, grouped) in enumerate(agg_data.items()):
+        round_title = round_name
+        for p_idx, placement in enumerate(placements):
+            if placement not in ["col_based", "checkerboard"]:
+                continue
+            sub = grouped[grouped["placement"] == placement]
+
+            aods_values = sorted(sub["n_aods"].unique())
+            for aod in aods_values:
+                sub_aod = sub[sub["n_aods"] == aod].sort_values("n_qubits")
+                axes[row_idx].errorbar(
+                    sub_aod["n_qubits"],
+                    sub_aod["total_time_mean"],
+                    yerr=sub_aod["total_time_std"],
+                    marker="o",
+                    capsize=3,
+                    color=base_colors[p_idx % len(base_colors)],
+                    alpha=0.3 + 0.7 * (aod - min_aods) / (max_aods - min_aods + 1e-5),
+                    label=f"{placement}, #aod={aod}",
+                )
+
+        x_vals = sorted(grouped["n_qubits"].unique())
+        axes[row_idx].set_xticks(x_vals)
+        axes[row_idx].set_xticklabels(
+            _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup)
+        )
+        axes[row_idx].set_xlabel("n_qubits (angles)")
+        axes[row_idx].set_ylabel("total_time")
+        axes[row_idx].set_title(f"Total time for placement × #aod - {round_title}")
+        axes[row_idx].legend(fontsize=7, ncol=2)
+
+    plt.tight_layout()
+    plt.savefig(
+        os.path.join(
+            output_dir,
+            f"total_time_placement_nAOD_setting_{setting_idx}_skip_placements-True_combined.pdf",
+        )
+    )
+    plt.close()
+
+
+def process_full_trotter_csv(csv_file: str, output_dir: str):
+    """Generate full-trotter and per-round analyses for microarchitecture, ablation, and AOD studies."""
+    os.makedirs(output_dir, exist_ok=True)
+    df = pd.read_csv(csv_file, engine="python", on_bad_lines="skip")
+    df = _coerce_result_cols_numeric(df)
+    df = _normalize_config_types(df)
+
+    if "round" not in df.columns:
+        raise ValueError("CSV must include 'round' column for full-trotter processing")
+
+    round_values = sorted(df["round"].unique())
+    df_full = aggregate_full_trotter(df)
+
+    # Prepare dicts for combined plotting
+    dfs_dict_micro = {"full_trotter": df_full}
+    dfs_dict_ablation = {"full_trotter": df_full}
+    dfs_dict_aod = {"full_trotter": df_full}
+
+    for r in round_values:
+        df_round = df[df["round"] == r]
+        dfs_dict_micro[f"round_{r}"] = df_round
+        dfs_dict_ablation[f"round_{r}"] = df_round
+        dfs_dict_aod[f"round_{r}"] = df_round
+
+    round_angle_lookup = _build_round_angle_lookup(dfs_dict_micro)
+
+    # 1) Microarchitecture comparison: combined with rows for each round
+    micro_dir = os.path.join(output_dir, "microarch_setting")
+    plot_microarch_comp_setting_combined(
+        dfs_dict_micro,
+        micro_dir,
+        setting_idx=1,
+        round_angle_lookup=round_angle_lookup,
+    )
+
+    # 2) Ablation study: combined for both placements
+    ablation_dir = os.path.join(output_dir, "ablation")
+    for placement in ["checkerboard", "col_based"]:
+        plot_ablation_combined(
+            dfs_dict_ablation,
+            os.path.join(ablation_dir, placement),
+            placement,
+            round_angle_lookup=round_angle_lookup,
+        )
+
+    # 3) AOD study: combined for settings 4 and 6
+    aod_dir = os.path.join(output_dir, "aod_study")
+    for setting_idx in [4, 6]:
+        plot_nAOD_placement_lines_combined(
+            dfs_dict_aod,
+            aod_dir,
+            setting_idx=setting_idx,
+            round_angle_lookup=round_angle_lookup,
+        )
+
+    print("Saved full-trotter plots to", output_dir)
+
+
+def _coerce_result_cols_numeric(df: pd.DataFrame) -> pd.DataFrame:
+    for col in RESULT_COLS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def _normalize_config_types(df: pd.DataFrame) -> pd.DataFrame:
+    bool_cols = ["trivial_return", "decompose_move", "parallel_execution"]
+    for col in bool_cols:
+        if col in df.columns:
+            if df[col].dtype == object:
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .map({"true": True, "false": False})
+                )
+            else:
+                df[col] = df[col].astype(bool)
+
+    int_cols = [
+        "n_qubits",
+        "qubit_cols",
+        "qubit_rows",
+        "n_aods",
+        "consider_skip_rus",
+        "round",
+    ]
+    for col in int_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
 
 
 # ------------------------------------------------------------
@@ -498,6 +1243,8 @@ def plot_ablation(df, output_dir, placement):
 def process_csv(csv_file: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     df = pd.read_csv(csv_file)
+    df = _coerce_result_cols_numeric(df)
+    df = _normalize_config_types(df)
     # plot_microarch_comp_average_all(df, output_dir + "/microarch_all")
     # plot_microarch_comp_setting(df, output_dir + "/microarch_setting", setting_idx=4)
     plot_ablation(df, output_dir + "/ablation_checkerboard", "checkerboard")
@@ -510,4 +1257,13 @@ def process_csv(csv_file: str, output_dir: str):
 if __name__ == "__main__":
     csv_file = "output/evaluation/evaluation_results.csv"
     output_dir = "output/analysis_plots"
-    process_csv(csv_file, output_dir)
+    try:
+        process_csv(csv_file, output_dir)
+    except Exception as e:
+        print(f"Skipping one-round processing due to error: {e}")
+
+    full_trotter_csv = (
+        "output/evaluation/fidelity/star_full_trotter_profiling_results.csv"
+    )
+    full_trotter_output_dir = "output/analysis_plots/full_trotter"
+    process_full_trotter_csv(full_trotter_csv, full_trotter_output_dir)
