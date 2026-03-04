@@ -760,8 +760,89 @@ def plot_microarch_comp_setting_combined(
     if 5 in aods and 5 not in aods_to_plot:
         aods_to_plot.append(5)
 
-    # Create combined figure for each AOD
+    execution_mode_title = ""
+    if setting_idx == 4:
+        execution_mode_title = " - sync. execution"
+    elif setting_idx == 6:
+        execution_mode_title = " - async. execution"
+
+    def _draw_round_plots(total_ax, movement_ax, round_name, g_aod):
+        lines = sorted(g_aod["placement"].unique())
+
+        for line_name in lines:
+            sub = g_aod[g_aod["placement"] == line_name].sort_values(SWEEP_COL)
+            total_ax.errorbar(
+                sub[SWEEP_COL],
+                sub["total_time_mean"],
+                yerr=sub["total_time_std"],
+                marker="o",
+                capsize=4,
+                label=str(line_name),
+            )
+
+        total_x_vals = sorted(g_aod[SWEEP_COL].unique())
+        total_ax.set_xticks(total_x_vals)
+        total_ax.set_xticklabels(
+            _format_nqubit_ticklabels(total_x_vals, round_name, round_angle_lookup),
+            rotation=45,
+            ha="right",
+        )
+        total_ax.set_xlabel("n_qubits (angles)")
+        total_ax.set_ylabel("total_time")
+        total_ax.legend(title="microarchitecture")
+        total_ax.set_title(f"Total Execution Time - {round_name}")
+
+        x_vals = sorted(g_aod[SWEEP_COL].unique())
+        width = 0.8 / len(lines)
+        cmap = plt.get_cmap("tab10")
+        base_colors = [cmap(i) for i in range(10)]
+        handles = []
+
+        for i, line_name in enumerate(lines):
+            sub = g_aod[g_aod["placement"] == line_name].sort_values(SWEEP_COL)
+            x = [v + i * width for v in range(len(x_vals))]
+            move = sub["movement_time_mean"].values
+            ret = sub["return_movement_time_mean"].values
+            base_color = base_colors[i % len(base_colors)]
+            lighter = mcolors.to_rgba(base_color, alpha=0.35)
+
+            movement_ax.bar(
+                x,
+                move,
+                width=width,
+                color=base_color,
+            )
+            movement_ax.bar(
+                x,
+                ret,
+                width=width,
+                bottom=move,
+                color=lighter,
+            )
+            patch = mpatches.Patch(color=base_color, label=line_name)
+            handles.append(patch)
+
+        movement_ax.set_xticks(
+            [r + width * (len(lines) / 2) for r in range(len(x_vals))]
+        )
+        movement_ax.set_xticklabels(
+            _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup),
+            rotation=45,
+            ha="right",
+        )
+        movement_ax.set_xlabel("n_qubits (angles)")
+        movement_ax.set_ylabel("movement time")
+        movement_ax.set_ylim(bottom=0, top=1100)
+        movement_ax.set_title(f"Movement Time Breakdown - {round_name}")
+
+        move_patch = mpatches.Patch(color="black", label="Move")
+        return_patch = mpatches.Patch(color="grey", label="Return")
+        handles.extend([move_patch, return_patch])
+        movement_ax.legend(title="microarch/move type", handles=handles, fontsize=8)
+
+    # Create combined figures for each AOD in both orientations
     for aod_val in aods_to_plot:
+        # vertical: execution time in a column
         fig, axes = plt.subplots(
             len(round_names), 2, figsize=(14, 4.5 * len(round_names))
         )
@@ -773,87 +854,50 @@ def plot_microarch_comp_setting_combined(
             g_aod = g[g["n_aods"] == aod_val]
             if g_aod.empty:
                 continue
-            round_title = round_name
+            _draw_round_plots(axes[row_idx, 0], axes[row_idx, 1], round_name, g_aod)
 
-            # Total time plot
-            lines = sorted(g_aod["placement"].unique())
-            for line_name in lines:
-                sub = g_aod[g_aod["placement"] == line_name].sort_values(SWEEP_COL)
-                axes[row_idx, 0].errorbar(
-                    sub[SWEEP_COL],
-                    sub["total_time_mean"],
-                    yerr=sub["total_time_std"],
-                    marker="o",
-                    capsize=4,
-                    label=str(line_name),
-                )
-
-            total_x_vals = sorted(g_aod[SWEEP_COL].unique())
-            axes[row_idx, 0].set_xticks(total_x_vals)
-            axes[row_idx, 0].set_xticklabels(
-                _format_nqubit_ticklabels(total_x_vals, round_name, round_angle_lookup)
-            )
-            axes[row_idx, 0].set_xlabel("n_qubits (angles)")
-            axes[row_idx, 0].set_ylabel("total_time")
-            axes[row_idx, 0].legend(title="microarchitecture")
-            axes[row_idx, 0].set_title(f"Total Execution Time - {round_title}")
-
-            # Movement plot
-            x_vals = sorted(g_aod[SWEEP_COL].unique())
-            width = 0.8 / len(lines)
-            cmap = plt.get_cmap("tab10")
-            base_colors = [cmap(i) for i in range(10)]
-            handles = []
-
-            for i, line_name in enumerate(lines):
-                sub = g_aod[g_aod["placement"] == line_name].sort_values(SWEEP_COL)
-                x = [v + i * width for v in range(len(x_vals))]
-                move = sub["movement_time_mean"].values
-                ret = sub["return_movement_time_mean"].values
-                base_color = base_colors[i % len(base_colors)]
-                lighter = mcolors.to_rgba(base_color, alpha=0.35)
-
-                axes[row_idx, 1].bar(
-                    x,
-                    move,
-                    width=width,
-                    color=base_color,
-                )
-                axes[row_idx, 1].bar(
-                    x,
-                    ret,
-                    width=width,
-                    bottom=move,
-                    color=lighter,
-                )
-                patch = mpatches.Patch(color=base_color, label=line_name)
-                handles.append(patch)
-
-            axes[row_idx, 1].set_xticks(
-                [r + width * (len(lines) / 2) for r in range(len(x_vals))]
-            )
-            axes[row_idx, 1].set_xticklabels(
-                _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup)
-            )
-            axes[row_idx, 1].set_xlabel("n_qubits (angles)")
-            axes[row_idx, 1].set_ylabel("movement time")
-            axes[row_idx, 1].set_ylim(bottom=0, top=1100)
-            axes[row_idx, 1].set_title(f"Movement Time Breakdown - {round_title}")
-
-            move_patch = mpatches.Patch(color="black", label="Move")
-            return_patch = mpatches.Patch(color="grey", label="Return")
-            handles.extend([move_patch, return_patch])
-            axes[row_idx, 1].legend(
-                title="microarch/move type", handles=handles, fontsize=8
-            )
-
-        plt.tight_layout()
-        plt.savefig(
+        fig.suptitle(
+            f"microarchitecture evaluation{execution_mode_title} (n_aods={aod_val})",
+            fontsize=20,
+            y=0.995,
+        )
+        fig.tight_layout(rect=(0, 0.08, 1, 0.985))
+        fig.savefig(
             os.path.join(
-                output_dir, f"fig2_nAOD{aod_val}_setting_{setting_idx}_combined.pdf"
+                output_dir,
+                f"fig2_nAOD{aod_val}_setting_{setting_idx}_combined_vertical.pdf",
             )
         )
-        plt.close()
+        # Keep backward-compatible filename mapped to the vertical layout.
+        plt.close(fig)
+
+        # horizontal: execution time in a row
+        fig, axes = plt.subplots(
+            2, len(round_names), figsize=(4.5 * len(round_names), 9)
+        )
+        if len(round_names) == 1:
+            axes = axes.reshape(2, 1)
+
+        for col_idx, round_name in enumerate(round_names):
+            g = agg_data[round_name]
+            g_aod = g[g["n_aods"] == aod_val]
+            if g_aod.empty:
+                continue
+            _draw_round_plots(axes[0, col_idx], axes[1, col_idx], round_name, g_aod)
+
+        fig.suptitle(
+            f"microarchitecture evaluation{execution_mode_title} (n_aods={aod_val})",
+            fontsize=20,
+            y=0.995,
+        )
+        fig.tight_layout(rect=(0, 0.08, 1, 0.985))
+        fig.savefig(
+            os.path.join(
+                output_dir,
+                f"fig2_nAOD{aod_val}_setting_{setting_idx}_combined_horizontal.pdf",
+            )
+        )
+        plt.close(fig)
 
 
 def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=None):
@@ -942,109 +986,147 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
     if 5 in all_aods and 5 not in target_aods:
         target_aods.append(5)
 
+    round_items = list(agg_data.items())
+
+    def _draw_ablation_round(
+        total_ax, movement_ax, round_name, gs, labels_used, target_aod
+    ):
+        tmp_gs = []
+        tmp_labels = []
+        for g, lbl in zip(gs, labels_used):
+            sub = g[g["n_aods"] == target_aod]
+            if not sub.empty:
+                tmp_gs.append(sub)
+                tmp_labels.append(lbl)
+
+        if len(tmp_gs) == 0:
+            return
+
+        for g, label in zip(tmp_gs, tmp_labels):
+            sub = g.sort_values(SWEEP_COL)
+            total_ax.errorbar(
+                sub[SWEEP_COL],
+                sub["total_time_mean"],
+                yerr=sub["total_time_std"],
+                marker="o",
+                capsize=4,
+                label=label,
+            )
+
+        total_x_vals = sorted(tmp_gs[0][SWEEP_COL].unique())
+        total_ax.set_xticks(total_x_vals)
+        total_ax.set_xticklabels(
+            _format_nqubit_ticklabels(total_x_vals, round_name, round_angle_lookup),
+            rotation=45,
+            ha="right",
+        )
+        total_ax.set_xlabel("n_qubits (angles)")
+        total_ax.set_ylabel("total_time")
+        total_ax.legend(title="settings", fontsize=8)
+        total_ax.set_title(f"Total Execution Time - {round_name}")
+
+        x_vals = sorted(tmp_gs[0][SWEEP_COL].unique())
+        n_lines = len(tmp_gs)
+        width = 0.8 / n_lines
+
+        cmap = plt.get_cmap("tab10")
+        base_colors = [cmap(i) for i in range(10)]
+        handles = []
+
+        for i, (g, label) in enumerate(zip(tmp_gs, tmp_labels)):
+            sub = g.sort_values("n_qubits")
+            x = [v + i * width for v in range(len(x_vals))]
+            move = sub["movement_time_mean"].values
+            ret = sub["return_movement_time_mean"].values
+            base_color = base_colors[i % len(base_colors)]
+            lighter = mcolors.to_rgba(base_color, alpha=0.35)
+
+            movement_ax.bar(
+                x,
+                move,
+                width=width,
+                color=base_color,
+            )
+            movement_ax.bar(
+                x,
+                ret,
+                width=width,
+                bottom=move,
+                color=lighter,
+            )
+            patch = mpatches.Patch(color=base_color, label=label)
+            handles.append(patch)
+
+        movement_ax.set_xticks([r + width * (n_lines / 2) for r in range(len(x_vals))])
+        movement_ax.set_xticklabels(
+            _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup),
+            rotation=45,
+            ha="right",
+        )
+        movement_ax.set_xlabel("n_qubits (angles)")
+        movement_ax.set_ylabel("movement time")
+        movement_ax.set_title(f"Movement Time Breakdown - {round_name}")
+
+        move_patch = mpatches.Patch(color="black", label="Move")
+        return_patch = mpatches.Patch(color="grey", label="Return")
+        handles.extend([move_patch, return_patch])
+        movement_ax.legend(title="settings/move type", handles=handles, fontsize=8)
+
     for target_aod in target_aods:
-        # Create combined figure
-        fig, axes = plt.subplots(len(agg_data), 2, figsize=(14, 4.5 * len(agg_data)))
-        if len(agg_data) == 1:
+        # vertical: each round in a row, metrics in columns
+        fig, axes = plt.subplots(
+            len(round_items), 2, figsize=(14, 4.5 * len(round_items))
+        )
+        if len(round_items) == 1:
             axes = axes.reshape(1, -1)
 
-        for row_idx, (round_name, (gs, labels_used)) in enumerate(agg_data.items()):
-            # Filter to target AOD
-            tmp_gs = []
-            tmp_labels = []
-            for g, lbl in zip(gs, labels_used):
-                sub = g[g["n_aods"] == target_aod]
-                if not sub.empty:
-                    tmp_gs.append(sub)
-                    tmp_labels.append(lbl)
-
-            if len(tmp_gs) == 0:
-                continue
-            round_title = round_name
-
-            # Total time plot
-            for g, label in zip(tmp_gs, tmp_labels):
-                sub = g.sort_values(SWEEP_COL)
-                axes[row_idx, 0].errorbar(
-                    sub[SWEEP_COL],
-                    sub["total_time_mean"],
-                    yerr=sub["total_time_std"],
-                    marker="o",
-                    capsize=4,
-                    label=label,
-                )
-
-            total_x_vals = sorted(tmp_gs[0][SWEEP_COL].unique())
-            axes[row_idx, 0].set_xticks(total_x_vals)
-            axes[row_idx, 0].set_xticklabels(
-                _format_nqubit_ticklabels(total_x_vals, round_name, round_angle_lookup)
-            )
-            axes[row_idx, 0].set_xlabel("n_qubits (angles)")
-            axes[row_idx, 0].set_ylabel("total_time")
-            axes[row_idx, 0].legend(title="settings", fontsize=8)
-            axes[row_idx, 0].set_title(
-                f"Ablation Study: Total Execution Time - {round_title}"
+        for row_idx, (round_name, (gs, labels_used)) in enumerate(round_items):
+            _draw_ablation_round(
+                axes[row_idx, 0],
+                axes[row_idx, 1],
+                round_name,
+                gs,
+                labels_used,
+                target_aod,
             )
 
-            # Movement plot
-            x_vals = sorted(tmp_gs[0][SWEEP_COL].unique())
-            n_lines = len(tmp_gs)
-            width = 0.8 / n_lines
-
-            cmap = plt.get_cmap("tab10")
-            base_colors = [cmap(i) for i in range(10)]
-            handles = []
-
-            for i, (g, label) in enumerate(zip(tmp_gs, tmp_labels)):
-                sub = g.sort_values("n_qubits")
-                x = [v + i * width for v in range(len(x_vals))]
-                move = sub["movement_time_mean"].values
-                ret = sub["return_movement_time_mean"].values
-                base_color = base_colors[i % len(base_colors)]
-                lighter = mcolors.to_rgba(base_color, alpha=0.35)
-
-                axes[row_idx, 1].bar(
-                    x,
-                    move,
-                    width=width,
-                    color=base_color,
-                )
-                axes[row_idx, 1].bar(
-                    x,
-                    ret,
-                    width=width,
-                    bottom=move,
-                    color=lighter,
-                )
-                patch = mpatches.Patch(color=base_color, label=label)
-                handles.append(patch)
-
-            axes[row_idx, 1].set_xticks(
-                [r + width * (n_lines / 2) for r in range(len(x_vals))]
-            )
-            axes[row_idx, 1].set_xticklabels(
-                _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup)
-            )
-            axes[row_idx, 1].set_xlabel("n_qubits (angles)")
-            axes[row_idx, 1].set_ylabel("movement time")
-            axes[row_idx, 1].set_title(
-                f"Ablation Study: Movement Time Breakdown - {round_title}"
-            )
-
-            move_patch = mpatches.Patch(color="black", label="Move")
-            return_patch = mpatches.Patch(color="grey", label="Return")
-            handles.extend([move_patch, return_patch])
-            axes[row_idx, 1].legend(
-                title="settings/move type", handles=handles, fontsize=8
-            )
-
-        plt.tight_layout()
-        plt.savefig(
+        fig.suptitle(f"ablation study (n_aods={target_aod})")
+        fig.tight_layout(rect=(0, 0.08, 1, 0.97))
+        fig.savefig(
             os.path.join(
-                output_dir, f"ablation_nAOD{target_aod}_{placement}_combined.pdf"
+                output_dir,
+                f"ablation_nAOD{target_aod}_{placement}_combined_vertical.pdf",
             )
         )
-        plt.close()
+        # Keep backward-compatible filename mapped to the vertical layout.
+        plt.close(fig)
+
+        # horizontal: each round in a column, metrics in rows
+        fig, axes = plt.subplots(
+            2, len(round_items), figsize=(4.5 * len(round_items), 9)
+        )
+        if len(round_items) == 1:
+            axes = axes.reshape(2, 1)
+
+        for col_idx, (round_name, (gs, labels_used)) in enumerate(round_items):
+            _draw_ablation_round(
+                axes[0, col_idx],
+                axes[1, col_idx],
+                round_name,
+                gs,
+                labels_used,
+                target_aod,
+            )
+
+        fig.suptitle(f"ablation study (n_aods={target_aod})")
+        fig.tight_layout(rect=(0, 0.08, 1, 0.97))
+        fig.savefig(
+            os.path.join(
+                output_dir,
+                f"ablation_nAOD{target_aod}_{placement}_combined_horizontal.pdf",
+            )
+        )
+        plt.close(fig)
 
 
 def plot_nAOD_placement_lines_combined(
@@ -1093,17 +1175,21 @@ def plot_nAOD_placement_lines_combined(
     placements = sorted(first_grouped["placement"].unique())
     min_aods = first_grouped["n_aods"].min()
     max_aods = first_grouped["n_aods"].max()
+    if setting_idx == 4:
+        execution_mode = "sync. execution"
+    elif setting_idx == 6:
+        execution_mode = "async. execution"
+    else:
+        execution_mode = "execution"
 
-    # Create combined figure
-    fig, axes = plt.subplots(len(agg_data), 1, figsize=(8, 4.5 * len(agg_data)))
-    if len(agg_data) == 1:
-        axes = [axes]
+    figure_title = f"AOD number comparison ({execution_mode})"
 
     cmap_placement = plt.get_cmap("tab10")
     base_colors = [cmap_placement(i) for i in range(10)]
 
-    for row_idx, (round_name, grouped) in enumerate(agg_data.items()):
-        round_title = round_name
+    round_items = list(agg_data.items())
+
+    def _draw_aod_round(ax, round_name, grouped):
         for p_idx, placement in enumerate(placements):
             if placement not in ["col_based", "checkerboard"]:
                 continue
@@ -1112,7 +1198,7 @@ def plot_nAOD_placement_lines_combined(
             aods_values = sorted(sub["n_aods"].unique())
             for aod in aods_values:
                 sub_aod = sub[sub["n_aods"] == aod].sort_values("n_qubits")
-                axes[row_idx].errorbar(
+                ax.errorbar(
                     sub_aod["n_qubits"],
                     sub_aod["total_time_mean"],
                     yerr=sub_aod["total_time_std"],
@@ -1124,23 +1210,55 @@ def plot_nAOD_placement_lines_combined(
                 )
 
         x_vals = sorted(grouped["n_qubits"].unique())
-        axes[row_idx].set_xticks(x_vals)
-        axes[row_idx].set_xticklabels(
-            _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup)
+        ax.set_xticks(x_vals)
+        ax.set_xticklabels(
+            _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup),
+            rotation=45,
+            ha="right",
         )
-        axes[row_idx].set_xlabel("n_qubits (angles)")
-        axes[row_idx].set_ylabel("total_time")
-        axes[row_idx].set_title(f"Total time for placement × #aod - {round_title}")
-        axes[row_idx].legend(fontsize=7, ncol=2)
+        ax.set_xlabel("n_qubits (angles)")
+        ax.set_ylabel("total_time")
+        # Apply y-limit only for single trotter rounds, not for full_trotter
+        if round_name != "full_trotter":
+            ax.set_ylim(0, 300)
+        ax.set_title(f"Total time for placement × #aod - {round_name}")
+        ax.legend(fontsize=7, ncol=2)
 
-    plt.tight_layout()
-    plt.savefig(
+    # vertical: each round in a row
+    fig, axes = plt.subplots(len(round_items), 1, figsize=(7, 4.5 * len(round_items)))
+    if len(round_items) == 1:
+        axes = [axes]
+
+    for row_idx, (round_name, grouped) in enumerate(round_items):
+        _draw_aod_round(axes[row_idx], round_name, grouped)
+
+    fig.suptitle(figure_title)
+    fig.tight_layout(rect=(0, 0.08, 1, 0.97))
+    fig.savefig(
         os.path.join(
             output_dir,
-            f"total_time_placement_nAOD_setting_{setting_idx}_skip_placements-True_combined.pdf",
+            f"total_time_placement_nAOD_setting_{setting_idx}_skip_placements-True_combined_vertical.pdf",
         )
     )
-    plt.close()
+    plt.close(fig)
+
+    # horizontal: each round in a column
+    fig, axes = plt.subplots(1, len(round_items), figsize=(4.5 * len(round_items), 4.5))
+    if len(round_items) == 1:
+        axes = [axes]
+
+    for col_idx, (round_name, grouped) in enumerate(round_items):
+        _draw_aod_round(axes[col_idx], round_name, grouped)
+
+    fig.suptitle(figure_title)
+    fig.tight_layout(rect=(0, 0.08, 1, 0.97))
+    fig.savefig(
+        os.path.join(
+            output_dir,
+            f"total_time_placement_nAOD_setting_{setting_idx}_skip_placements-True_combined_horizontal.pdf",
+        )
+    )
+    plt.close(fig)
 
 
 def process_full_trotter_csv(csv_file: str, output_dir: str):
@@ -1170,23 +1288,29 @@ def process_full_trotter_csv(csv_file: str, output_dir: str):
     round_angle_lookup = _build_round_angle_lookup(dfs_dict_micro)
 
     # 1) Microarchitecture comparison: combined with rows for each round
-    micro_dir = os.path.join(output_dir, "microarch_setting")
-    plot_microarch_comp_setting_combined(
-        dfs_dict_micro,
-        micro_dir,
-        setting_idx=1,
-        round_angle_lookup=round_angle_lookup,
-    )
+    # micro_dir = os.path.join(output_dir, "microarch_setting")
+    # plot_microarch_comp_setting_combined(
+    #     dfs_dict_micro,
+    #     micro_dir,
+    #     setting_idx=4,
+    #     round_angle_lookup=round_angle_lookup,
+    # )
+    # plot_microarch_comp_setting_combined(
+    #     dfs_dict_micro,
+    #     micro_dir,
+    #     setting_idx=6,
+    #     round_angle_lookup=round_angle_lookup,
+    # )
 
-    # 2) Ablation study: combined for both placements
-    ablation_dir = os.path.join(output_dir, "ablation")
-    for placement in ["checkerboard", "col_based"]:
-        plot_ablation_combined(
-            dfs_dict_ablation,
-            os.path.join(ablation_dir, placement),
-            placement,
-            round_angle_lookup=round_angle_lookup,
-        )
+    # # 2) Ablation study: combined for both placements
+    # ablation_dir = os.path.join(output_dir, "ablation")
+    # for placement in ["checkerboard", "col_based"]:
+    #     plot_ablation_combined(
+    #         dfs_dict_ablation,
+    #         os.path.join(ablation_dir, placement),
+    #         placement,
+    #         round_angle_lookup=round_angle_lookup,
+    #     )
 
     # 3) AOD study: combined for settings 4 and 6
     aod_dir = os.path.join(output_dir, "aod_study")

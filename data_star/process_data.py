@@ -101,7 +101,7 @@ success_data_6d = {
     "suc7": data_6d["suc7"],
 }
 
-# fitted_params_6d = fit_data_series(success_data_6d, "fig_6_d (suc3, suc5, suc7)")
+fitted_params_6d = fit_data_series(success_data_6d, "fig_6_d (suc3, suc5, suc7)")
 
 # ============================================================================
 # Process fig_6_b

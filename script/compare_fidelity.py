@@ -115,7 +115,7 @@ def plot_raw_infidelity_breakdown(raw_df, output_dir):
     ]
 
     # Create stacked bar plot showing contribution of each error term
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     n_qubits = sorted(raw_df["n_qubit"].unique())
     infidelity_data = {term: [] for term in error_terms}
@@ -151,8 +151,9 @@ def plot_raw_infidelity_breakdown(raw_df, output_dir):
     ax.set_ylabel("Total Infidelity", fontsize=14)
     ax.set_title("Raw Infidelity Breakdown by Error Source", fontsize=16)
     ax.set_xticks(x)
-    ax.set_xticklabels(n_qubits)
+    ax.set_xticklabels(n_qubits, fontsize=12)
     ax.legend(loc="upper left", fontsize=10)
+    ax.tick_params(axis="y", labelsize=12)
     ax.grid(True, alpha=0.3, axis="y")
 
     output_path = os.path.join(output_dir, "raw_infidelity_stacked.pdf")
@@ -182,7 +183,9 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
 
     # Create merged figure for all placements
     placements = sorted(star_df["placement"].unique())
-    fig, axes = plt.subplots(len(placements), len(error_terms), figsize=(16, 10))
+    fig, axes = plt.subplots(
+        len(placements), len(error_terms), figsize=(18, 6 * len(placements))
+    )
 
     for placement_idx, placement in enumerate(placements):
         placement_df = star_df[star_df["placement"] == placement]
@@ -208,24 +211,23 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
                     alpha=0.7,
                 )
 
-            ax.set_xlabel("Number of Qubits", fontsize=11)
-            ax.set_ylabel("Infidelity (1 - Fidelity)", fontsize=11)
-            term_name = (
-                term.replace("fidelity_", "").replace("fidelity_of_", "").upper()
-            )
-            ax.set_title(term_name, fontsize=12)
+            ax.set_xlabel("Number of Qubits", fontsize=14)
+            ax.set_ylabel("Infidelity (1 - Fidelity)", fontsize=14)
+            term_name = term.replace("fidelity_", "").replace("of_", "").upper()
+            ax.set_title(term_name, fontsize=16)
             ax.grid(True, alpha=0.3)
             ax.set_yscale("log")
+            ax.tick_params(axis="both", labelsize=12)
             if placement_idx == 0:
-                ax.legend(fontsize=8)
+                ax.legend(fontsize=10)
 
     # Set row labels
     for placement_idx, placement in enumerate(placements):
         axes[placement_idx, 0].set_ylabel(
-            f"{placement.upper()}\nInfidelity", fontsize=12, fontweight="bold"
+            f"{placement.upper()}\nInfidelity", fontsize=14, fontweight="bold"
         )
 
-    fig.suptitle("STAR Infidelity Breakdown by Error Type and Placement", fontsize=16)
+    fig.suptitle("STAR Infidelity Breakdown by Error Type and Placement", fontsize=18)
     fig.tight_layout()
     output_path = os.path.join(output_dir, "star_infidelity_breakdown.pdf")
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -258,7 +260,7 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
 
     for term, color in zip(stacked_terms, colors):
         values = infidelity_data[term]
-        label = term.replace("fidelity_", "").replace("fidelity_of_", "").upper()
+        label = term.replace("fidelity_", "").replace("of_", "").upper()
         if term == "fidelity_1q":
             label = "H"
         ax.bar(
@@ -272,19 +274,17 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
         )
         bottom += values
 
-    ax.set_xlabel("Number of Qubits", fontsize=12)
-    ax.set_ylabel("Total Infidelity", fontsize=12)
+    ax.set_xlabel("Number of Qubits", fontsize=14)
+    ax.set_ylabel("Total Infidelity", fontsize=14)
     ax.set_title(
-        "STAR Infidelity Breakdown (Averaged Over All Configurations)", fontsize=13
+        "STAR Infidelity Breakdown (Averaged Over All Configurations)", fontsize=16
     )
     ax.set_xticks(x)
-    ax.set_xticklabels(n_qubits)
+    ax.set_xticklabels(n_qubits, fontsize=12)
+    ax.tick_params(axis="y", labelsize=12)
     ax.grid(True, alpha=0.3, axis="y")
-    ax.legend(loc="upper left", fontsize=8)
+    ax.legend(loc="upper left", fontsize=10)
 
-    fig.suptitle(
-        "STAR Infidelity Stacked (Averaged Over All Configurations)", fontsize=15
-    )
     fig.tight_layout()
     output_path = os.path.join(output_dir, "star_infidelity_stacked_best.pdf")
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -330,7 +330,7 @@ def plot_star_settings_comparison(star_df, output_dir):
     n_placements = len(placements)
 
     fig, axes = plt.subplots(
-        n_placements, len(aod_values), figsize=(21, 5 * n_placements)
+        n_placements, len(aod_values), figsize=(18, 6 * n_placements)
     )
     if n_placements == 1:
         axes = axes.reshape(1, len(aod_values))
@@ -390,11 +390,12 @@ def plot_star_settings_comparison(star_df, output_dir):
                     label=label,
                 )
 
-            ax.set_xlabel("Number of Qubits", fontsize=11)
-            ax.set_ylabel("Fidelity", fontsize=11)
-            ax.set_title(f"{placement}, AOD={n_aods}", fontsize=12)
+            ax.set_xlabel("Number of Qubits", fontsize=14)
+            ax.set_ylabel("Fidelity", fontsize=14)
+            ax.set_title(f"{placement}, AOD={n_aods}", fontsize=16)
             ax.grid(True, alpha=0.3)
-            ax.legend(fontsize=8)
+            ax.tick_params(axis="both", labelsize=12)
+            ax.legend(fontsize=10)
 
             # Track y-limits per column for syncing
             if col_ylims[col_idx] is None:
@@ -412,7 +413,7 @@ def plot_star_settings_comparison(star_df, output_dir):
             for row_idx in range(n_placements):
                 axes[row_idx, col_idx].set_ylim(col_ylims[col_idx])
 
-    fig.suptitle("STAR Ablation Study", fontsize=16, y=0.995)
+    fig.suptitle("STAR Ablation Study", fontsize=18, y=0.995)
     fig.tight_layout()
     output_path = os.path.join(output_dir, "star_ablation_fidelity.pdf")
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -423,7 +424,7 @@ def plot_star_settings_comparison(star_df, output_dir):
 def plot_overall_fidelity_comparison(raw_df, star_df, output_dir):
     """Create overall fidelity comparison with STAR averaged over all configurations."""
 
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     # Plot raw fidelity
     raw_data = (
@@ -477,7 +478,8 @@ def plot_overall_fidelity_comparison(raw_df, star_df, output_dir):
     ax.set_xlabel("Number of Qubits", fontsize=14)
     ax.set_ylabel("Mean Fidelity", fontsize=14)
     ax.set_title("Overall Fidelity Comparison: Raw vs STAR", fontsize=16)
-    ax.legend(fontsize=12)
+    ax.tick_params(axis="both", labelsize=12)
+    ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
 
     output_path = os.path.join(output_dir, "overall_fidelity_comparison.pdf")

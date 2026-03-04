@@ -199,11 +199,11 @@ def analyze_execution_log(
         # Record op stats
         if operation == "Rz":
             if isinstance(value, list):
+                if initial_angle is None:
+                    initial_angle = min(value, key=abs)
                 for angle in value:
                     rotation_count[angle] += 1
                     # Track initial and largest angles
-                    if initial_angle is None:
-                        initial_angle = angle
                     if largest_angle is None or abs(angle) > abs(largest_angle):
                         largest_angle = angle
             else:

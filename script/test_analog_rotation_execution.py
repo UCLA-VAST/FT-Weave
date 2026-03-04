@@ -263,5 +263,5 @@ if __name__ == "__main__":
         consider_skip_rus=False,
         tmr_assignment_method="matching",
         trivial_return=False,
-        parallel_execution=False,
+        parallel_execution=True,
     )
