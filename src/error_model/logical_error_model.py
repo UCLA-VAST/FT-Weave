@@ -53,6 +53,8 @@ class LogicalErrorModel:
         """Initialize and validate the logical error model."""
         if self.code_distance < 3:
             raise ValueError(f"Code distance must be >= 3, got {self.code_distance}")
+        if self.code_distance != 7:
+            self._compute_logical_error_rates()
 
     def _compute_logical_error_rates(self):
         """Compute CNOT error rates based on code distance and physical error rate.
@@ -67,17 +69,16 @@ class LogicalErrorModel:
         d_exponent = math.ceil((self.code_distance + 1) / 2)
 
         # Scale based on physical error rate change
-
-        self.logical_error_rates["CNOT"] = (
+        old_cnot_fid = self.logical_error_rates["CNOT"]
+        new_cnot_fid = (
             self._PREFACTOR_A
             * (p_physical / self._THRESHOLD_ERROR_RATE_P_C) ** d_exponent
         )
-
+        error_ratio = new_cnot_fid / old_cnot_fid
         # # Apply scaling to reference rates
-        # scaled_rates = {
-        #     op: rate * error_ratio
-        #     for op, rate in self._DEFAULT_LOGICAL_ERROR_RATES.items()
-        # }
+        self.logical_error_rates = {
+            op: rate * error_ratio for op, rate in self.logical_error_rates.items()
+        }
 
     def set_code_distance(self, distance: int) -> None:
         """Set the code distance and recompute logical error rates.
@@ -147,7 +148,7 @@ class LogicalErrorModel:
             a = 3.827042e-04
             b = 1.463395
             c = 0.000000
-        elif self.code_distance == 7:
+        elif self.code_distance == 7 or self.code_distance == 9:
             a = 3.136180e-04
             b = 1.464970
             c = 0.000000

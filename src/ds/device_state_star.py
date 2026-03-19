@@ -4,10 +4,10 @@ from enum import Enum
 from typing import Optional
 
 import numpy as np
-from ..config import PRECISION
+from src.star.config import PRECISION
 
 
-from src.config import (
+from src.star.config import (
     ANGLE_S,
     ANGLE_T,
 )

@@ -22,7 +22,7 @@ def simluate_trotter_2d_tfim_fidelity(
         [RX on all qubits]
     """
     row, col = qubit_layout
-    n_rz_layer = 5 * n_trotter_steps
+    n_rz_layer = 9 * n_trotter_steps
     assert (
         len(execution_logs) == n_rz_layer
     ), f"Expected {n_rz_layer} layers of RZ gates, but got {len(execution_logs)}"
@@ -43,6 +43,7 @@ def simluate_trotter_2d_tfim_fidelity(
                     "Barrier",
                     "TMR_fail",
                     "RUS_success",
+                    "RUS_fail",
                 ], f"Unexpected operation {operation} in execution log"
                 if operation == "Rz":
                     # value is the angle of Rz gate, we assume the error is proportional to the angle

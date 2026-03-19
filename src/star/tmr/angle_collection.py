@@ -1,9 +1,9 @@
 import math
 from collections import defaultdict
 import numpy as np
-from src.ds import QubitAngleTracker
+from ...ds import QubitAngleTracker
 
-from src.simulation import (
+from src.star.simulation import (
     calculate_success_rate,
 )
 

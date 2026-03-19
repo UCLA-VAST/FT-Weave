@@ -1,4 +1,4 @@
-from src.rus.rus_assignment import AngleFactoryIndex
+from ..rus.rus_assignment import AngleFactoryIndex
 from src.ds import QubitAngleTracker, Factory, FactoryPool, FactoryState
 
 
@@ -44,7 +44,7 @@ def update_factory_states_post_tmr(
         factory_pool: FactoryPool containing Factory objects with TMR results
     """
     for factory in factory_list:
-        if factory.tmr_state is False:
+        if not factory.tmr_state:
             qubit_id = factory.qubit
             assert (
                 qubit_id is not None

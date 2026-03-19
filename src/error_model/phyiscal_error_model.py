@@ -73,6 +73,8 @@ class PhysicalErrorModel:
 
     def get_coherence_time(self) -> float:
         """Get the coherence time for idle error calculations."""
+        if self.model_type == "lookahead":
+            return self.coherence_time * self.lookahead_improvement_ratio
         return self.coherence_time
 
     def get_fidelity(self, operation: str) -> float:

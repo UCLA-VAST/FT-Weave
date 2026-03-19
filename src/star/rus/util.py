@@ -1,13 +1,14 @@
 import numpy as np
 
-from src.config import (
+from src.star.config import (
     CNOT_TIME,
     SE_TIME,
     TMR_PREPARATION_TIME,
 )
 
-from src.ds import QubitAngleTracker, move_duration
-from src.analog_rotation import insert_s_gate
+from ...ds import FactoryPool, QubitAngleTracker
+from src.ds import move_duration
+from src.execution_log import insert_s_gate
 
 
 def update_qubit_state_per_teleportation(
@@ -44,12 +45,37 @@ def check_teleportation_worthiness(
     n_tmr_next_run: int,
     total_qubits: int,
     parital_skip: bool = False,
+    factory_pool: FactoryPool | None = None,
 ) -> list[list[tuple[int, int, int, int, int, int]]]:
     """
     Check if performing injection is worth it based on movement time and qubit counts.
     """
     THRESHOLD_HIGH_TMR = np.sqrt(total_qubits)
     THRESHOLD_HIGH_RUS = THRESHOLD_HIGH_TMR
+
+    def _has_better_idle_factory_for_batch(batch) -> bool:
+        """Return True if every qubit in batch has at least one better idle factory nearby.
+
+        If False, we should keep teleportation for this batch instead of skipping,
+        because re-preparing likely cannot improve routing quality.
+        """
+        if factory_pool is None:
+            return False
+
+        idle_factories = factory_pool.get_idle_factories()
+        if len(idle_factories) == 0:
+            return False
+
+        for _, x_q, y_q, _, x_f, y_f in batch:
+            current_move = move_duration(x_q, y_q, x_f, y_f)
+            best_idle_move = min(
+                move_duration(x_q, y_q, idle.location[0], idle.location[1])
+                for idle in idle_factories
+            )
+            if best_idle_move >= current_move:
+                return False
+
+        return True
 
     new_routing_batches = []
     # check if executing teleporation is worth it.
@@ -70,6 +96,8 @@ def check_teleportation_worthiness(
             move_time_idx_pairs.append((max_movement_time, i))
             new_routing_batches.append(batches)
         else:
+            if not _has_better_idle_factory_for_batch(batches):
+                return routing_batches
             # print("Skipping teleportation for this batch due to high movement time:")
             for qubit, _, _, factory_id, _, _ in batches:
                 qubit_factory_pairs.remove((qubit, factory_id))

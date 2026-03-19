@@ -1,11 +1,11 @@
 from collections import defaultdict
 import heapq
 from itertools import count
-from src.simulation import (
+from src.star.simulation import (
     calculate_success_rate,
 )
 
-from src.ds import FactoryPool, QubitAngleTracker
+from ....ds import FactoryPool, QubitAngleTracker
 
 
 def phase1_exact_match(

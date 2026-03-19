@@ -9,6 +9,7 @@ from .util import (
 )
 from .rus_routing import (
     solve_return_move,
+    decompose_return_move,
     two_layer_routing,
     chain_decomposition_matching,
     verify_chain_decomposition,

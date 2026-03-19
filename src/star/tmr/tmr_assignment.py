@@ -3,14 +3,15 @@ from collections import defaultdict
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from src.ds import FactoryPool, QubitAngleTracker, move_duration, FactoryState
+from src.ds import move_duration
+from ...ds import FactoryPool, QubitAngleTracker, FactoryState
 
-from src.tmr.tmr_assignment_method import (
+from src.star.tmr.tmr_assignment_method import (
     assign_factories_for_batch_naive,
     assign_factories_for_batch_matching,
 )
 
-from src.config import TMR_P, TMR_Q, CNOT_TIME, SE_TIME, ANGLE_S
+from src.star.config import TMR_P, TMR_Q, CNOT_TIME, SE_TIME, ANGLE_S
 
 
 def assign_factories_for_batch(

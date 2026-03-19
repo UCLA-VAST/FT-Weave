@@ -20,14 +20,20 @@ def generate_one_layer_2d_tfim_circuit_star(
     result_path: str | None = None,
 ) -> tuple[list[dict], list[list[tuple]], list[dict]]:
     qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
-        n_qubits=n_qubits, qubit_layout=qubit_layout, J=J, h=h, dt=dt, logical=True
+        n_qubits=n_qubits,
+        qubit_layout=qubit_layout,
+        J=J,
+        h=h,
+        dt=dt,
+        logical=True,
+        order=2,
     )
-    for instruction in qc_one_layer:
-        if instruction["gate"] == "Rz":
-            print(
-                f"Rz gate on qubits {instruction['targets']} with angle {instruction['params']['theta']:.4f} radians"
-            )
-    input()
+    # for instruction in qc_one_layer:
+    #     if instruction["gate"] == "Rz":
+    #         print(
+    #             f"Rz gate on qubits {instruction['targets']} with angle {instruction['params']['theta']:.4f} radians"
+    #         )
+    # input()
     # add logic_qubit_locations, and magic_state_locations here
     rz_logs: list[list[tuple]] = []
     logic_qubit_locations, magic_state_locations = get_microarchitecture(
@@ -76,6 +82,7 @@ def generate_one_layer_2d_tfim_circuit_star(
                 "qubit_cols": qubit_layout[0],
                 "qubit_rows": qubit_layout[1],
                 "round": i,
+                "code_distance": code_distance,
                 "placement": placement,
                 "n_aods": config["n_aods"],
                 "consider_skip_rus": config["consider_skip_rus"],

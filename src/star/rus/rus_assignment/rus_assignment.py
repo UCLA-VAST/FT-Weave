@@ -1,7 +1,7 @@
 from collections import defaultdict
 from typing import Dict, List, Tuple
-from src.ds import FactoryPool, QubitAngleTracker, move_duration
-from src.rus.rus_assignment.angle_factory_index import AngleFactoryIndex
+from ....ds import FactoryPool, QubitAngleTracker, move_duration
+from .angle_factory_index import AngleFactoryIndex
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 

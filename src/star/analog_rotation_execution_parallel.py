@@ -4,7 +4,6 @@ import numpy as np
 import heapq
 from itertools import count
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 from .simulation import (
     simulate_TMR_preparation,
@@ -17,12 +16,12 @@ from .tmr.util import (
     update_factory_states_post_tmr,
 )
 
-from .ds import FactoryPool, QubitAngleTracker
+from ..ds import FactoryPool, QubitAngleTracker
 from .rus import (
     update_qubit_state_per_teleportation,
 )
 
-from .analog_rotation import (
+from ..execution_log import (
     execute_movement,
     execute_rus_teleportation,
     execute_tmr_preparation_pre_rz,
@@ -142,6 +141,12 @@ def factory_angle_execution_parallel(
     while len(qubit_trackers) > 0:
 
         if not events:
+            for log in execution_log:
+                print(log)
+            for factory in factory_pool.factories:
+                print(factory)
+            for qubit, tracker in qubit_trackers.items():
+                print(f"Qubit {qubit}: {tracker}")
             assert (
                 False
             ), f"Event queue is empty but {len(qubit_trackers)} qubits remain unprocessed"
@@ -163,6 +168,13 @@ def factory_angle_execution_parallel(
 
             local_moment = max(local_moment, aod_earliest_available_time[aod_id])
             factory_list = factory_pool.get_idle_factories()
+            logger.debug(
+                f"Before TMR: {len(factory_list)} idle factories available for TMR"
+            )
+            for factory in factory_pool.factories:
+                logger.debug(
+                    f"Factory {factory.id}: state={factory.state}, qubit={factory.qubit}"
+                )
             if not factory_list:
                 # for factory in factory_pool.factories:
                 #     print(factory)
@@ -232,11 +244,16 @@ def factory_angle_execution_parallel(
                 factory_pool.get_factory_by_id(fid) for fid in factory_id_list
             ]
             update_factory_states_post_tmr(factory_list, factory_pool, qubit_trackers)
+            logger.debug("Updated factory states post TMR completion")
+            for factory in factory_list:
+                if not factory.tmr_state:
+                    logger.debug(f"Factory {factory.id} failed TMR. will be reset")
             add_event(local_moment, next(counter), "TMR_start")
 
             add_event(
                 local_moment, next(counter) - 40, "RUS_start", aod_id=event["aod_id"]
             )
+
         elif event["type"] == "RUS_start":
             logger.debug(f"Event: RUS_start at t={local_moment}")
             # Execute RUS teleportation

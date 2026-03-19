@@ -1,11 +1,11 @@
-from src.rus.util import check_teleportation_worthiness
-from src.rus.rus_routing import two_layer_routing
-from src.rus.rus_assignment import (
+from .util import check_teleportation_worthiness
+from .rus_routing import two_layer_routing
+from .rus_assignment import (
     assign_teleportation_with_sharing,
 )
 from src.ds import FactoryPool, QubitAngleTracker
 
-from src.tmr.util import (
+from ..tmr.util import (
     build_angle_factory_index_from_tmr_results,
 )
 
@@ -52,8 +52,9 @@ def rus_teleportation(
             n_aods,
             qubit_factory_pairs,
             total_qubits=total_qubits,
-            n_tmr_next_run=len(qubit_trackers),
+            n_tmr_next_run=len(qubit_trackers) - len(qubit_factory_pairs),
             parital_skip=(consider_skip_rus == 1),
+            factory_pool=factory_pool,
         )
 
     for batch in routing_batches:

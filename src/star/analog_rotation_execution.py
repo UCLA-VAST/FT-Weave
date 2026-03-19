@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 
+# logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 from .simulation import (
     simulate_TMR_preparation,
@@ -13,12 +14,12 @@ from .tmr.util import (
     update_factory_states_post_tmr,
 )
 
-from .ds import FactoryPool, QubitAngleTracker
+from ..ds import FactoryPool, QubitAngleTracker
 from .rus import (
     update_qubit_state_per_teleportation,
 )
 
-from .analog_rotation import (
+from ..execution_log import (
     execute_movement,
     execute_rus_teleportation,
     execute_tmr_preparation_pre_rz,
@@ -93,8 +94,14 @@ def factory_angle_execution(
     # ========================================================================
 
     while len(qubit_trackers):
+        # print(
+        #     f"Current circuit moment: {circuit_moment:.2f}, Remaining qubits: {len(qubit_trackers)}"
+        # )
+        if circuit_moment > 3000:
+            for log in execution_log[-50:]:
+                print(f"Recent log entry: {log}")
         assert (
-            circuit_moment <= 5000
+            circuit_moment <= 3000
         ), "Circuit execution taking too long, possible infinite loop. #idle factories: {}, Qubit trackers: {}".format(
             len(factory_pool.get_idle_factories()), qubit_trackers
         )
@@ -137,7 +144,16 @@ def factory_angle_execution(
         simulate_TMR_preparation(factory_pool, rng)
 
         update_factory_states_post_tmr(factory_list, factory_pool, qubit_trackers)
-
+        # print("Updated factory states post TMR completion")
+        # for factory in factory_list:
+        #     if factory.tmr_state:
+        #         print(
+        #             f"Factory {factory.id} with angle {factory.angle} success. will be teleported"
+        #         )
+        # for qubit in qubit_trackers:
+        #     print(
+        #         f"Qubit {qubit} factories: {qubit_trackers[qubit].factories if qubit in qubit_trackers else 'N/A'}"
+        #     )
         execution_log = write_tmr_result_log(
             factory_pool,
             circuit_moment,
@@ -154,6 +170,7 @@ def factory_angle_execution(
         while True:
             # qubit_factory_pairs: list[tuple(qubit, factory_id)]
             # routing batch: list of tuple (qubit, x_q, y_q, factory_id, x_f, y_f)
+
             qubit_factory_pairs, routing_batches = rus_teleportation(
                 qubit_trackers,
                 factory_pool,
@@ -162,6 +179,9 @@ def factory_angle_execution(
                 n_aods=n_aods,
                 total_qubits=len(target_qubits_angles),
             )
+
+            if circuit_moment > 3000:
+                print(routing_batches)
 
             if not qubit_factory_pairs or not routing_batches:
                 break

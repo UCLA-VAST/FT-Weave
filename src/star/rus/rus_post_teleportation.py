@@ -1,4 +1,4 @@
-from src.rus.rus_routing import solve_return_move
+from .rus_routing import solve_return_move
 from src.ds import FactoryPool
 
 
