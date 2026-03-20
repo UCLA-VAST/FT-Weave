@@ -40,9 +40,21 @@ class TFactory:
         """Set to state 1."""
         self.state = FactoryStateT.STAGE_1
 
+    def set_stage_1_state_outcome(self, outcome: bool):
+        """Set state 1 outcome."""
+        self.stage_1_state = outcome
+
     def set_stage_2_state(self):
         """Set to state 2."""
         self.state = FactoryStateT.STAGE_2
+
+    def set_stage_2_state_outcome(self, outcome: bool):
+        """Set state 2 outcome."""
+        self.stage_2_state = outcome
+
+    def set_to_wait_for_rus(self):
+        """Set the factory state to RUS teleportation."""
+        self.state = FactoryStateT.WAIT_FOR_RUS
 
     def set_to_rus(self):
         """Set the factory state to RUS teleportation."""

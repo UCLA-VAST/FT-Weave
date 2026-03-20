@@ -1,10 +1,10 @@
 from .rus_routing import solve_return_move
-from src.ds import FactoryPool
+from src.ds import FactoryPool, TFactoryPool
 
 
 def rus_post_teleportation(
     routing_batches: list[list[tuple[int, int, int, int, int, int]]],
-    factory_pool: FactoryPool,
+    factory_pool: FactoryPool | TFactoryPool,
     trivial_return: bool = False,
     decompose_move: bool = False,
 ) -> list[list[tuple[int, int, int, int, int, int]]]:

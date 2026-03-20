@@ -22,7 +22,7 @@ def write_execution_log(
         end_time = start_time + CNOT_TIME
     elif operation == "Rz":
         end_time = start_time + 1
-    elif operation == "S":
+    elif operation == "S" or operation == "H":
         end_time = start_time + SE_TIME
     elif operation in ["move", "return_move"]:
         end_time = start_time + movement_time

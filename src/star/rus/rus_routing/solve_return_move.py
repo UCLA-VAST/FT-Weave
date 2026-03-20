@@ -3,12 +3,12 @@ from collections import defaultdict
 import numpy as np
 import numpy.typing as npt
 from scipy.optimize import linear_sum_assignment
-from src.ds import move_duration, FactoryPool
+from src.ds import move_duration, FactoryPool, TFactoryPool
 
 
 def solve_return_move(
     routing_batches: list[list[tuple]],
-    factory_pool: FactoryPool,
+    factory_pool: FactoryPool | TFactoryPool,
     decompose_move: bool = True,
 ) -> list[list[tuple[int, int, int, int, int, int]]]:
     """
@@ -49,7 +49,7 @@ def solve_return_move(
 
 def decompose_return_move(
     routing_batches: list[list[tuple[int, int, int, int, int, int]]],
-    factory_pool: FactoryPool,
+    factory_pool: FactoryPool | TFactoryPool,
 ):
     """
     Decompose return move into multiple parallel shifts to reduce maximum move duration.

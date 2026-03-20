@@ -1,6 +1,6 @@
 from collections import defaultdict, deque
 
-from src.ds import FactoryPool
+from src.ds import FactoryPool, TFactoryPool
 
 
 def create_flow_network() -> tuple[dict, str, str]:
@@ -168,7 +168,7 @@ def chain_decomposition_matching(
 
 
 def two_layer_routing(
-    factory_pool: FactoryPool,
+    factory_pool: FactoryPool | TFactoryPool,
     logic_qubit_locations: list[tuple[int, int]],
     qubit_factory_pairs: list[tuple[int, int]],
 ) -> list[list[tuple[int, int, int, int, int, int]]]:

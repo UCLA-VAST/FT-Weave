@@ -305,7 +305,7 @@ def factory_angle_execution_parallel(
 
             logger.debug(f"RUS teleportation executed, circuit_moment={local_moment}")
 
-            # Simulate RUS injection results
+            # Simulate RUS teleportation results
             rus_simulation = simulate_RUS_injection(
                 event["qubit_factory_pairs"], factory_pool, rng
             )
