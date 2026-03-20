@@ -6,7 +6,9 @@ import numpy as np
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True,
 )
 
 np.random.seed(1234)
@@ -16,8 +18,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 logger = logging.getLogger(__name__)
 
-from src.analog_rotation_execution import factory_angle_execution
-from src.analog_rotation_execution_parallel import factory_angle_execution_parallel
+from src.star.analog_rotation_execution import factory_angle_execution
+from src.star.analog_rotation_execution_parallel import factory_angle_execution_parallel
 from src.ds import FactoryPool, get_microarchitecture
 from src.util import analyze_execution_log, print_execution_profile
 from src.animator import (

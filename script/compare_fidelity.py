@@ -2,7 +2,26 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-from collections import defaultdict
+
+
+def get_n_qubit(layout_str):
+    if isinstance(layout_str, str):
+        rows, cols = eval(layout_str)
+        return rows * cols
+    return layout_str[0] * layout_str[1]
+
+
+def get_code_distances(star_df):
+    if "code_distance" not in star_df.columns:
+        return [None]
+    return sorted(star_df["code_distance"].dropna().astype(int).unique())
+
+
+def normalize_star_df(star_df):
+    star_df = star_df.copy()
+    if "skip_rus" not in star_df.columns and "consider_skip_rus" in star_df.columns:
+        star_df["skip_rus"] = star_df["consider_skip_rus"]
+    return star_df
 
 
 def load_and_process_data():
@@ -15,6 +34,8 @@ def load_and_process_data():
 
 def generate_comparison_csv(raw_df, star_df, output_path):
     """Generate a comparison CSV with one line for raw and lines for each STAR setting."""
+
+    star_df = normalize_star_df(star_df)
 
     # Prepare comparison data
     comparison_data = []
@@ -172,13 +193,7 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
         "fidelity_of_rz_s",
     ]
 
-    # Parse qubit layout to get n_qubit
-    def get_n_qubit(layout_str):
-        if isinstance(layout_str, str):
-            rows, cols = eval(layout_str)
-            return rows * cols
-        return layout_str[0] * layout_str[1]
-
+    star_df = normalize_star_df(star_df)
     star_df["n_qubit"] = star_df["qubit_layout"].apply(get_n_qubit)
 
     # Create merged figure for all placements
@@ -234,8 +249,7 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
     print(f"STAR infidelity breakdown plot saved to: {output_path}")
     plt.close(fig)
 
-    # Create a single stacked bar chart by averaging STAR over all configurations
-    # Include all STAR fidelity sources for stacked view
+    # Create one clustered stacked chart by distance, averaged over STAR configurations
     stacked_terms = [
         "fidelity_of_rz_injection",
         "fidelity_of_rz_teleportaion",
@@ -243,47 +257,84 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
         "fidelity_cnot",
         "fidelity_1q",
     ]
-    fig, ax = plt.subplots(figsize=(10, 6))
-
     cmap = plt.get_cmap("tab10")
     colors = [cmap(i) for i in range(len(stacked_terms))]
 
-    # Average over all STAR configurations and placements per qubit count
-    grouped = star_df.groupby("n_qubit", as_index=False)[stacked_terms].mean()
-    n_qubits = grouped["n_qubit"].tolist()
-
-    infidelity_data = {term: (1 - grouped[term]).tolist() for term in stacked_terms}
-
-    x = np.arange(len(n_qubits))
-    width = 0.6
-    bottom = np.zeros(len(n_qubits))
-
-    for term, color in zip(stacked_terms, colors):
-        values = infidelity_data[term]
-        label = term.replace("fidelity_", "").replace("of_", "").upper()
-        if term == "fidelity_1q":
-            label = "H"
-        ax.bar(
-            x,
-            values,
-            width,
-            label=label,
-            bottom=bottom,
-            color=color,
-            alpha=0.8,
+    if "code_distance" in star_df.columns:
+        available_distances = sorted(
+            star_df["code_distance"].dropna().astype(int).unique()
         )
-        bottom += values
+        distances = [d for d in [7, 9] if d in available_distances]
+        if len(distances) == 0:
+            distances = available_distances
+    else:
+        distances = []
 
-    ax.set_xlabel("Number of Qubits", fontsize=14)
-    ax.set_ylabel("Total Infidelity", fontsize=14)
-    ax.set_title(
-        "STAR Infidelity Breakdown (Averaged Over All Configurations)", fontsize=16
+    if len(distances) == 0:
+        print("Skipping STAR stacked distance cluster plot: no code_distance available")
+        return
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    grouped = (
+        star_df[star_df["code_distance"].isin(distances)]
+        .groupby(["n_qubit", "code_distance"], as_index=False)[stacked_terms]
+        .mean()
     )
-    ax.set_xticks(x)
-    ax.set_xticklabels(n_qubits, fontsize=12)
+
+    n_qubits = sorted(grouped["n_qubit"].unique())
+    x_group = np.arange(len(n_qubits))
+    group_width = 0.8
+    bar_width = group_width / len(distances)
+
+    xtick_positions = []
+    xtick_labels = []
+
+    for dist_idx, code_distance in enumerate(distances):
+        offset = (dist_idx - (len(distances) - 1) / 2) * bar_width
+        x = x_group + offset
+
+        subset = (
+            grouped[grouped["code_distance"] == code_distance]
+            .set_index("n_qubit")
+            .reindex(n_qubits)
+        )
+
+        bottom = np.zeros(len(n_qubits))
+        for term, color in zip(stacked_terms, colors):
+            values = (1 - subset[term]).fillna(0).values
+            label = term.replace("fidelity_", "").replace("of_", "").upper()
+            if term == "fidelity_1q":
+                label = "H"
+            ax.bar(
+                x,
+                values,
+                bar_width * 0.9,
+                label=label if dist_idx == 0 else "_nolegend_",
+                bottom=bottom,
+                color=color,
+                alpha=0.85,
+            )
+            bottom += values
+
+        xtick_positions.extend(x.tolist())
+        xtick_labels.extend([str(code_distance)] * len(x))
+
+    ax.set_ylabel("Total Infidelity", fontsize=14)
+    ax.set_title("STAR Infidelity Breakdown (Distance 7 and 9)", fontsize=16)
     ax.tick_params(axis="y", labelsize=12)
     ax.grid(True, alpha=0.3, axis="y")
     ax.legend(loc="upper left", fontsize=10)
+
+    ax.set_xticks(xtick_positions)
+    ax.set_xticklabels(xtick_labels, fontsize=11)
+    ax.set_xlabel("Code Distance", fontsize=12, labelpad=2)
+
+    secax = ax.secondary_xaxis("bottom", functions=(lambda x: x, lambda x: x))
+    secax.set_xticks(x_group)
+    secax.set_xticklabels([str(n) for n in n_qubits], fontsize=11)
+    secax.set_xlabel("Number of Qubits", fontsize=12, labelpad=10)
+    secax.spines["bottom"].set_position(("outward", 42))
 
     fig.tight_layout()
     output_path = os.path.join(output_dir, "star_infidelity_stacked_best.pdf")
@@ -295,13 +346,7 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
 def plot_star_settings_comparison(star_df, output_dir):
     """Plot merged STAR ablation comparison: rows=placements × cols=AOD (1,2,5)."""
 
-    def get_n_qubit(layout_str):
-        if isinstance(layout_str, str):
-            rows, cols = eval(layout_str)
-            return rows * cols
-        return layout_str[0] * layout_str[1]
-
-    star_df = star_df.copy()
+    star_df = normalize_star_df(star_df)
     star_df["n_qubit"] = star_df["qubit_layout"].apply(get_n_qubit)
 
     for col in ["trivial_return", "decompose_move", "parallel_execution"]:
@@ -329,100 +374,112 @@ def plot_star_settings_comparison(star_df, output_dir):
     placements = sorted(star_df["placement"].unique())
     n_placements = len(placements)
 
-    fig, axes = plt.subplots(
-        n_placements, len(aod_values), figsize=(18, 6 * n_placements)
-    )
-    if n_placements == 1:
-        axes = axes.reshape(1, len(aod_values))
+    for code_distance in get_code_distances(star_df):
+        if code_distance is None:
+            distance_df = star_df
+            distance_suffix = ""
+            title_suffix = ""
+        else:
+            distance_df = star_df[star_df["code_distance"] == code_distance]
+            distance_suffix = f"_distance_{code_distance}"
+            title_suffix = f" (Distance = {code_distance})"
 
-    # Store y-limits for each column to sync placement rows
-    col_ylims = [None] * len(aod_values)
-
-    for col_idx, n_aods in enumerate(aod_values):
-        aod_df = star_df[star_df["n_aods"] == n_aods]
-        if aod_df.empty:
-            print(f"No data found for n_aods={n_aods}")
+        if distance_df.empty:
             continue
 
-        # Use different settings for AOD=1 (exclude async)
-        if n_aods == 1:
-            ablation_settings = ablation_settings_all[:-1]
-        else:
-            ablation_settings = ablation_settings_all
+        fig, axes = plt.subplots(
+            n_placements, len(aod_values), figsize=(18, 6 * n_placements)
+        )
+        if n_placements == 1:
+            axes = axes.reshape(1, len(aod_values))
 
-        for row_idx, placement in enumerate(placements):
-            ax = axes[row_idx, col_idx]
-            placement_df = aod_df[aod_df["placement"] == placement]
+        col_ylims: list[tuple[float, float] | None] = [None] * len(aod_values)
 
-            for (
-                label,
-                trivial_return,
-                skip_rus,
-                decompose_move,
-                parallel_execution,
-            ) in ablation_settings:
-                subset = placement_df[
-                    (placement_df["trivial_return"] == trivial_return)
-                    & (placement_df["skip_rus"] == skip_rus)
-                    & (placement_df["decompose_move"] == decompose_move)
-                    & (placement_df["parallel_execution"] == parallel_execution)
-                ]
+        for col_idx, n_aods in enumerate(aod_values):
+            aod_df = distance_df[distance_df["n_aods"] == n_aods]
+            if aod_df.empty:
+                print(f"No data found for n_aods={n_aods}, distance={code_distance}")
+                continue
 
-                if subset.empty:
-                    continue
-
-                grouped = subset.groupby("n_qubit")["fidelity"]
-                means = grouped.mean().sort_index()
-                mins = grouped.min().reindex(means.index)
-                maxs = grouped.max().reindex(means.index)
-                lower_err = (means - mins).clip(lower=0)
-                upper_err = (maxs - means).clip(lower=0)
-                yerr = np.vstack([lower_err.values, upper_err.values])
-
-                ax.errorbar(
-                    means.index,
-                    means.values,
-                    yerr=yerr,
-                    marker="o",
-                    linewidth=2,
-                    markersize=7,
-                    capsize=4,
-                    label=label,
-                )
-
-            ax.set_xlabel("Number of Qubits", fontsize=14)
-            ax.set_ylabel("Fidelity", fontsize=14)
-            ax.set_title(f"{placement}, AOD={n_aods}", fontsize=16)
-            ax.grid(True, alpha=0.3)
-            ax.tick_params(axis="both", labelsize=12)
-            ax.legend(fontsize=10)
-
-            # Track y-limits per column for syncing
-            if col_ylims[col_idx] is None:
-                col_ylims[col_idx] = ax.get_ylim()
+            if n_aods == 1:
+                ablation_settings = ablation_settings_all[:-1]
             else:
+                ablation_settings = ablation_settings_all
+
+            for row_idx, placement in enumerate(placements):
+                ax = axes[row_idx, col_idx]
+                placement_df = aod_df[aod_df["placement"] == placement]
+
+                for (
+                    label,
+                    trivial_return,
+                    skip_rus,
+                    decompose_move,
+                    parallel_execution,
+                ) in ablation_settings:
+                    subset = placement_df[
+                        (placement_df["trivial_return"] == trivial_return)
+                        & (placement_df["skip_rus"] == skip_rus)
+                        & (placement_df["decompose_move"] == decompose_move)
+                        & (placement_df["parallel_execution"] == parallel_execution)
+                    ]
+
+                    if subset.empty:
+                        continue
+
+                    grouped = subset.groupby("n_qubit")["fidelity"]
+                    means = grouped.mean().sort_index()
+                    mins = grouped.min().reindex(means.index)
+                    maxs = grouped.max().reindex(means.index)
+                    lower_err = (means - mins).clip(lower=0)
+                    upper_err = (maxs - means).clip(lower=0)
+                    yerr = np.vstack([lower_err.values, upper_err.values])
+
+                    ax.errorbar(
+                        means.index,
+                        means.values,
+                        yerr=yerr,
+                        marker="o",
+                        linewidth=2,
+                        markersize=7,
+                        capsize=4,
+                        label=label,
+                    )
+
+                ax.set_xlabel("Number of Qubits", fontsize=14)
+                ax.set_ylabel("Fidelity", fontsize=14)
+                ax.set_title(f"{placement}, AOD={n_aods}", fontsize=16)
+                ax.grid(True, alpha=0.3)
+                ax.tick_params(axis="both", labelsize=12)
+                ax.legend(fontsize=10)
+
                 current = ax.get_ylim()
-                col_ylims[col_idx] = (
-                    min(col_ylims[col_idx][0], current[0]),
-                    max(col_ylims[col_idx][1], current[1]),
-                )
+                prev_ylim = col_ylims[col_idx]
+                if prev_ylim is None:
+                    col_ylims[col_idx] = current
+                else:
+                    col_ylims[col_idx] = (
+                        min(prev_ylim[0], current[0]),
+                        max(prev_ylim[1], current[1]),
+                    )
 
-    # Apply synchronized y-limits per column
-    for col_idx in range(len(aod_values)):
-        if col_ylims[col_idx] is not None:
-            for row_idx in range(n_placements):
-                axes[row_idx, col_idx].set_ylim(col_ylims[col_idx])
+        for col_idx in range(len(aod_values)):
+            if col_ylims[col_idx] is not None:
+                for row_idx in range(n_placements):
+                    axes[row_idx, col_idx].set_ylim(col_ylims[col_idx])
 
-    fig.suptitle("STAR Ablation Study", fontsize=18, y=0.995)
-    fig.tight_layout()
-    output_path = os.path.join(output_dir, "star_ablation_fidelity.pdf")
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    print(f"STAR ablation plot saved to: {output_path}")
+        fig.suptitle(f"STAR Ablation Study{title_suffix}", fontsize=18, y=0.995)
+        fig.tight_layout()
+        output_path = os.path.join(
+            output_dir, f"star_ablation_fidelity{distance_suffix}.pdf"
+        )
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"STAR ablation plot saved to: {output_path}")
 
 
 def plot_overall_fidelity_comparison(raw_df, star_df, output_dir):
-    """Create overall fidelity comparison with STAR averaged over all configurations."""
+    """Create overall fidelity comparison with separate STAR lines by code distance."""
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -443,37 +500,45 @@ def plot_overall_fidelity_comparison(raw_df, star_df, output_dir):
         alpha=0.7,
     )
 
-    # Plot STAR fidelity averaged over all configurations
-    def get_n_qubit(layout_str):
-        if isinstance(layout_str, str):
-            rows, cols = eval(layout_str)
-            return rows * cols
-        return layout_str[0] * layout_str[1]
-
-    star_data = star_df.copy()
+    star_data = normalize_star_df(star_df)
     star_data["n_qubit"] = star_data["qubit_layout"].apply(get_n_qubit)
-    grouped = star_data.groupby("n_qubit")["fidelity"]
-    means = grouped.mean().sort_index()
-    mins = grouped.min().reindex(means.index)
-    maxs = grouped.max().reindex(means.index)
+    colors = {7: "tab:blue", 9: "tab:orange"}
 
-    line = ax.plot(
-        means.index,
-        means.values,
-        marker="o",
-        linewidth=2,
-        markersize=8,
-        label="STAR (avg over all configs)",
-        alpha=0.8,
-    )[0]
-    ax.fill_between(
-        means.index,
-        mins.values,
-        maxs.values,
-        color=line.get_color(),
-        alpha=0.2,
-        label="STAR (min-max)",
-    )
+    for code_distance in get_code_distances(star_data):
+        if code_distance is None:
+            distance_df = star_data
+            label = "STAR"
+            color = None
+        else:
+            distance_df = star_data[star_data["code_distance"] == code_distance]
+            label = f"STAR (distance={code_distance})"
+            color = colors.get(code_distance)
+
+        if distance_df.empty:
+            continue
+
+        grouped = distance_df.groupby("n_qubit")["fidelity"]
+        means = grouped.mean().sort_index()
+        mins = grouped.min().reindex(means.index)
+        maxs = grouped.max().reindex(means.index)
+
+        line = ax.plot(
+            means.index,
+            means.values,
+            marker="o",
+            linewidth=2,
+            markersize=8,
+            label=label,
+            alpha=0.8,
+            color=color,
+        )[0]
+        ax.fill_between(
+            means.index,
+            mins.values,
+            maxs.values,
+            color=line.get_color(),
+            alpha=0.15,
+        )
 
     ax.set_xlabel("Number of Qubits", fontsize=14)
     ax.set_ylabel("Mean Fidelity", fontsize=14)
