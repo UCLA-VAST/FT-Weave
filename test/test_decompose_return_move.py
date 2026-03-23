@@ -5,8 +5,8 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.ds.device_state import FactoryPool
-from src.rus.solve_return_move import (
+from src.ds.device_state_star import FactoryPool
+from src.star.rus import (
     decompose_return_move,
 )
 from src.ds import move_duration
