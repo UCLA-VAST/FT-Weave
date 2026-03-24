@@ -1,5 +1,14 @@
-from qiskit.synthesis import gridsynth_rz
+from __future__ import annotations
+
 from numbers import Real
+from typing import Optional
+
+import numpy as np
+from qiskit.synthesis import gridsynth_rz
+from scipy.optimize import linear_sum_assignment
+
+from src.ds import TFactoryPool, move_duration
+from src.execution_log import write_execution_log
 
 
 _GRIDSYNTH_GATE_MAP = {
@@ -20,11 +29,7 @@ def is_rz_gate(gate_name: str) -> bool:
 
 def count_t_gates_in_instructions(instructions: list[dict]) -> int:
     """Count T and Tdg gates in a flat instruction list (e.g. expanded circuit)."""
-    return sum(
-        1
-        for inst in instructions
-        if inst.get("gate") in ("T", "Tdg")
-    )
+    return sum(1 for inst in instructions if inst.get("gate") in ("T", "Tdg"))
 
 
 def t_gate_count_per_unique_rz_angle(
@@ -216,3 +221,126 @@ def build_circuit_dag(
             successors[dep].append(node)
 
     return predecessors, successors
+
+
+# ---------------------------------------------------------------------------
+# T-cultivation stage 1: redistribution and factory state (not random draws)
+# ---------------------------------------------------------------------------
+
+
+def raw_stage1_counts(
+    factory_pool: TFactoryPool, factory_ids: list[int]
+) -> dict[int, int]:
+    """Count True stage_1_success flags per factory."""
+    out: dict[int, int] = {}
+    for fid in factory_ids:
+        f = factory_pool.get_factory_by_id(fid)
+        out[fid] = sum(1 for sf in f.subfactories if sf.stage_1_success is True)
+    return out
+
+
+def redistribute_stage1_successes(
+    factory_pool: TFactoryPool,
+    factory_ids: list[int],
+    counts: dict[int, int],
+    execution_log: Optional[list],
+    log_time: float,
+    aod_id: int,
+) -> list[tuple[int, int]]:
+    """
+    Move spare stage-1 successes from donors (count >= 2) to receivers (count == 0)
+    using minimum total move cost (Hungarian / linear sum assignment).
+    Mutates ``counts`` in place. Returns list of (donor_factory_id, receiver_factory_id).
+    """
+    donor_units: list[int] = []
+    for fid in factory_ids:
+        c = counts[fid]
+        donor_units.extend([fid] * max(0, c - 1))
+
+    receivers = [fid for fid in factory_ids if counts[fid] == 0]
+    transfers: list[tuple[int, int]] = []
+
+    if not receivers or not donor_units:
+        return transfers
+
+    n_r, n_d = len(receivers), len(donor_units)
+    cost = np.zeros((n_r, n_d))
+    for i, r_fid in enumerate(receivers):
+        r_loc = factory_pool.get_factory_by_id(r_fid).location
+        for j, d_fid in enumerate(donor_units):
+            d_loc = factory_pool.get_factory_by_id(d_fid).location
+            cost[i, j] = move_duration(r_loc[0], r_loc[1], d_loc[0], d_loc[1])
+
+    row_ind, col_ind = linear_sum_assignment(cost)
+
+    for ri, dj in zip(row_ind, col_ind):
+        recv_fid = receivers[ri]
+        don_fid = donor_units[dj]
+        counts[recv_fid] += 1
+        counts[don_fid] -= 1
+        transfers.append((don_fid, recv_fid))
+
+    if execution_log is not None:
+        for don_fid, recv_fid in transfers:
+            dloc = factory_pool.get_factory_by_id(don_fid).location
+            rloc = factory_pool.get_factory_by_id(recv_fid).location
+            write_execution_log(
+                execution_log,
+                start_time=log_time,
+                factories=[don_fid, recv_fid],
+                operation="move",
+                aod_assignment=aod_id,
+                targets=None,
+                movement_time=move_duration(dloc[0], dloc[1], rloc[0], rloc[1]),
+                move_vecs=[
+                    [
+                        f"({dloc[0]},{dloc[1]})",
+                        f"({rloc[0]},{rloc[1]})",
+                    ]
+                ],
+            )
+
+    return transfers
+
+
+def finalize_stage1_outcomes(
+    factory_pool: TFactoryPool,
+    factory_ids: list[int],
+    counts: dict[int, int],
+) -> list[int]:
+    """
+    Apply post-redistribution counts to subfactories, then move each factory to stage 2
+    or idle. Returns factory ids that pass stage 1.
+    """
+    success_factory_ids: list[int] = []
+    for factory_id in factory_ids:
+        factory = factory_pool.get_factory_by_id(factory_id)
+        if factory.stage_1_passed():
+            factory.set_stage_2_state()
+            success_factory_ids.append(factory_id)
+        else:
+            factory.free()
+    return success_factory_ids
+
+
+def complete_stage1_preparation(
+    factory_pool: TFactoryPool,
+    factory_ids: list[int],
+    execution_log: Optional[list],
+    log_time: float,
+    aod_id: int,
+) -> list[int]:
+    """
+    After ``simulate_stage1_preparation``: redistribute spare successes, sync subfactories,
+    and advance factories to stage 2 or free.
+    """
+    counts = raw_stage1_counts(factory_pool, factory_ids)
+    redistribute_stage1_successes(
+        factory_pool,
+        factory_ids,
+        counts,
+        execution_log,
+        log_time,
+        aod_id,
+    )
+    return finalize_stage1_outcomes(factory_pool, factory_ids, counts)
