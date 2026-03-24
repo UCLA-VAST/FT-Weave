@@ -18,9 +18,38 @@ def is_rz_gate(gate_name: str) -> bool:
     return gate_name.lower() == "rz"
 
 
-def gridsynth_rz_templates(theta: float) -> list[dict]:
+def count_t_gates_in_instructions(instructions: list[dict]) -> int:
+    """Count T and Tdg gates in a flat instruction list (e.g. expanded circuit)."""
+    return sum(
+        1
+        for inst in instructions
+        if inst.get("gate") in ("T", "Tdg")
+    )
+
+
+def t_gate_count_per_unique_rz_angle(
+    circuit: list[dict], epsilon: float, angle_digits: int = 12
+) -> dict[float, int]:
+    """For each distinct Rz theta in *circuit*, T+Tdg count for one Rz(theta) via gridsynth."""
+    per_angle: dict[float, int] = {}
+    for instr in circuit:
+        if not is_rz_gate(instr.get("gate", "")):
+            continue
+        theta_raw = instr.get("params", {}).get("theta")
+        if not isinstance(theta_raw, Real):
+            raise ValueError("Rz instruction requires numeric params['theta']")
+        theta = float(theta_raw)
+        key = round(theta, angle_digits)
+        if key in per_angle:
+            continue
+        templates = gridsynth_rz_templates(theta, epsilon=epsilon)
+        per_angle[key] = sum(1 for t in templates if t["gate"] in ("T", "Tdg"))
+    return per_angle
+
+
+def gridsynth_rz_templates(theta: float, epsilon: float) -> list[dict]:
     """Return a single-qubit gate template list from qiskit gridsynth for Rz(theta)."""
-    synthesized_circuit = gridsynth_rz(theta)
+    synthesized_circuit = gridsynth_rz(theta, epsilon=epsilon)
     templates: list[dict] = []
 
     for circuit_instruction in synthesized_circuit.data:
@@ -58,15 +87,17 @@ def extract_target_qubits(targets: list) -> list[int]:
     return qubits
 
 
-def expand_multi_target_layers(circuit: list[dict], to_decompose: bool) -> list[dict]:
+def expand_multi_target_layers(
+    circuit: list[dict], epsilon: float, to_decompose: bool
+) -> list[dict]:
     """Expand layer instructions into sequential individual instructions.
 
-        Supported expansions:
-        - Rz layers are always expanded to single-target instructions and decomposed
-            via qiskit gridsynth, regardless of `to_decompose`.
-        - For non-Rz gates, expansion occurs only when `to_decompose=True`:
-            - Single-qubit layer: [q0, q1, q2] -> one instruction per qubit.
-            - Two-qubit layer: [(q0, q1), (q2, q3)] -> one instruction per pair.
+    Supported expansions:
+    - Rz layers are always expanded to single-target instructions and decomposed
+        via qiskit gridsynth, regardless of `to_decompose`.
+    - For non-Rz gates, expansion occurs only when `to_decompose=True`:
+        - Single-qubit layer: [q0, q1, q2] -> one instruction per qubit.
+        - Two-qubit layer: [(q0, q1), (q2, q3)] -> one instruction per pair.
 
     """
     expanded_circuit: list[dict] = []
@@ -85,7 +116,7 @@ def expand_multi_target_layers(circuit: list[dict], to_decompose: bool) -> list[
             theta = instr.get("params", {}).get("theta")
             if not isinstance(theta, Real):
                 raise ValueError("Rz instruction requires numeric params['theta']")
-            rz_templates = gridsynth_rz_templates(float(theta))
+            rz_templates = gridsynth_rz_templates(float(theta), epsilon=epsilon)
             rz_templates_by_instruction[original_index] = rz_templates
 
     for original_index, instr in enumerate(circuit):
@@ -101,7 +132,7 @@ def expand_multi_target_layers(circuit: list[dict], to_decompose: bool) -> list[
                 theta = instr.get("params", {}).get("theta")
                 if not isinstance(theta, Real):
                     raise ValueError("Rz instruction requires numeric params['theta']")
-                rz_templates = gridsynth_rz_templates(float(theta))
+                rz_templates = gridsynth_rz_templates(float(theta), epsilon=epsilon)
 
             for target in targets:
                 for template in rz_templates:

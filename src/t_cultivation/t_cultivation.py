@@ -18,6 +18,7 @@ from src.execution_log import (
     execute_movement,
     execute_rus_teleportation,
     write_rus_result_log,
+    clean_up_execution_log,
 )
 from src.t_cultivation.rus import rus_teleportation
 from src.t_cultivation.simulation import (
@@ -26,6 +27,11 @@ from src.t_cultivation.simulation import (
     simulate_stage2_preparation,
 )
 from src.star.rus.rus_post_teleportation import rus_post_teleportation
+from src.t_cultivation.util import (
+    count_t_gates_in_instructions,
+    t_gate_count_per_unique_rz_angle,
+)
+from src.util import analyze_execution_log, print_execution_profile
 
 import numpy as np
 
@@ -39,8 +45,9 @@ def t_cultivation_execution(
     logic_qubit_locations: list[tuple[int, int]],
     magic_state_locations: list[tuple[int, int]],
     rng: np.random.Generator,
-    n_aods: int = 1,
+    n_aods: int = 2,
     to_decompose: bool = False,
+    epsilon: float = 1e-4,
 ) -> list[tuple]:
     """
     Execute a quantum circuit using T cultivation.
@@ -52,16 +59,49 @@ def t_cultivation_execution(
     Returns:
         execution_log: List of execution tuples with timestamps and details.
     """
+    logger.info(
+        "t_cultivation_execution: n_instr=%d n_factories=%d n_aods=%d to_decompose=%s epsilon=%g",
+        len(circuit),
+        n_factories,
+        n_aods,
+        to_decompose,
+        epsilon,
+    )
+
     if n_factories < 0:
         raise ValueError("n_factories must be non-negative")
+    if n_aods < 2:
+        raise ValueError(
+            "n_aods must be at least 2: AOD 0 for T factory, AOD > 0 for gates/RUS"
+        )
 
     if not circuit:
         return []
 
-    expanded_circuit = expand_multi_target_layers(circuit, to_decompose)
+    expanded_circuit = expand_multi_target_layers(circuit, epsilon, to_decompose)
+    for inst in expanded_circuit:
+        logger.debug("Expanded instruction: %s", inst)
+
+    logger.info(
+        "Expanded circuit: %d instructions (from %d original)",
+        len(expanded_circuit),
+        len(circuit),
+    )
+
+    rz_t_by_angle = t_gate_count_per_unique_rz_angle(circuit, epsilon)
+    total_t_expanded = count_t_gates_in_instructions(expanded_circuit)
+    if rz_t_by_angle:
+        print(
+            "T+Tdg count per distinct Rz angle (one gridsynth decomposition per angle):"
+        )
+        for theta_key in sorted(rz_t_by_angle.keys()):
+            print(f"  theta={theta_key:g}: T+Tdg count = {rz_t_by_angle[theta_key]}")
+    print(f"Total T+Tdg gates in expanded circuit: {total_t_expanded}")
 
     predecessors, successors = build_circuit_dag(expanded_circuit)
+
     remaining_deps = {node: len(deps) for node, deps in predecessors.items()}
+    logger.debug("Built DAG: nodes=%d", len(predecessors))
 
     ready_clifford: deque[int] = deque()
     ready_t = set()
@@ -71,6 +111,9 @@ def t_cultivation_execution(
                 ready_t.add(node)
             else:
                 ready_clifford.append(node)
+    logger.debug(
+        "Initial ready queues: clifford=%d t=%d", len(ready_clifford), len(ready_t)
+    )
 
     factory_pool = TFactoryPool(n_factories)
     factory_pool.set_locations(magic_state_locations)
@@ -81,10 +124,25 @@ def t_cultivation_execution(
     completed_nodes: set[int] = set()
     aod_earliest_available_time = [0.0] * n_aods
 
+    def pick_gate_aod(earliest_start: float) -> tuple[int, float]:
+        """Pick earliest available gate/RUS AOD from ids > 0."""
+        gate_aod_id = min(
+            range(1, n_aods), key=lambda idx: aod_earliest_available_time[idx]
+        )
+        start_time = max(earliest_start, aod_earliest_available_time[gate_aod_id])
+        return gate_aod_id, start_time
+
+    def pick_any_aod(earliest_start: float) -> tuple[int, float]:
+        """Pick earliest available AOD from all ids (including AOD 0)."""
+        aod_id = min(range(n_aods), key=lambda idx: aod_earliest_available_time[idx])
+        start_time = max(earliest_start, aod_earliest_available_time[aod_id])
+        return aod_id, start_time
+
     def mark_node_completed(node: int):
         if node in completed_nodes:
             return
         completed_nodes.add(node)
+        logger.debug("Completed node=%d gate=%s", node, expanded_circuit[node]["gate"])
         for successor in successors[node]:
             remaining_deps[successor] -= 1
             if remaining_deps[successor] == 0:
@@ -92,24 +150,48 @@ def t_cultivation_execution(
                     ready_t.add(successor)
                 else:
                     ready_clifford.append(successor)
+        logger.debug(
+            "Post-complete queues: clifford=%d t=%d completed=%d/%d",
+            len(ready_clifford),
+            len(ready_t),
+            len(completed_nodes),
+            len(expanded_circuit),
+        )
 
     def schedule_t_preparation(at_time: float):
         idle_factories = deque(factory_pool.get_idle_factories())
         factory_ids = [f.id for f in idle_factories]
+        aod_id = 0
+        start_time = max(at_time, aod_earliest_available_time[aod_id])
+        logger.debug(
+            "Schedule T prep at t=%.3f on idle factories=%s aod_id=%d",
+            start_time,
+            factory_ids,
+            aod_id,
+        )
         for factory in idle_factories:
             factory.restart()
 
-        stage_1_end = at_time + SE_STAGE_1
+        stage_1_end = start_time + SE_STAGE_1
+        aod_earliest_available_time[aod_id] = stage_1_end
 
-        execution_log.append(
-            (
-                at_time,
-                stage_1_end,
-                factory_ids,
-                "SE_stage_1",
-                None,
-                [],
-            )
+        # execution_log.append(
+        #     (
+        #         start_time,
+        #         stage_1_end,
+        #         factory_ids,
+        #         "SE_stage_1",
+        #         None,
+        #         [],
+        #     )
+        # )
+        write_execution_log(
+            execution_log,
+            start_time=start_time,
+            factories=factory_ids,
+            operation="SE_stage_1",
+            aod_assignment=aod_id,
+            targets=None,
         )
         heapq.heappush(
             events,
@@ -119,6 +201,7 @@ def t_cultivation_execution(
                 {
                     "type": "stage_1_completion",
                     "factory_list": factory_ids,
+                    "aod_id": aod_id,
                 },
             ),
         )
@@ -128,8 +211,17 @@ def t_cultivation_execution(
             node = ready_clifford.popleft()
             instr = expanded_circuit[node]
             gate = instr["gate"]
+            aod_id, gate_start_time = pick_gate_aod(opt_time)
+            logger.debug(
+                "Schedule Clifford node=%d gate=%s at t=%.3f targets=%s aod_id=%d",
+                node,
+                gate,
+                gate_start_time,
+                instr.get("targets", []),
+                aod_id,
+            )
             duration = CNOT_TIME if gate in {"CNOT", "CZ"} else SE_TIME
-            finish_time = opt_time + duration
+            finish_time = gate_start_time + duration
             targets = instr.get("targets", [])
             if gate in {"CNOT", "CZ"}:
                 assert all(
@@ -161,28 +253,28 @@ def t_cultivation_execution(
                     )
                 write_execution_log(
                     execution_log,
-                    start_time=opt_time,
+                    start_time=gate_start_time,
                     factories=[],
                     operation=gate,
-                    aod_assignment=None,
+                    aod_assignment=aod_id,
                     targets=c_qubits,
                     move_vecs=move_vecs,
                     movement_time=move_dur,
                 )
                 write_execution_log(
                     execution_log,
-                    start_time=opt_time + move_dur,
+                    start_time=gate_start_time + move_dur,
                     factories=[],
                     operation=gate,
-                    aod_assignment=None,
+                    aod_assignment=aod_id,
                     targets=targets,
                 )
                 write_execution_log(
                     execution_log,
-                    start_time=opt_time + move_dur + duration,
+                    start_time=gate_start_time + move_dur + duration,
                     factories=[],
                     operation=gate,
-                    aod_assignment=None,
+                    aod_assignment=aod_id,
                     targets=c_qubits,
                     move_vecs=reverse_move_vecs,
                     movement_time=move_dur,
@@ -191,12 +283,13 @@ def t_cultivation_execution(
             else:
                 write_execution_log(
                     execution_log,
-                    start_time=opt_time,
+                    start_time=gate_start_time,
                     factories=[],
                     operation=gate,
-                    aod_assignment=None,
+                    aod_assignment=aod_id,
                     targets=targets,
                 )
+            aod_earliest_available_time[aod_id] = finish_time
             heapq.heappush(
                 events,
                 (
@@ -206,9 +299,11 @@ def t_cultivation_execution(
                         "type": "op_complete",
                         "node": node,
                         "factory_id": None,
+                        "aod_id": aod_id,
                     },
                 ),
             )
+            logger.debug("Enqueued op_complete node=%d at t=%.3f", node, finish_time)
 
     schedule_ready_clifford_operations(current_time)
     schedule_t_preparation(current_time)
@@ -226,6 +321,12 @@ def t_cultivation_execution(
             )
 
         current_time, _, first_event = heapq.heappop(events)
+        logger.debug(
+            "Processing events at t=%.3f first_event=%s pending_events=%d",
+            current_time,
+            first_event["type"],
+            len(events),
+        )
         same_time_events = {
             "op_complete": [],
             "rus_teleportation": [],
@@ -239,51 +340,102 @@ def t_cultivation_execution(
             _, _, event = heapq.heappop(events)
             same_time_events[event["type"]].append(event)
 
-        for event in same_time_events["stage_1_completion"]:
+        if same_time_events["stage_1_completion"]:
+            factory_list = []
             local_time = current_time
-            factory_list = event["factory_list"]
+            for event in same_time_events["stage_1_completion"]:
+                factory_list.extend(event["factory_list"])
             # simulate stage 1 success/failure for each factory
             success_factory_ids = simulate_stage1_preparation(
                 factory_pool, rng, factory_list
             )
+            logger.debug(
+                "Stage 1 complete at t=%.3f success=%s failed=%d",
+                local_time,
+                success_factory_ids,
+                len(factory_list) - len(success_factory_ids),
+            )
 
             if len(success_factory_ids) < len(factory_list):
                 schedule_t_preparation(local_time)
-
-            heapq.heappush(
-                events,
-                (
-                    local_time + SE_STAGE_2,
-                    next(event_counter),
-                    {"type": "stage_2_completion", "factory_list": success_factory_ids},
-                ),
-            )
-
-        for event in same_time_events["stage_2_completion"]:
+            if success_factory_ids:
+                write_execution_log(
+                    execution_log,
+                    start_time=local_time,
+                    factories=success_factory_ids,
+                    operation="SE_stage_2",
+                    aod_assignment=same_time_events["stage_1_completion"][0]["aod_id"],
+                    targets=None,
+                )
+                heapq.heappush(
+                    events,
+                    (
+                        local_time + SE_STAGE_2,
+                        next(event_counter),
+                        {
+                            "type": "stage_2_completion",
+                            "factory_list": success_factory_ids,
+                            "aod_id": same_time_events["stage_1_completion"][0][
+                                "aod_id"
+                            ],
+                        },
+                    ),
+                )
+        if same_time_events["stage_2_completion"]:
+            factory_list = []
             local_time = current_time
-            factory_list = event["factory_list"]
+            for event in same_time_events["stage_2_completion"]:
+                factory_list.extend(event["factory_list"])
             success_factory_ids = simulate_stage2_preparation(
                 factory_pool, rng, factory_list
             )
+            logger.debug(
+                "Stage 2 complete at t=%.3f success=%s failed=%d",
+                local_time,
+                success_factory_ids,
+                len(factory_list) - len(success_factory_ids),
+            )
 
             if len(success_factory_ids) < len(factory_list):
                 schedule_t_preparation(local_time)
 
-            heapq.heappush(
-                events,
-                (
-                    local_time,
-                    next(event_counter),
-                    {"type": "rus_start", "factory_list": success_factory_ids},
-                ),
-            )
-
-        for event in same_time_events["rus_start"]:
+            if success_factory_ids:
+                heapq.heappush(
+                    events,
+                    (
+                        local_time,
+                        next(event_counter),
+                        {
+                            "type": "rus_start",
+                            "factory_list": success_factory_ids,
+                            "aod_id": same_time_events["stage_2_completion"][0][
+                                "aod_id"
+                            ],
+                        },
+                    ),
+                )
+        if same_time_events["rus_start"]:
+            factory_list = []
+            for event in same_time_events["rus_start"]:
+                factory_list.extend(event["factory_list"])
             # find rus assignments for each factory ready for rus
             local_time = current_time
-            factory_list = event["factory_list"]
             qubits_to_teleport = []
             qubit_idx_to_node = {}
+            if not ready_t:
+                heapq.heappush(
+                    events,
+                    (
+                        local_time + 1,
+                        next(event_counter),
+                        {
+                            "type": "rus_start",
+                            "factory_list": factory_list,
+                            "aod_id": same_time_events["rus_start"][0]["aod_id"],
+                        },
+                    ),
+                )
+                continue
             for ready_node in ready_t:
                 instr = expanded_circuit[ready_node]
                 qubits_to_teleport.extend(instr.get("targets", []))
@@ -296,6 +448,12 @@ def t_cultivation_execution(
                 factory_pool,
                 factory_list,
             )
+            logger.debug(
+                "RUS start at t=%.3f ready_t=%d assigned_pairs=%d",
+                local_time,
+                len(ready_t),
+                len(qubit_factory_pairs),
+            )
             if qubit_factory_pairs and routing_batches:
                 # Execute movement to factories
                 local_time = execute_movement(
@@ -304,12 +462,10 @@ def t_cultivation_execution(
                     local_time,
                     aod_earliest_available_time,
                 )
-                # find earliest available AOD for teleportation
-                aod_idx = aod_earliest_available_time.index(
-                    min(aod_earliest_available_time)
-                )
+                # find earliest available AOD for teleportation (including AOD 0)
+                aod_idx, rus_start_time = pick_any_aod(local_time)
                 local_time = execute_rus_teleportation(
-                    qubit_factory_pairs, local_time, execution_log, aod_idx
+                    qubit_factory_pairs, rus_start_time, execution_log, aod_idx
                 )
                 aod_earliest_available_time[aod_idx] = local_time
                 logger.debug(
@@ -322,11 +478,11 @@ def t_cultivation_execution(
                         local_time,
                         next(event_counter),
                         {
-                            "type": "RUS_teleportation",
+                            "type": "rus_teleportation",
                             "qubit_factory_pairs": qubit_factory_pairs,
                             "qubit_idx_to_node": qubit_idx_to_node,
                             "routing_batches": routing_batches,
-                            "aod_id": event["aod_id"],
+                            "aod_id": aod_idx,
                         },
                     ),
                 )
@@ -340,6 +496,12 @@ def t_cultivation_execution(
             # Simulate RUS teleportation results
             rus_simulation = simulate_RUS_teleportation(
                 event["qubit_factory_pairs"], factory_pool, rng
+            )
+            logger.debug(
+                "RUS teleportation at t=%.3f pairs=%d successes=%d",
+                local_time,
+                len(qubit_factory_pairs),
+                sum(rus_simulation),
             )
 
             execution_log = write_rus_result_log(
@@ -376,16 +538,13 @@ def t_cultivation_execution(
                         start_time=local_time,
                         factories=[],
                         operation="S",
-                        aod_assignment=None,
+                        aod_assignment=event["aod_id"],
                         targets=[qubit],
                     )
                     insert_s = True
                 ready_t.remove(qubit_idx_to_node[qubit])
                 node = qubit_idx_to_node[qubit]
                 mark_node_completed(node)
-            if insert_s:
-                local_time += 1
-
             heapq.heappush(
                 events,
                 (
@@ -394,17 +553,34 @@ def t_cultivation_execution(
                     {
                         "type": "rus_completion",
                         "factory_list": factory_list,
+                        "aod_id": event["aod_id"],
                     },
                 ),
             )
+            if insert_s:
+                local_time += 1
+                logger.debug("Inserted corrective S gate at t=%.3f", local_time)
+            schedule_ready_clifford_operations(local_time)
 
         for event in same_time_events["rus_completion"]:
             factory_pool.free_factories(event["factory_list"])
+            logger.debug("Freed factories after RUS: %s", event["factory_list"])
+            schedule_t_preparation(current_time)
 
         for event in same_time_events["op_complete"]:
             node = event["node"]
             mark_node_completed(node)
+            schedule_ready_clifford_operations(current_time)
 
-        schedule_ready_clifford_operations(current_time)
+    execution_log = clean_up_execution_log(execution_log, current_time)
+    for log in execution_log:
+        logger.debug("Execution log: %s", log)
 
+    logger.info(
+        "t_cultivation_execution finished: end_time=%.3f log_entries=%d",
+        current_time,
+        len(execution_log),
+    )
+    profiling = analyze_execution_log(execution_log, n_factories=n_factories)
+    print_execution_profile(profiling)
     return execution_log

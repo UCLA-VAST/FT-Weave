@@ -378,6 +378,10 @@ def print_execution_profile(profile: dict[str, Any], top_n_pairs: int = 0) -> No
     # Define operation order for output
     op_order = [
         "SE",
+        "SE_stage_1",
+        "SE_stage_2",
+        "H",
+        "S",
         "Rz",
         "move",
         "return_move",
@@ -389,7 +393,7 @@ def print_execution_profile(profile: dict[str, Any], top_n_pairs: int = 0) -> No
     ]
 
     # Operations with timing details
-    timing_ops = {"SE", "Rz", "CNOT"}
+    timing_ops = {"SE", "SE_stage_1", "SE_stage_2", "H", "S", "Rz", "CNOT"}
     move_ops = {"move", "return_move"}
     # Operations with count only
     count_only_ops = {"RUS_success", "RUS_fail", "TMR_fail"}
