@@ -2,6 +2,10 @@ from src.star.config import (
     CNOT_TIME,
     SE_TIME,
 )
+from src.t_cultivation.config import (
+    SE_STAGE_1,
+    SE_STAGE_2,
+)
 from src.ds import move_duration
 
 
@@ -26,6 +30,10 @@ def write_execution_log(
         end_time = start_time + SE_TIME
     elif operation in ["move", "return_move"]:
         end_time = start_time + movement_time
+    elif operation == "SE_stage_1":
+        end_time = start_time + SE_STAGE_1
+    elif operation == "SE_stage_2":
+        end_time = start_time + SE_STAGE_2
     else:
         end_time = start_time
     if move_vecs:

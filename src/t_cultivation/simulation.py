@@ -1,35 +1,29 @@
 import numpy as np
+
 from .config import (
     TELEPORTATION_SUCCESS_RATE,
     STAGE_1_SUCCESS_RATE,
     STAGE_2_SUCCESS_RATE,
 )
 
-from src.ds import (
-    TFactoryPool,
-)
+from src.ds import TFactoryPool
 
 
 def simulate_stage1_preparation(
     factory_pool: TFactoryPool,
     rng: np.random.Generator,
     factory_id_list: list[int] | None = None,
-) -> list[int]:
-    """Simulate stage 1 success based on success rate."""
+) -> None:
+    """Draw independent Bernoulli outcomes for each subfactory (stage 1 only)."""
 
     if not factory_id_list:
         factory_id_list = [
             factory.id for factory in factory_pool.get_stage_1_factories()
         ]
-    success_factory_ids = []
     for factory_id in factory_id_list:
         factory = factory_pool.get_factory_by_id(factory_id)
-        outcome = rng.random() < STAGE_1_SUCCESS_RATE
-        factory.set_stage_1_state_outcome(outcome)
-        if outcome:
-            factory.set_stage_2_state()  # Only proceed to stage 2 if stage 1 is successful
-            success_factory_ids.append(factory_id)
-    return success_factory_ids
+        for sf in factory.subfactories:
+            sf.stage_1_success = rng.random() < STAGE_1_SUCCESS_RATE
 
 
 def simulate_stage2_preparation(
@@ -40,7 +34,7 @@ def simulate_stage2_preparation(
     """Simulate stage 2 success based on success rate."""
     if not factory_id_list:
         factory_id_list = [
-            factory.id for factory in factory_pool.get_stage_1_factories()
+            factory.id for factory in factory_pool.get_stage_2_factories()
         ]
     success_factory_ids = []
     for factory_id in factory_id_list:
@@ -50,6 +44,8 @@ def simulate_stage2_preparation(
         if outcome:
             factory.set_to_wait_for_rus()  # Only proceed to RUS if stage 2 is successful
             success_factory_ids.append(factory_id)
+        else:
+            factory.free()
     return success_factory_ids
 
 

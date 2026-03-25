@@ -1,4 +1,5 @@
-from src.star import factory_angle_execution, factory_angle_execution_parallel
+from src.star.analog_rotation_execution import factory_angle_execution
+from src.star.analog_rotation_execution_parallel import factory_angle_execution_parallel
 from src.ds import FactoryPool, get_microarchitecture
 from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
 from src.util import analyze_execution_log

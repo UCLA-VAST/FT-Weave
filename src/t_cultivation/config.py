@@ -9,14 +9,26 @@ import numpy as np
 # ============================================================================
 # CONFIGURATION CONSTANTS
 # ============================================================================
-SE_STAGE_1 = 6
-SE_STAGE_2 = 6
+SE_STAGE_1 = 10
+SE_STAGE_2 = 4
 CNOT_TIME = 1
 SE_TIME = 1
 TELEPORTATION_SUCCESS_RATE = 0.5
-STAGE_1_SUCCESS_RATE = 0.5
-STAGE_2_SUCCESS_RATE = 0.5
+STAGE_1_SUCCESS_RATE = 0.25
+STAGE_2_SUCCESS_RATE = 0.40
 ANGLE_S = np.pi / 2
+
+# Physical factory holds `FACTORY_PHYSICAL_SIZE` units; stage 1 uses `STAGE_1_RESOURCE_UNITS`
+# per sub-line. Number of parallel subfactories is max(1, FACTORY_PHYSICAL_SIZE // STAGE_1_RESOURCE_UNITS).
+FACTORY_PHYSICAL_SIZE = 2
+STAGE_1_RESOURCE_UNITS = 1
+
+
+def compute_num_subfactories(physical_size: int, stage1_resource_units: int) -> int:
+    """Return k = max(1, physical_size // stage1_resource_units) with a safe denominator."""
+    if stage1_resource_units <= 0:
+        return 1
+    return max(1, physical_size // stage1_resource_units)
 
 
 def update_config(**kwargs):
@@ -25,14 +37,16 @@ def update_config(**kwargs):
 
     Parameters:
         **kwargs: Configuration key-value pairs to update.
-                 Valid keys: SE_STAGE_1, SE_STAGE_2, CNOT_TIME, SE_TIME,
-                            TELEPORTATION_SUCCESS_RATE, ANGLE_S
+                 Valid keys include: SE_STAGE_1, SE_STAGE_2, CNOT_TIME, SE_TIME,
+                 TELEPORTATION_SUCCESS_RATE, STAGE_1_SUCCESS_RATE, STAGE_2_SUCCESS_RATE,
+                 ANGLE_S, FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS.
 
     Example:
         update_config(SE_STAGE_1=8, TELEPORTATION_SUCCESS_RATE=0.7)
     """
     global SE_STAGE_1, SE_STAGE_2, CNOT_TIME, SE_TIME
-    global TELEPORTATION_SUCCESS_RATE, ANGLE_S
+    global TELEPORTATION_SUCCESS_RATE, STAGE_1_SUCCESS_RATE, STAGE_2_SUCCESS_RATE, ANGLE_S
+    global FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS
 
     valid_keys = {
         "SE_STAGE_1",
@@ -40,7 +54,11 @@ def update_config(**kwargs):
         "CNOT_TIME",
         "SE_TIME",
         "TELEPORTATION_SUCCESS_RATE",
+        "STAGE_1_SUCCESS_RATE",
+        "STAGE_2_SUCCESS_RATE",
         "ANGLE_S",
+        "FACTORY_PHYSICAL_SIZE",
+        "STAGE_1_RESOURCE_UNITS",
     }
 
     # Validate keys
@@ -59,8 +77,16 @@ def update_config(**kwargs):
         SE_TIME = kwargs["SE_TIME"]
     if "TELEPORTATION_SUCCESS_RATE" in kwargs:
         TELEPORTATION_SUCCESS_RATE = kwargs["TELEPORTATION_SUCCESS_RATE"]
+    if "STAGE_1_SUCCESS_RATE" in kwargs:
+        STAGE_1_SUCCESS_RATE = kwargs["STAGE_1_SUCCESS_RATE"]
+    if "STAGE_2_SUCCESS_RATE" in kwargs:
+        STAGE_2_SUCCESS_RATE = kwargs["STAGE_2_SUCCESS_RATE"]
     if "ANGLE_S" in kwargs:
         ANGLE_S = kwargs["ANGLE_S"]
+    if "FACTORY_PHYSICAL_SIZE" in kwargs:
+        FACTORY_PHYSICAL_SIZE = kwargs["FACTORY_PHYSICAL_SIZE"]
+    if "STAGE_1_RESOURCE_UNITS" in kwargs:
+        STAGE_1_RESOURCE_UNITS = kwargs["STAGE_1_RESOURCE_UNITS"]
 
 
 def get_config():
@@ -76,7 +102,11 @@ def get_config():
         "CNOT_TIME": CNOT_TIME,
         "SE_TIME": SE_TIME,
         "TELEPORTATION_SUCCESS_RATE": TELEPORTATION_SUCCESS_RATE,
+        "STAGE_1_SUCCESS_RATE": STAGE_1_SUCCESS_RATE,
+        "STAGE_2_SUCCESS_RATE": STAGE_2_SUCCESS_RATE,
         "ANGLE_S": ANGLE_S,
+        "FACTORY_PHYSICAL_SIZE": FACTORY_PHYSICAL_SIZE,
+        "STAGE_1_RESOURCE_UNITS": STAGE_1_RESOURCE_UNITS,
     }
 
 
@@ -88,5 +118,9 @@ def reset_config():
         CNOT_TIME=1,
         SE_TIME=1,
         TELEPORTATION_SUCCESS_RATE=0.5,
+        STAGE_1_SUCCESS_RATE=0.25,
+        STAGE_2_SUCCESS_RATE=0.40,
         ANGLE_S=np.pi / 2,
+        FACTORY_PHYSICAL_SIZE=1,
+        STAGE_1_RESOURCE_UNITS=1,
     )

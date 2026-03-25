@@ -2,6 +2,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import os
 
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
 # Color mapping for operations
 color_map = {
     "TUM": "#9ed76c",
@@ -15,6 +17,9 @@ color_map = {
     "RUS_success": "#E01414",
     "RUS_fail": "#DDA413",
     "TMR_fail": "#007E15",
+    "CNOT(T)": "#e74c3c",
+    "SE_stage_1": "#4681a9",
+    "SE_stage_2": "#4F64C2",
 }
 
 # Color mapping for AOD devices (for border colors)
@@ -22,7 +27,7 @@ aod_colors = [
     "#FF57579A",
     "#EF7432F4",
     "#F3C82DEB",
-    "#F62ED1C2",
+    "#python-color-picker",
     "#C540BE79",
     "#B145D9E5",
     "#4825E8CC",
@@ -75,6 +80,22 @@ def _resolve_factory_value(values, idx: int):
     if isinstance(values, list) and idx < len(values):
         return values[idx]
     return values
+
+
+def _extract_qubits_from_targets(targets) -> list[int]:
+    if targets is None:
+        return []
+    qubits: list[int] = []
+    for target in targets:
+        if isinstance(target, int):
+            qubits.append(target)
+        elif isinstance(target, (tuple, list)) and len(target) == 2:
+            q0, q1 = target
+            if isinstance(q0, int):
+                qubits.append(q0)
+            if isinstance(q1, int):
+                qubits.append(q1)
+    return sorted(set(qubits))
 
 
 # ============================================================================
@@ -427,3 +448,162 @@ def plot_circuit_execution_vertical(
         os.makedirs(output_dir, exist_ok=True)
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     print(f"\nCircuit execution plot (vertical) saved to: {save_path}")
+
+
+def plot_t_cultivation_execution(
+    execution_log,
+    n_qubits: int,
+    n_factories: int,
+    save_path="output/circuit_execution/t_cultivation_execution.pdf",
+):
+    """Plot T-cultivation timeline with qubit and factory lanes.
+
+    X-axis is time, Y-axis contains logical qubits (q*) and factories (f*).
+    For factory-side CNOT in RUS teleportation, also draw CNOT(T) on target qubits.
+    """
+    if not execution_log:
+        print("No execution log to plot")
+        return
+
+    rows = [f"q{i}" for i in range(n_qubits)] + [f"f{i}" for i in range(n_factories)]
+    y_pos = {name: idx for idx, name in enumerate(rows)}
+
+    max_time = max(entry[1] for entry in execution_log)
+    fig, ax = plt.subplots(figsize=(14, max(4, 0.9 * len(rows))))
+
+    no_text_operations = {"RUS_success", "RUS_fail", "TMR_fail"}
+
+    for entry in execution_log:
+        (
+            start_time,
+            end_time,
+            factories,
+            operation,
+            aod_assignment,
+            value,
+            _move_vecs,
+        ) = _parse_execution_entry(entry)
+
+        duration = max(end_time - start_time, 0.1)
+        color = color_map.get(operation, "#95a5a6")
+
+        # Factory lanes
+        for idx, factory_id in enumerate(factories):
+            row_name = f"f{factory_id}"
+            if row_name not in y_pos:
+                continue
+            rect = mpatches.Rectangle(
+                (start_time, y_pos[row_name] - 0.35),
+                duration,
+                0.7,
+                facecolor=color,
+                edgecolor="black",
+                linewidth=1 if operation not in {"move", "return_move"} else 2,
+                alpha=0.9 if aod_assignment is None else 0.9,
+            )
+            ax.add_patch(rect)
+            if operation not in no_text_operations:
+                factory_value = _resolve_factory_value(value, idx)
+                text = (
+                    operation
+                    if factory_value is None
+                    else f"{operation}\nQ{factory_value}"
+                )
+                ax.text(
+                    start_time + duration / 2,
+                    y_pos[row_name],
+                    text,
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                )
+
+        qubits = _extract_qubits_from_targets(value)
+
+        # Logical-qubit lanes
+        if not factories and qubits:
+            # Normal logical gate path.
+            for qubit in qubits:
+                row_name = f"q{qubit}"
+                if row_name not in y_pos:
+                    continue
+                rect = mpatches.Rectangle(
+                    (start_time, y_pos[row_name] - 0.35),
+                    duration,
+                    0.7,
+                    facecolor=color,
+                    edgecolor="black",
+                    linewidth=1,
+                    alpha=0.9,
+                )
+                ax.add_patch(rect)
+                if operation not in no_text_operations:
+                    ax.text(
+                        start_time + duration / 2,
+                        y_pos[row_name],
+                        operation,
+                        ha="center",
+                        va="center",
+                        fontsize=7,
+                    )
+
+        # For factory-side CNOT (RUS teleportation), also plot target qubit with suffix.
+        if factories and operation == "CNOT" and qubits:
+            t_color = color_map.get("CNOT(T)", color)
+            for qubit in qubits:
+                row_name = f"q{qubit}"
+                if row_name not in y_pos:
+                    continue
+                rect = mpatches.Rectangle(
+                    (start_time, y_pos[row_name] - 0.35),
+                    duration,
+                    0.7,
+                    facecolor=t_color,
+                    edgecolor="black",
+                    linewidth=1,
+                    alpha=0.9,
+                )
+                ax.add_patch(rect)
+                ax.text(
+                    start_time + duration / 2,
+                    y_pos[row_name],
+                    "CNOT(T)",
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                )
+
+    ax.set_xlim(0, max_time * 1.03)
+    ax.set_ylim(-0.7, len(rows) - 0.3)
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Qubits / Factories")
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels(rows)
+    ax.set_title("T-Cultivation Execution Timeline")
+    ax.grid(axis="x", linestyle="--", alpha=0.35)
+
+    legend_ops = [
+        "H",
+        "CNOT",
+        "CNOT(T)",
+        "S",
+        "T",
+        "Rz",
+        "SE_stage_1",
+        "SE_stage_2",
+        "move",
+        "return_move",
+    ]
+    legend_handles = [
+        mpatches.Patch(facecolor=color_map[op], edgecolor="black", label=op)
+        for op in legend_ops
+        if op in color_map
+    ]
+    ax.legend(handles=legend_handles, loc="upper right", fontsize=8)
+
+    output_dir = os.path.dirname(save_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"\nT-cultivation plot saved to: {save_path}")

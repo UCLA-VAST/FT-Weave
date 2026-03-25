@@ -17,32 +17,47 @@ class FactoryStateT(Enum):
 
 
 @dataclass
+class TSubFactory:
+    """One parallel stage-1 line inside a physical T-factory."""
+
+    index: int
+    stage_1_success: Optional[bool] = None
+
+
+def _make_subfactories(num_subfactories: int) -> list[TSubFactory]:
+    return [TSubFactory(index=i) for i in range(num_subfactories)]
+
+
+@dataclass
 class TFactory:
     id: int
     state: FactoryStateT = FactoryStateT.IDLE
-    stage_1_state: Optional[bool] = None
     stage_2_state: Optional[bool] = None
     location: tuple[int, int] = (0, 0)  # (x, y) coordinates
+    subfactories: list[TSubFactory] = field(default_factory=list)
+
+    def stage_1_passed(self) -> bool:
+        return any(sf.stage_1_success is True for sf in self.subfactories)
+
+    def clear_subfactory_stage1(self) -> None:
+        for sf in self.subfactories:
+            sf.stage_1_success = None
 
     def free(self):
         """Mark the factory as idle."""
-        self.stage_1_state = None
         self.stage_2_state = None
+        self.clear_subfactory_stage1()
         self.state = FactoryStateT.IDLE
 
     def restart(self):
         """restart the factory."""
-        self.stage_1_state = None
         self.stage_2_state = None
+        self.clear_subfactory_stage1()
         self.state = FactoryStateT.STAGE_1
 
     def set_stage_1_state(self):
         """Set to state 1."""
         self.state = FactoryStateT.STAGE_1
-
-    def set_stage_1_state_outcome(self, outcome: bool):
-        """Set state 1 outcome."""
-        self.stage_1_state = outcome
 
     def set_stage_2_state(self):
         """Set to state 2."""
@@ -79,13 +94,20 @@ class TFactoryPool:
     Attributes:
         factories: List of Factory objects
         num_factories: Total number of factories
+        num_subfactories: Parallel stage-1 lines per physical factory
     """
 
     num_factories: int
+    num_subfactories: int = 1
     factories: list[TFactory] = field(default_factory=list)
 
     def __post_init__(self):
-        self.factories = [TFactory(id=i) for i in range(self.num_factories)]
+        k = max(1, self.num_subfactories)
+        self.num_subfactories = k
+        self.factories = [
+            TFactory(id=i, subfactories=_make_subfactories(k))
+            for i in range(self.num_factories)
+        ]
 
     def set_locations(self, locations: list[tuple[int, int]]):
         for factory, loc in zip(self.factories, locations):

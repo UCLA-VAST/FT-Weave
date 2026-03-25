@@ -1,2 +1,9 @@
-from analog_rotation_execution import factory_angle_execution
-from analog_rotation_execution_parallel import factory_angle_execution_parallel
+"""Star package.
+
+Keep package initialization lightweight to avoid circular imports.
+Import execution entrypoints from their modules directly when needed:
+    - src.star.analog_rotation_execution
+    - src.star.analog_rotation_execution_parallel
+"""
+
+__all__: list[str] = []

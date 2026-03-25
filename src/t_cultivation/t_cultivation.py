@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, Optional
 
 import heapq
 from collections import deque
@@ -7,9 +7,12 @@ from itertools import count
 
 from .config import (
     CNOT_TIME,
+    FACTORY_PHYSICAL_SIZE,
     SE_STAGE_1,
     SE_STAGE_2,
     SE_TIME,
+    STAGE_1_RESOURCE_UNITS,
+    compute_num_subfactories,
 )
 from .util import expand_multi_target_layers, build_circuit_dag
 from src.ds import TFactoryPool, move_duration
@@ -28,6 +31,7 @@ from src.t_cultivation.simulation import (
 )
 from src.star.rus.rus_post_teleportation import rus_post_teleportation
 from src.t_cultivation.util import (
+    complete_stage1_preparation,
     count_t_gates_in_instructions,
     t_gate_count_per_unique_rz_angle,
 )
@@ -48,6 +52,7 @@ def t_cultivation_execution(
     n_aods: int = 2,
     to_decompose: bool = False,
     epsilon: float = 1e-4,
+    num_subfactories: Optional[int] = None,
 ) -> list[tuple]:
     """
     Execute a quantum circuit using T cultivation.
@@ -78,7 +83,7 @@ def t_cultivation_execution(
     if not circuit:
         return []
 
-    expanded_circuit = expand_multi_target_layers(circuit, epsilon, to_decompose)
+    expanded_circuit = expand_multi_target_layers(circuit, epsilon, to_decompose)[:4]
     for inst in expanded_circuit:
         logger.debug("Expanded instruction: %s", inst)
 
@@ -107,7 +112,7 @@ def t_cultivation_execution(
     ready_t = set()
     for node, dep_count in remaining_deps.items():
         if dep_count == 0:
-            if expanded_circuit[node]["gate"] == "T":
+            if expanded_circuit[node]["gate"] in {"T", "Tdg"}:
                 ready_t.add(node)
             else:
                 ready_clifford.append(node)
@@ -115,7 +120,12 @@ def t_cultivation_execution(
         "Initial ready queues: clifford=%d t=%d", len(ready_clifford), len(ready_t)
     )
 
-    factory_pool = TFactoryPool(n_factories)
+    k_sub = (
+        max(1, num_subfactories)
+        if num_subfactories is not None
+        else compute_num_subfactories(FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS)
+    )
+    factory_pool = TFactoryPool(n_factories, num_subfactories=k_sub)
     factory_pool.set_locations(magic_state_locations)
     events: list[tuple[float, int, dict[str, Any]]] = []
     event_counter = count()
@@ -146,7 +156,7 @@ def t_cultivation_execution(
         for successor in successors[node]:
             remaining_deps[successor] -= 1
             if remaining_deps[successor] == 0:
-                if expanded_circuit[successor]["gate"] == "T":
+                if expanded_circuit[successor]["gate"] in {"T", "Tdg"}:
                     ready_t.add(successor)
                 else:
                     ready_clifford.append(successor)
@@ -345,9 +355,14 @@ def t_cultivation_execution(
             local_time = current_time
             for event in same_time_events["stage_1_completion"]:
                 factory_list.extend(event["factory_list"])
-            # simulate stage 1 success/failure for each factory
-            success_factory_ids = simulate_stage1_preparation(
-                factory_pool, rng, factory_list
+            # Stage 1: simulate per-subfactory outcomes, then redistribute and advance.
+            simulate_stage1_preparation(factory_pool, rng, factory_list)
+            success_factory_ids = complete_stage1_preparation(
+                factory_pool,
+                factory_list,
+                execution_log,
+                local_time,
+                same_time_events["stage_1_completion"][0]["aod_id"],
             )
             logger.debug(
                 "Stage 1 complete at t=%.3f success=%s failed=%d",
@@ -532,7 +547,10 @@ def t_cultivation_execution(
             for (qubit, factory_id), rus_success in zip(
                 qubit_factory_pairs, rus_simulation
             ):
-                if not rus_success:
+                gate_name = expanded_circuit[qubit_idx_to_node[qubit]]["gate"]
+                if (not rus_success and gate_name == "T") or (
+                    rus_success and gate_name == "Tdg"
+                ):
                     write_execution_log(
                         execution_log,
                         start_time=local_time,
@@ -574,7 +592,8 @@ def t_cultivation_execution(
 
     execution_log = clean_up_execution_log(execution_log, current_time)
     for log in execution_log:
-        logger.debug("Execution log: %s", log)
+        # logger.debug("Execution log: %s", log)
+        logger.info("Execution log: %s", log)
 
     logger.info(
         "t_cultivation_execution finished: end_time=%.3f log_entries=%d",
