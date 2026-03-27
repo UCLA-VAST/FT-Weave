@@ -11,11 +11,12 @@ from .config import (
     SE_STAGE_1,
     SE_STAGE_2,
     SE_TIME,
+    SYNCHRONIZE_FACTORY_EXECUTION,
     STAGE_1_RESOURCE_UNITS,
     compute_num_subfactories,
 )
 from .util import expand_multi_target_layers, build_circuit_dag
-from src.ds import TFactoryPool, move_duration
+from src.ds import FactoryStateT, TFactoryPool, move_duration
 from src.execution_log import (
     write_execution_log,
     execute_movement,
@@ -53,6 +54,7 @@ def t_cultivation_execution(
     to_decompose: bool = False,
     epsilon: float = 1e-4,
     num_subfactories: Optional[int] = None,
+    synchronize_factory_execution: Optional[bool] = None,
 ) -> list[tuple]:
     """
     Execute a quantum circuit using T cultivation.
@@ -60,6 +62,8 @@ def t_cultivation_execution(
     Args:
         circuit: List of instruction dictionaries, where each instruction has the format:
                  {"gate": str, "targets": list[int] | list[tuple[int, int]], "params": dict}
+        synchronize_factory_execution: If True, stage-1 restarts are delayed until all
+            currently running stage-2 factories complete.
 
     Returns:
         execution_log: List of execution tuples with timestamps and details.
@@ -83,7 +87,7 @@ def t_cultivation_execution(
     if not circuit:
         return []
 
-    expanded_circuit = expand_multi_target_layers(circuit, epsilon, to_decompose)[:4]
+    expanded_circuit = expand_multi_target_layers(circuit, epsilon, to_decompose)
     for inst in expanded_circuit:
         logger.debug("Expanded instruction: %s", inst)
 
@@ -127,6 +131,16 @@ def t_cultivation_execution(
     )
     factory_pool = TFactoryPool(n_factories, num_subfactories=k_sub)
     factory_pool.set_locations(magic_state_locations)
+    sync_stages = (
+        SYNCHRONIZE_FACTORY_EXECUTION
+        if synchronize_factory_execution is None
+        else synchronize_factory_execution
+    )
+    if not sync_stages:
+        raise NotImplementedError(
+            "Non-synchronized factory execution is not implemented yet because "
+            "AOD assignment for asynchronous factory progression is not handled."
+        )
     events: list[tuple[float, int, dict[str, Any]]] = []
     event_counter = count()
     execution_log: list[tuple] = []
@@ -169,8 +183,19 @@ def t_cultivation_execution(
         )
 
     def schedule_t_preparation(at_time: float):
+        if sync_stages and any(
+            f.state in (FactoryStateT.STAGE_2, FactoryStateT.WAIT_FOR_RUS, FactoryStateT.RUS)
+            for f in factory_pool.get_busy_factories()
+        ):
+            logger.debug(
+                "Delayed stage-1 restart at t=%.3f due to synchronized stage/RUS barrier",
+                at_time,
+            )
+            return
         idle_factories = deque(factory_pool.get_idle_factories())
         factory_ids = [f.id for f in idle_factories]
+        if not factory_ids:
+            return
         aod_id = 0
         start_time = max(at_time, aod_earliest_available_time[aod_id])
         logger.debug(
@@ -355,9 +380,10 @@ def t_cultivation_execution(
             local_time = current_time
             for event in same_time_events["stage_1_completion"]:
                 factory_list.extend(event["factory_list"])
+            factory_list = list(dict.fromkeys(factory_list))
             # Stage 1: simulate per-subfactory outcomes, then redistribute and advance.
             simulate_stage1_preparation(factory_pool, rng, factory_list)
-            success_factory_ids = complete_stage1_preparation(
+            success_factory_ids, redistribution_delay = complete_stage1_preparation(
                 factory_pool,
                 factory_list,
                 execution_log,
@@ -374,9 +400,10 @@ def t_cultivation_execution(
             if len(success_factory_ids) < len(factory_list):
                 schedule_t_preparation(local_time)
             if success_factory_ids:
+                stage_2_start_time = local_time + redistribution_delay
                 write_execution_log(
                     execution_log,
-                    start_time=local_time,
+                    start_time=stage_2_start_time,
                     factories=success_factory_ids,
                     operation="SE_stage_2",
                     aod_assignment=same_time_events["stage_1_completion"][0]["aod_id"],
@@ -385,7 +412,7 @@ def t_cultivation_execution(
                 heapq.heappush(
                     events,
                     (
-                        local_time + SE_STAGE_2,
+                        stage_2_start_time + SE_STAGE_2,
                         next(event_counter),
                         {
                             "type": "stage_2_completion",
@@ -429,6 +456,9 @@ def t_cultivation_execution(
                         },
                     ),
                 )
+            # In synchronized mode, factories that failed stage 1 can restart now
+            # once every stage-2 factory in this wave has completed stage 2.
+            schedule_t_preparation(local_time)
         if same_time_events["rus_start"]:
             factory_list = []
             for event in same_time_events["rus_start"]:

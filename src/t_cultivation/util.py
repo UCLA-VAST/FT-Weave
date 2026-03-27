@@ -100,6 +100,8 @@ def expand_multi_target_layers(
     Supported expansions:
     - Rz layers are always expanded to single-target instructions and decomposed
         via qiskit gridsynth, regardless of `to_decompose`.
+    - T/Tdg layers are always expanded to single-target instructions, regardless
+        of `to_decompose`.
     - For non-Rz gates, expansion occurs only when `to_decompose=True`:
         - Single-qubit layer: [q0, q1, q2] -> one instruction per qubit.
         - Two-qubit layer: [(q0, q1), (q2, q3)] -> one instruction per pair.
@@ -148,6 +150,18 @@ def expand_multi_target_layers(
                     }
 
                     expanded_circuit.append(gate_instr)
+            continue
+
+        if gate_name in {"T", "Tdg"}:
+            if not all(isinstance(target, int) for target in targets):
+                raise ValueError("T/Tdg targets must be a list of qubit indices")
+            for target in targets:
+                gate_instr = {
+                    "gate": instr["gate"],
+                    "targets": [target],
+                    "params": instr.get("params", {}),
+                }
+                expanded_circuit.append(gate_instr)
             continue
 
         if not to_decompose:
@@ -235,7 +249,7 @@ def raw_stage1_counts(
     out: dict[int, int] = {}
     for fid in factory_ids:
         f = factory_pool.get_factory_by_id(fid)
-        out[fid] = sum(1 for sf in f.subfactories if sf.stage_1_success is True)
+        out[fid] = sum(1 for sf in f.subfactories if sf.stage_1_success)
     return out
 
 
@@ -315,6 +329,10 @@ def finalize_stage1_outcomes(
     success_factory_ids: list[int] = []
     for factory_id in factory_ids:
         factory = factory_pool.get_factory_by_id(factory_id)
+        # Synchronize factory subfactory states with post-redistribution counts.
+        n_success = max(0, min(counts.get(factory_id, 0), len(factory.subfactories)))
+        for i, sf in enumerate(factory.subfactories):
+            sf.stage_1_success = i < n_success
         if factory.stage_1_passed():
             factory.set_stage_2_state()
             success_factory_ids.append(factory_id)
@@ -329,13 +347,13 @@ def complete_stage1_preparation(
     execution_log: Optional[list],
     log_time: float,
     aod_id: int,
-) -> list[int]:
+) -> tuple[list[int], float]:
     """
     After ``simulate_stage1_preparation``: redistribute spare successes, sync subfactories,
     and advance factories to stage 2 or free.
     """
     counts = raw_stage1_counts(factory_pool, factory_ids)
-    redistribute_stage1_successes(
+    transfers = redistribute_stage1_successes(
         factory_pool,
         factory_ids,
         counts,
@@ -343,4 +361,14 @@ def complete_stage1_preparation(
         log_time,
         aod_id,
     )
-    return finalize_stage1_outcomes(factory_pool, factory_ids, counts)
+    redistribution_delay = 0.0
+    for donor_id, receiver_id in transfers:
+        donor = factory_pool.get_factory_by_id(donor_id).location
+        receiver = factory_pool.get_factory_by_id(receiver_id).location
+        redistribution_delay = max(
+            redistribution_delay,
+            move_duration(donor[0], donor[1], receiver[0], receiver[1]),
+        )
+
+    success_factory_ids = finalize_stage1_outcomes(factory_pool, factory_ids, counts)
+    return success_factory_ids, redistribution_delay

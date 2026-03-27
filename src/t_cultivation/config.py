@@ -9,18 +9,22 @@ import numpy as np
 # ============================================================================
 # CONFIGURATION CONSTANTS
 # ============================================================================
-SE_STAGE_1 = 10
+# SE_STAGE_1 = 10
+SE_STAGE_1 = 8  # for MSC-3
 SE_STAGE_2 = 4
 CNOT_TIME = 1
 SE_TIME = 1
 TELEPORTATION_SUCCESS_RATE = 0.5
-STAGE_1_SUCCESS_RATE = 0.25
-STAGE_2_SUCCESS_RATE = 0.40
+STAGE_1_SUCCESS_RATE = 0.25  # will be fixed
+STAGE_2_SUCCESS_RATE = (
+    0.40  # derived by the overall post-selection success rate / stage 1 success rate
+)
 ANGLE_S = np.pi / 2
+SYNCHRONIZE_FACTORY_EXECUTION = True
 
 # Physical factory holds `FACTORY_PHYSICAL_SIZE` units; stage 1 uses `STAGE_1_RESOURCE_UNITS`
 # per sub-line. Number of parallel subfactories is max(1, FACTORY_PHYSICAL_SIZE // STAGE_1_RESOURCE_UNITS).
-FACTORY_PHYSICAL_SIZE = 2
+FACTORY_PHYSICAL_SIZE = 4
 STAGE_1_RESOURCE_UNITS = 1
 
 
@@ -39,14 +43,15 @@ def update_config(**kwargs):
         **kwargs: Configuration key-value pairs to update.
                  Valid keys include: SE_STAGE_1, SE_STAGE_2, CNOT_TIME, SE_TIME,
                  TELEPORTATION_SUCCESS_RATE, STAGE_1_SUCCESS_RATE, STAGE_2_SUCCESS_RATE,
-                 ANGLE_S, FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS.
+                 ANGLE_S, FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS,
+                 SYNCHRONIZE_FACTORY_EXECUTION.
 
     Example:
         update_config(SE_STAGE_1=8, TELEPORTATION_SUCCESS_RATE=0.7)
     """
     global SE_STAGE_1, SE_STAGE_2, CNOT_TIME, SE_TIME
     global TELEPORTATION_SUCCESS_RATE, STAGE_1_SUCCESS_RATE, STAGE_2_SUCCESS_RATE, ANGLE_S
-    global FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS
+    global FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS, SYNCHRONIZE_FACTORY_EXECUTION
 
     valid_keys = {
         "SE_STAGE_1",
@@ -59,6 +64,7 @@ def update_config(**kwargs):
         "ANGLE_S",
         "FACTORY_PHYSICAL_SIZE",
         "STAGE_1_RESOURCE_UNITS",
+        "SYNCHRONIZE_FACTORY_EXECUTION",
     }
 
     # Validate keys
@@ -87,6 +93,8 @@ def update_config(**kwargs):
         FACTORY_PHYSICAL_SIZE = kwargs["FACTORY_PHYSICAL_SIZE"]
     if "STAGE_1_RESOURCE_UNITS" in kwargs:
         STAGE_1_RESOURCE_UNITS = kwargs["STAGE_1_RESOURCE_UNITS"]
+    if "SYNCHRONIZE_FACTORY_EXECUTION" in kwargs:
+        SYNCHRONIZE_FACTORY_EXECUTION = kwargs["SYNCHRONIZE_FACTORY_EXECUTION"]
 
 
 def get_config():
@@ -107,6 +115,7 @@ def get_config():
         "ANGLE_S": ANGLE_S,
         "FACTORY_PHYSICAL_SIZE": FACTORY_PHYSICAL_SIZE,
         "STAGE_1_RESOURCE_UNITS": STAGE_1_RESOURCE_UNITS,
+        "SYNCHRONIZE_FACTORY_EXECUTION": SYNCHRONIZE_FACTORY_EXECUTION,
     }
 
 
@@ -123,4 +132,5 @@ def reset_config():
         ANGLE_S=np.pi / 2,
         FACTORY_PHYSICAL_SIZE=1,
         STAGE_1_RESOURCE_UNITS=1,
+        SYNCHRONIZE_FACTORY_EXECUTION=True,
     )

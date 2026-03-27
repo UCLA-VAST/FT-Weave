@@ -20,10 +20,15 @@ def simulate_stage1_preparation(
         factory_id_list = [
             factory.id for factory in factory_pool.get_stage_1_factories()
         ]
+    # print(f"Simulating stage 1 preparation for {len(factory_id_list)} factories")
     for factory_id in factory_id_list:
         factory = factory_pool.get_factory_by_id(factory_id)
+        # print(f"Factory {factory_id} has {len(factory.subfactories)} subfactories")
         for sf in factory.subfactories:
             sf.stage_1_success = rng.random() < STAGE_1_SUCCESS_RATE
+            # print(f"Subfactory {sf.index} has stage 1 success: {sf.stage_1_success}")
+
+    # input()
 
 
 def simulate_stage2_preparation(
