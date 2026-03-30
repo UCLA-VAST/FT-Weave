@@ -8,6 +8,7 @@ from itertools import count
 from .config import (
     CNOT_TIME,
     FACTORY_PHYSICAL_SIZE,
+    RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT,
     SE_STAGE_1,
     SE_STAGE_2,
     SE_TIME,
@@ -15,7 +16,11 @@ from .config import (
     STAGE_1_RESOURCE_UNITS,
     compute_num_subfactories,
 )
-from .util import expand_multi_target_layers, build_circuit_dag
+from .util import (
+    build_circuit_dag,
+    compute_longest_path_to_sink,
+    expand_multi_target_layers,
+)
 from src.ds import FactoryStateT, TFactoryPool, move_duration
 from src.execution_log import (
     write_execution_log,
@@ -108,6 +113,7 @@ def t_cultivation_execution(
     print(f"Total T+Tdg gates in expanded circuit: {total_t_expanded}")
 
     predecessors, successors = build_circuit_dag(expanded_circuit)
+    longest_path_to_sink = compute_longest_path_to_sink(successors, len(expanded_circuit))
 
     remaining_deps = {node: len(deps) for node, deps in predecessors.items()}
     logger.debug("Built DAG: nodes=%d", len(predecessors))
@@ -184,7 +190,8 @@ def t_cultivation_execution(
 
     def schedule_t_preparation(at_time: float):
         if sync_stages and any(
-            f.state in (FactoryStateT.STAGE_2, FactoryStateT.WAIT_FOR_RUS, FactoryStateT.RUS)
+            f.state
+            in (FactoryStateT.STAGE_2, FactoryStateT.WAIT_FOR_RUS, FactoryStateT.RUS)
             for f in factory_pool.get_busy_factories()
         ):
             logger.debug(
@@ -492,6 +499,9 @@ def t_cultivation_execution(
                 logic_qubit_locations,
                 factory_pool,
                 factory_list,
+                qubit_to_node=qubit_idx_to_node,
+                longest_path_to_sink=longest_path_to_sink,
+                critical_path_weight=RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT,
             )
             logger.debug(
                 "RUS start at t=%.3f ready_t=%d assigned_pairs=%d",
@@ -622,8 +632,8 @@ def t_cultivation_execution(
 
     execution_log = clean_up_execution_log(execution_log, current_time)
     for log in execution_log:
-        # logger.debug("Execution log: %s", log)
-        logger.info("Execution log: %s", log)
+        logger.debug("Execution log: %s", log)
+        # logger.info("Execution log: %s", log)
 
     logger.info(
         "t_cultivation_execution finished: end_time=%.3f log_entries=%d",

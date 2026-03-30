@@ -27,6 +27,10 @@ SYNCHRONIZE_FACTORY_EXECUTION = True
 FACTORY_PHYSICAL_SIZE = 4
 STAGE_1_RESOURCE_UNITS = 1
 
+# Weight for (longest-path-to-sink) term in RUS qubit–factory assignment cost:
+# cost = move_duration + weight * (batch_max_lp - lp[node]). Higher lp => lower extra cost.
+RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT = 1.0
+
 
 def compute_num_subfactories(physical_size: int, stage1_resource_units: int) -> int:
     """Return k = max(1, physical_size // stage1_resource_units) with a safe denominator."""
@@ -44,7 +48,7 @@ def update_config(**kwargs):
                  Valid keys include: SE_STAGE_1, SE_STAGE_2, CNOT_TIME, SE_TIME,
                  TELEPORTATION_SUCCESS_RATE, STAGE_1_SUCCESS_RATE, STAGE_2_SUCCESS_RATE,
                  ANGLE_S, FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS,
-                 SYNCHRONIZE_FACTORY_EXECUTION.
+                 SYNCHRONIZE_FACTORY_EXECUTION, RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT.
 
     Example:
         update_config(SE_STAGE_1=8, TELEPORTATION_SUCCESS_RATE=0.7)
@@ -52,6 +56,7 @@ def update_config(**kwargs):
     global SE_STAGE_1, SE_STAGE_2, CNOT_TIME, SE_TIME
     global TELEPORTATION_SUCCESS_RATE, STAGE_1_SUCCESS_RATE, STAGE_2_SUCCESS_RATE, ANGLE_S
     global FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS, SYNCHRONIZE_FACTORY_EXECUTION
+    global RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT
 
     valid_keys = {
         "SE_STAGE_1",
@@ -65,6 +70,7 @@ def update_config(**kwargs):
         "FACTORY_PHYSICAL_SIZE",
         "STAGE_1_RESOURCE_UNITS",
         "SYNCHRONIZE_FACTORY_EXECUTION",
+        "RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT",
     }
 
     # Validate keys
@@ -95,6 +101,8 @@ def update_config(**kwargs):
         STAGE_1_RESOURCE_UNITS = kwargs["STAGE_1_RESOURCE_UNITS"]
     if "SYNCHRONIZE_FACTORY_EXECUTION" in kwargs:
         SYNCHRONIZE_FACTORY_EXECUTION = kwargs["SYNCHRONIZE_FACTORY_EXECUTION"]
+    if "RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT" in kwargs:
+        RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT = kwargs["RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT"]
 
 
 def get_config():
@@ -116,6 +124,7 @@ def get_config():
         "FACTORY_PHYSICAL_SIZE": FACTORY_PHYSICAL_SIZE,
         "STAGE_1_RESOURCE_UNITS": STAGE_1_RESOURCE_UNITS,
         "SYNCHRONIZE_FACTORY_EXECUTION": SYNCHRONIZE_FACTORY_EXECUTION,
+        "RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT": RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT,
     }
 
 
@@ -133,4 +142,5 @@ def reset_config():
         FACTORY_PHYSICAL_SIZE=1,
         STAGE_1_RESOURCE_UNITS=1,
         SYNCHRONIZE_FACTORY_EXECUTION=True,
+        RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT=1.0,
     )

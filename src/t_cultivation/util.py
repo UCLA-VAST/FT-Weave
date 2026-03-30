@@ -237,6 +237,30 @@ def build_circuit_dag(
     return predecessors, successors
 
 
+def compute_longest_path_to_sink(
+    successors: dict[int, list[int]],
+    num_nodes: int,
+) -> list[int]:
+    """
+    For each DAG node, length of the longest path starting at that node (inclusive)
+    following successor edges toward sinks. T/Tdg nodes with more downstream work
+    get larger values — used to prioritize RUS assignment toward the critical path.
+    """
+    memo: dict[int, int] = {}
+
+    def longest_from(u: int) -> int:
+        if u in memo:
+            return memo[u]
+        outs = successors.get(u, [])
+        if not outs:
+            memo[u] = 1
+        else:
+            memo[u] = 1 + max(longest_from(v) for v in outs)
+        return memo[u]
+
+    return [longest_from(i) for i in range(num_nodes)]
+
+
 # ---------------------------------------------------------------------------
 # T-cultivation stage 1: redistribution and factory state (not random draws)
 # ---------------------------------------------------------------------------
