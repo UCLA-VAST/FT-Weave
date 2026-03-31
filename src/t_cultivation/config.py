@@ -45,7 +45,7 @@ SYNCHRONIZE_FACTORY_EXECUTION = True
 
 # Physical factory holds `FACTORY_PHYSICAL_SIZE` units; stage 1 uses `STAGE_1_RESOURCE_UNITS`
 # per sub-line. Number of parallel subfactories is max(1, FACTORY_PHYSICAL_SIZE // STAGE_1_RESOURCE_UNITS).
-FACTORY_PHYSICAL_SIZE = 4
+FACTORY_PHYSICAL_SIZE = 2
 STAGE_1_RESOURCE_UNITS = 1
 
 # Weight for (longest-path-to-sink) term in RUS qubit–factory assignment cost:
@@ -117,7 +117,9 @@ def update_config(**kwargs):
         STAGE_1_SUCCESS_RATE = kwargs["STAGE_1_SUCCESS_RATE"]
     if "STAGE_2_FIDELITY_TARGET" in kwargs:
         STAGE_2_FIDELITY_TARGET = kwargs["STAGE_2_FIDELITY_TARGET"]
-        STAGE_2_SUCCESS_RATE = stage2_success_rate_from_fidelity(STAGE_2_FIDELITY_TARGET)
+        STAGE_2_SUCCESS_RATE = stage2_success_rate_from_fidelity(
+            STAGE_2_FIDELITY_TARGET
+        )
     if "STAGE_2_SUCCESS_RATE" in kwargs:
         STAGE_2_SUCCESS_RATE = kwargs["STAGE_2_SUCCESS_RATE"]
     if "ANGLE_S" in kwargs:

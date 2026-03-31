@@ -5,17 +5,7 @@ import heapq
 from collections import deque
 from itertools import count
 
-from .config import (
-    CNOT_TIME,
-    FACTORY_PHYSICAL_SIZE,
-    RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT,
-    SE_STAGE_1,
-    SE_STAGE_2,
-    SE_TIME,
-    SYNCHRONIZE_FACTORY_EXECUTION,
-    STAGE_1_RESOURCE_UNITS,
-    compute_num_subfactories,
-)
+from . import config as tcfg
 from .util import (
     build_circuit_dag,
     compute_longest_path_to_sink,
@@ -60,6 +50,7 @@ def t_cultivation_execution(
     epsilon: float = 1e-4,
     num_subfactories: Optional[int] = None,
     synchronize_factory_execution: Optional[bool] = None,
+    print_profile: bool = True,
 ) -> list[tuple]:
     """
     Execute a quantum circuit using T cultivation.
@@ -73,6 +64,11 @@ def t_cultivation_execution(
     Returns:
         execution_log: List of execution tuples with timestamps and details.
     """
+    _cfg = tcfg.get_config()
+    logger.info("t_cultivation config (current global):")
+    for _k in sorted(_cfg.keys()):
+        logger.info("  %s: %s", _k, _cfg[_k])
+
     logger.info(
         "t_cultivation_execution: n_instr=%d n_factories=%d n_aods=%d to_decompose=%s epsilon=%g",
         len(circuit),
@@ -105,12 +101,16 @@ def t_cultivation_execution(
     rz_t_by_angle = t_gate_count_per_unique_rz_angle(circuit, epsilon)
     total_t_expanded = count_t_gates_in_instructions(expanded_circuit)
     if rz_t_by_angle:
-        print(
+        logger.info(
             "T+Tdg count per distinct Rz angle (one gridsynth decomposition per angle):"
         )
         for theta_key in sorted(rz_t_by_angle.keys()):
-            print(f"  theta={theta_key:g}: T+Tdg count = {rz_t_by_angle[theta_key]}")
-    print(f"Total T+Tdg gates in expanded circuit: {total_t_expanded}")
+            logger.info(
+                "  theta=%g: T+Tdg count = %s",
+                theta_key,
+                rz_t_by_angle[theta_key],
+            )
+    logger.info("Total T+Tdg gates in expanded circuit: %d", total_t_expanded)
 
     predecessors, successors = build_circuit_dag(expanded_circuit)
     longest_path_to_sink = compute_longest_path_to_sink(
@@ -135,12 +135,14 @@ def t_cultivation_execution(
     k_sub = (
         max(1, num_subfactories)
         if num_subfactories is not None
-        else compute_num_subfactories(FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS)
+        else tcfg.compute_num_subfactories(
+            tcfg.FACTORY_PHYSICAL_SIZE, tcfg.STAGE_1_RESOURCE_UNITS
+        )
     )
     factory_pool = TFactoryPool(n_factories, num_subfactories=k_sub)
     factory_pool.set_locations(magic_state_locations)
     sync_stages = (
-        SYNCHRONIZE_FACTORY_EXECUTION
+        tcfg.SYNCHRONIZE_FACTORY_EXECUTION
         if synchronize_factory_execution is None
         else synchronize_factory_execution
     )
@@ -216,7 +218,7 @@ def t_cultivation_execution(
         for factory in idle_factories:
             factory.restart()
 
-        stage_1_end = start_time + SE_STAGE_1
+        stage_1_end = start_time + tcfg.SE_STAGE_1
         aod_earliest_available_time[aod_id] = stage_1_end
 
         # execution_log.append(
@@ -264,7 +266,7 @@ def t_cultivation_execution(
                 instr.get("targets", []),
                 aod_id,
             )
-            duration = CNOT_TIME if gate in {"CNOT", "CZ"} else SE_TIME
+            duration = tcfg.CNOT_TIME if gate in {"CNOT", "CZ"} else tcfg.SE_TIME
             finish_time = gate_start_time + duration
             targets = instr.get("targets", [])
             if gate in {"CNOT", "CZ"}:
@@ -423,7 +425,7 @@ def t_cultivation_execution(
                 heapq.heappush(
                     events,
                     (
-                        stage_2_start_time + SE_STAGE_2,
+                        stage_2_start_time + tcfg.SE_STAGE_2,
                         next(event_counter),
                         {
                             "type": "stage_2_completion",
@@ -527,7 +529,7 @@ def t_cultivation_execution(
                 wait_for_rus_ids,
                 qubit_to_node=qubit_idx_to_node,
                 longest_path_to_sink=longest_path_to_sink,
-                critical_path_weight=RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT,
+                critical_path_weight=tcfg.RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT,
             )
             logger.debug(
                 "RUS start at t=%.3f ready_t=%d assigned_pairs=%d",
@@ -695,6 +697,7 @@ def t_cultivation_execution(
         current_time,
         len(execution_log),
     )
-    profiling = analyze_execution_log(execution_log, n_factories=n_factories)
-    print_execution_profile(profiling)
+    if print_profile:
+        profiling = analyze_execution_log(execution_log, n_factories=n_factories)
+        print_execution_profile(profiling)
     return execution_log

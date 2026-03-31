@@ -1,10 +1,6 @@
 import numpy as np
 
-from .config import (
-    TELEPORTATION_SUCCESS_RATE,
-    STAGE_1_SUCCESS_RATE,
-    STAGE_2_SUCCESS_RATE,
-)
+from . import config as tcfg
 
 from src.ds import TFactoryPool
 
@@ -25,7 +21,7 @@ def simulate_stage1_preparation(
         factory = factory_pool.get_factory_by_id(factory_id)
         # print(f"Factory {factory_id} has {len(factory.subfactories)} subfactories")
         for sf in factory.subfactories:
-            sf.stage_1_success = rng.random() < STAGE_1_SUCCESS_RATE
+            sf.stage_1_success = rng.random() < tcfg.STAGE_1_SUCCESS_RATE
             # print(f"Subfactory {sf.index} has stage 1 success: {sf.stage_1_success}")
 
     # input()
@@ -44,7 +40,7 @@ def simulate_stage2_preparation(
     success_factory_ids = []
     for factory_id in factory_id_list:
         factory = factory_pool.get_factory_by_id(factory_id)
-        outcome = rng.random() < STAGE_2_SUCCESS_RATE
+        outcome = rng.random() < tcfg.STAGE_2_SUCCESS_RATE
         factory.set_stage_2_state_outcome(outcome)
         if outcome:
             factory.set_to_wait_for_rus()  # Only proceed to RUS if stage 2 is successful
@@ -56,7 +52,7 @@ def simulate_stage2_preparation(
 
 def simulate_teleportation(rng: np.random.Generator):
     """Simulate injection success (50% probability)."""
-    return rng.random() < TELEPORTATION_SUCCESS_RATE
+    return rng.random() < tcfg.TELEPORTATION_SUCCESS_RATE
 
 
 def simulate_RUS_teleportation(
