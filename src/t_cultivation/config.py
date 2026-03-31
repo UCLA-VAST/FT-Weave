@@ -16,9 +16,30 @@ CNOT_TIME = 1
 SE_TIME = 1
 TELEPORTATION_SUCCESS_RATE = 0.5
 STAGE_1_SUCCESS_RATE = 0.25  # will be fixed
-STAGE_2_SUCCESS_RATE = (
-    0.40  # derived by the overall post-selection success rate / stage 1 success rate
-)
+# Stage-2 post-selection model selected by target fidelity.
+# Keep the mapping explicit so evaluations can switch fidelity assumptions.
+STAGE_2_SUCCESS_RATE_BY_FIDELITY = {
+    1e-10: 0.40,
+    1e-8: 0.90,
+}
+DEFAULT_STAGE_2_FIDELITY_TARGET = 1e-8
+
+
+def stage2_success_rate_from_fidelity(fidelity_target: float) -> float:
+    """Return stage-2 success probability for a supported fidelity target."""
+    if fidelity_target in STAGE_2_SUCCESS_RATE_BY_FIDELITY:
+        return STAGE_2_SUCCESS_RATE_BY_FIDELITY[fidelity_target]
+    supported = ", ".join(
+        f"{k:g}" for k in sorted(STAGE_2_SUCCESS_RATE_BY_FIDELITY.keys())
+    )
+    raise ValueError(
+        f"Unsupported STAGE_2 fidelity target: {fidelity_target}. "
+        f"Supported values: {supported}"
+    )
+
+
+STAGE_2_FIDELITY_TARGET = DEFAULT_STAGE_2_FIDELITY_TARGET
+STAGE_2_SUCCESS_RATE = stage2_success_rate_from_fidelity(STAGE_2_FIDELITY_TARGET)
 ANGLE_S = np.pi / 2
 SYNCHRONIZE_FACTORY_EXECUTION = True
 
@@ -47,6 +68,7 @@ def update_config(**kwargs):
         **kwargs: Configuration key-value pairs to update.
                  Valid keys include: SE_STAGE_1, SE_STAGE_2, CNOT_TIME, SE_TIME,
                  TELEPORTATION_SUCCESS_RATE, STAGE_1_SUCCESS_RATE, STAGE_2_SUCCESS_RATE,
+                 STAGE_2_FIDELITY_TARGET,
                  ANGLE_S, FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS,
                  SYNCHRONIZE_FACTORY_EXECUTION, RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT.
 
@@ -55,6 +77,7 @@ def update_config(**kwargs):
     """
     global SE_STAGE_1, SE_STAGE_2, CNOT_TIME, SE_TIME
     global TELEPORTATION_SUCCESS_RATE, STAGE_1_SUCCESS_RATE, STAGE_2_SUCCESS_RATE, ANGLE_S
+    global STAGE_2_FIDELITY_TARGET
     global FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS, SYNCHRONIZE_FACTORY_EXECUTION
     global RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT
 
@@ -66,6 +89,7 @@ def update_config(**kwargs):
         "TELEPORTATION_SUCCESS_RATE",
         "STAGE_1_SUCCESS_RATE",
         "STAGE_2_SUCCESS_RATE",
+        "STAGE_2_FIDELITY_TARGET",
         "ANGLE_S",
         "FACTORY_PHYSICAL_SIZE",
         "STAGE_1_RESOURCE_UNITS",
@@ -91,6 +115,9 @@ def update_config(**kwargs):
         TELEPORTATION_SUCCESS_RATE = kwargs["TELEPORTATION_SUCCESS_RATE"]
     if "STAGE_1_SUCCESS_RATE" in kwargs:
         STAGE_1_SUCCESS_RATE = kwargs["STAGE_1_SUCCESS_RATE"]
+    if "STAGE_2_FIDELITY_TARGET" in kwargs:
+        STAGE_2_FIDELITY_TARGET = kwargs["STAGE_2_FIDELITY_TARGET"]
+        STAGE_2_SUCCESS_RATE = stage2_success_rate_from_fidelity(STAGE_2_FIDELITY_TARGET)
     if "STAGE_2_SUCCESS_RATE" in kwargs:
         STAGE_2_SUCCESS_RATE = kwargs["STAGE_2_SUCCESS_RATE"]
     if "ANGLE_S" in kwargs:
@@ -102,7 +129,9 @@ def update_config(**kwargs):
     if "SYNCHRONIZE_FACTORY_EXECUTION" in kwargs:
         SYNCHRONIZE_FACTORY_EXECUTION = kwargs["SYNCHRONIZE_FACTORY_EXECUTION"]
     if "RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT" in kwargs:
-        RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT = kwargs["RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT"]
+        RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT = kwargs[
+            "RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT"
+        ]
 
 
 def get_config():
@@ -120,6 +149,7 @@ def get_config():
         "TELEPORTATION_SUCCESS_RATE": TELEPORTATION_SUCCESS_RATE,
         "STAGE_1_SUCCESS_RATE": STAGE_1_SUCCESS_RATE,
         "STAGE_2_SUCCESS_RATE": STAGE_2_SUCCESS_RATE,
+        "STAGE_2_FIDELITY_TARGET": STAGE_2_FIDELITY_TARGET,
         "ANGLE_S": ANGLE_S,
         "FACTORY_PHYSICAL_SIZE": FACTORY_PHYSICAL_SIZE,
         "STAGE_1_RESOURCE_UNITS": STAGE_1_RESOURCE_UNITS,
@@ -137,7 +167,7 @@ def reset_config():
         SE_TIME=1,
         TELEPORTATION_SUCCESS_RATE=0.5,
         STAGE_1_SUCCESS_RATE=0.25,
-        STAGE_2_SUCCESS_RATE=0.40,
+        STAGE_2_FIDELITY_TARGET=DEFAULT_STAGE_2_FIDELITY_TARGET,
         ANGLE_S=np.pi / 2,
         FACTORY_PHYSICAL_SIZE=1,
         STAGE_1_RESOURCE_UNITS=1,

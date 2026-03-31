@@ -113,7 +113,9 @@ def t_cultivation_execution(
     print(f"Total T+Tdg gates in expanded circuit: {total_t_expanded}")
 
     predecessors, successors = build_circuit_dag(expanded_circuit)
-    longest_path_to_sink = compute_longest_path_to_sink(successors, len(expanded_circuit))
+    longest_path_to_sink = compute_longest_path_to_sink(
+        successors, len(expanded_circuit)
+    )
 
     remaining_deps = {node: len(deps) for node, deps in predecessors.items()}
     logger.debug("Built DAG: nodes=%d", len(predecessors))
@@ -363,6 +365,8 @@ def t_cultivation_execution(
             )
 
         current_time, _, first_event = heapq.heappop(events)
+        # if current_time > 1000:
+        #     raise RuntimeError(f"Current time is {current_time}, which is too large")
         logger.debug(
             "Processing events at t=%.3f first_event=%s pending_events=%d",
             current_time,
@@ -467,14 +471,30 @@ def t_cultivation_execution(
             # once every stage-2 factory in this wave has completed stage 2.
             schedule_t_preparation(local_time)
         if same_time_events["rus_start"]:
-            factory_list = []
+            wave_factory_ids: list[int] = []
             for event in same_time_events["rus_start"]:
-                factory_list.extend(event["factory_list"])
-            # find rus assignments for each factory ready for rus
+                wave_factory_ids.extend(event["factory_list"])
+            wave_factory_ids = list(dict.fromkeys(wave_factory_ids))
+            # Magic ready at *any* factory in WAIT_FOR_RUS, including leftovers from a
+            # previous wave when num_factories > num_qubits (Hungarian used only one
+            # factory per qubit; others stayed WAIT_FOR_RUS and must be eligible next).
+            wait_for_rus_ids = [f.id for f in factory_pool.get_wait_for_rus_factories()]
+            logger.debug(
+                "rus_start at t=%.3f wave_factories=%s wait_for_rus=%s",
+                current_time,
+                wave_factory_ids,
+                wait_for_rus_ids,
+            )
             local_time = current_time
             qubits_to_teleport = []
             qubit_idx_to_node = {}
             if not ready_t:
+                if not wait_for_rus_ids:
+                    logger.debug(
+                        "rus_start at t=%.3f: no T gates ready and no WAIT_FOR_RUS factories",
+                        local_time,
+                    )
+                    continue
                 heapq.heappush(
                     events,
                     (
@@ -482,10 +502,16 @@ def t_cultivation_execution(
                         next(event_counter),
                         {
                             "type": "rus_start",
-                            "factory_list": factory_list,
+                            "factory_list": wait_for_rus_ids,
                             "aod_id": same_time_events["rus_start"][0]["aod_id"],
                         },
                     ),
+                )
+                continue
+            if not wait_for_rus_ids:
+                logger.warning(
+                    "rus_start at t=%.3f but no factories in WAIT_FOR_RUS; skipping batch",
+                    current_time,
                 )
                 continue
             for ready_node in ready_t:
@@ -498,7 +524,7 @@ def t_cultivation_execution(
                 qubits_to_teleport,
                 logic_qubit_locations,
                 factory_pool,
-                factory_list,
+                wait_for_rus_ids,
                 qubit_to_node=qubit_idx_to_node,
                 longest_path_to_sink=longest_path_to_sink,
                 critical_path_weight=RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT,
@@ -603,6 +629,9 @@ def t_cultivation_execution(
                 ready_t.remove(qubit_idx_to_node[qubit])
                 node = qubit_idx_to_node[qubit]
                 mark_node_completed(node)
+            if insert_s:
+                local_time += 1
+                logger.debug("Inserted corrective S gate at t=%.3f", local_time)
             heapq.heappush(
                 events,
                 (
@@ -615,15 +644,41 @@ def t_cultivation_execution(
                     },
                 ),
             )
-            if insert_s:
-                local_time += 1
-                logger.debug("Inserted corrective S gate at t=%.3f", local_time)
+
             schedule_ready_clifford_operations(local_time)
 
         for event in same_time_events["rus_completion"]:
             factory_pool.free_factories(event["factory_list"])
             logger.debug("Freed factories after RUS: %s", event["factory_list"])
             schedule_t_preparation(current_time)
+            # If there are still magic states waiting at some factories and there are
+            # more ready T/Tdg nodes, keep running RUS batches until no further
+            # teleportation is possible.
+            if ready_t:
+                wait_for_rus_ids = [
+                    f.id for f in factory_pool.get_wait_for_rus_factories()
+                ]
+                if wait_for_rus_ids:
+                    # Avoid enqueueing an identical rus_start event repeatedly; if one
+                    # is already pending, let the existing one handle it.
+                    pending_rus_start = any(
+                        e.get("type") == "rus_start" for _, _, e in events
+                    )
+                    if not pending_rus_start:
+                        heapq.heappush(
+                            events,
+                            (
+                                current_time,
+                                next(event_counter),
+                                {
+                                    "type": "rus_start",
+                                    "factory_list": wait_for_rus_ids,
+                                    # aod_id is not used in the normal rus_start path,
+                                    # but keep a valid value for the event schema.
+                                    "aod_id": 0,
+                                },
+                            ),
+                        )
 
         for event in same_time_events["op_complete"]:
             node = event["node"]

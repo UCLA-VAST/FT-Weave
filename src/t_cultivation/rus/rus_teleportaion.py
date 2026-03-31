@@ -19,6 +19,15 @@ def rus_teleportation(
     longest_path_to_sink: Optional[list[int]] = None,
     critical_path_weight: Optional[float] = None,
 ) -> tuple[list[tuple[int, int]], list[list[tuple[int, int, int, int, int, int]]]]:
+    """
+    Match qubits needing T injection to factories.
+
+    ``available_factory_ids`` must list **every** factory that currently holds a
+    ready magic state (in the scheduler, all ``WAIT_FOR_RUS`` factories), not only
+    the factories that finished stage-2 in the latest wave. Otherwise, when
+    ``num_factories > num_qubits``, unused factories from a previous assignment
+    are excluded and later T gates on the same qubit cannot use them.
+    """
 
     available_factories = {}
     for factory_id in available_factory_ids:

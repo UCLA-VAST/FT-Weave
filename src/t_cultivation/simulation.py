@@ -28,7 +28,7 @@ def simulate_stage1_preparation(
             sf.stage_1_success = rng.random() < STAGE_1_SUCCESS_RATE
             # print(f"Subfactory {sf.index} has stage 1 success: {sf.stage_1_success}")
 
-    input()
+    # input()
 
 
 def simulate_stage2_preparation(
