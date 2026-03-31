@@ -109,9 +109,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--angle", type=float, default=0.0029, help="RZ angle in radians"
     )
-    parser.add_argument(
-        "--epsilon", type=float, default=1e-10, help="GridSynth epsilon"
-    )
+    parser.add_argument("--epsilon", type=float, default=1e-4, help="GridSynth epsilon")
     parser.add_argument(
         "--output-target",
         type=str,
