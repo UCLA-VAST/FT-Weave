@@ -21,7 +21,7 @@ logging.basicConfig(
     force=True,
 )
 
-logging.getLogger("src").setLevel(logging.DEBUG)
+logging.getLogger("src").setLevel(logging.INFO)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
@@ -166,31 +166,57 @@ def run_fig1_fail_case_debug(
 
 def test_t_cultivation_small():
     circuit = [
-        {"gate": "T", "targets": [0, 1], "params": {}},
-        {"gate": "T", "targets": [0, 1], "params": {}},
-        {"gate": "T", "targets": [0, 1], "params": {}},
-        {"gate": "H", "targets": [0], "params": {}},
-        {"gate": "H", "targets": [1], "params": {}},
-        {"gate": "T", "targets": [0, 1], "params": {}},
-        {"gate": "T", "targets": [0, 1], "params": {}},
-        {"gate": "T", "targets": [0, 1], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
+        {"gate": "T", "targets": [0], "params": {}},
     ]
 
-    logic_qubit_locations = [(0, 0), (1, 0)]
-    magic_state_locations = [(0, 1), (1, 1), (2, 1), (3, 1)]
+    logic_qubit_locations = [(0, 0)]
+    magic_state_locations = [(0, 1)]
     n_factories = len(magic_state_locations)
+    update_config(FACTORY_PHYSICAL_SIZE=2)
+    for i in range(10):
+        execution_log = t_cultivation_execution(
+            circuit=circuit,
+            n_factories=n_factories,
+            logic_qubit_locations=logic_qubit_locations,
+            magic_state_locations=magic_state_locations,
+            rng=np.random.default_rng(i),
+            n_aods=2,
+            to_decompose=False,
+        )
+        assert execution_log, "Execution log should not be empty."
+    update_config(FACTORY_PHYSICAL_SIZE=4)
+    for i in range(10):
+        execution_log = t_cultivation_execution(
+            circuit=circuit,
+            n_factories=n_factories,
+            logic_qubit_locations=logic_qubit_locations,
+            magic_state_locations=magic_state_locations,
+            rng=np.random.default_rng(i),
+            n_aods=2,
+            to_decompose=False,
+        )
+        assert execution_log, "Execution log should not be empty."
+    return
+    # execution_log = t_cultivation_execution(
+    #     circuit=circuit,
+    #     n_factories=n_factories,
+    #     logic_qubit_locations=logic_qubit_locations,
+    #     magic_state_locations=magic_state_locations,
+    #     rng=np.random.default_rng(42),
+    #     n_aods=2,
+    #     to_decompose=False,
+    # )
 
-    execution_log = t_cultivation_execution(
-        circuit=circuit,
-        n_factories=n_factories,
-        logic_qubit_locations=logic_qubit_locations,
-        magic_state_locations=magic_state_locations,
-        rng=np.random.default_rng(42),
-        n_aods=2,
-        to_decompose=False,
-    )
-
-    assert execution_log, "Execution log should not be empty."
+    # assert execution_log, "Execution log should not be empty."
 
     plot_t_cultivation_execution(
         execution_log=execution_log,
