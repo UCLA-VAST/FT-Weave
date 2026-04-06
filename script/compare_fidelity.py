@@ -25,15 +25,19 @@ def normalize_star_df(star_df):
 
 
 def load_and_process_data():
-    """Load raw and star fidelity results."""
+    """Load raw, star, and optional t-cultivation fidelity results."""
     raw_df = pd.read_csv("output/evaluation/fidelity/raw_fidelity_results.csv")
     star_df = pd.read_csv("output/evaluation/fidelity/star_fidelity_results.csv")
+    t_cultivation_path = "output/evaluation/fidelity/t_cultivation_fidelity_results.csv"
+    t_cultivation_df = (
+        pd.read_csv(t_cultivation_path) if os.path.exists(t_cultivation_path) else None
+    )
 
-    return raw_df, star_df
+    return raw_df, star_df, t_cultivation_df
 
 
-def generate_comparison_csv(raw_df, star_df, output_path):
-    """Generate a comparison CSV with one line for raw and lines for each STAR setting."""
+def generate_comparison_csv(raw_df, star_df, output_path, t_cultivation_df=None):
+    """Generate a comparison CSV with raw, STAR, and optional T-cultivation rows."""
 
     star_df = normalize_star_df(star_df)
 
@@ -112,6 +116,58 @@ def generate_comparison_csv(raw_df, star_df, output_path):
                 "infidelity": 1 - group_df["fidelity"].mean(),
             }
         )
+
+    # Add T-cultivation results (aggregate by configuration + three settings)
+    if t_cultivation_df is not None and not t_cultivation_df.empty:
+        t_df = t_cultivation_df.copy()
+        t_df["n_qubit"] = t_df["qubit_layout"].apply(get_n_qubit)
+        t_df["fidelity_total"] = pd.to_numeric(
+            t_df.get("fidelity_total"), errors="coerce"
+        )
+        t_df = t_df.dropna(subset=["fidelity_total"])
+        if not t_df.empty:
+            t_grouped = t_df.groupby(
+                [
+                    "n_qubit",
+                    "qubit_layout",
+                    "placement",
+                    "n_aods",
+                    "code_distance",
+                    "fidelity_target",
+                    "factory_physical_size",
+                ]
+            )
+            for config, group_df in t_grouped:
+                (
+                    n_qubit,
+                    qubit_layout,
+                    placement,
+                    n_aods,
+                    code_distance,
+                    fidelity_target,
+                    factory_physical_size,
+                ) = config
+                mean_fidelity = group_df["fidelity_total"].mean()
+                comparison_data.append(
+                    {
+                        "method": "t_cultivation",
+                        "n_qubit": n_qubit,
+                        "qubit_layout": str(qubit_layout),
+                        "placement": placement,
+                        "n_aods": n_aods,
+                        "skip_rus": "N/A",
+                        "trivial_return": "N/A",
+                        "decompose_move": "N/A",
+                        "parallel_execution": "N/A",
+                        "code_distance": code_distance,
+                        "fidelity_target": fidelity_target,
+                        "factory_physical_size": factory_physical_size,
+                        "mean_fidelity": mean_fidelity,
+                        "std_fidelity": group_df["fidelity_total"].std(),
+                        "n_samples": len(group_df),
+                        "infidelity": 1 - mean_fidelity,
+                    }
+                )
 
     # Create DataFrame and save
     comparison_df = pd.DataFrame(comparison_data)
@@ -478,8 +534,8 @@ def plot_star_settings_comparison(star_df, output_dir):
         print(f"STAR ablation plot saved to: {output_path}")
 
 
-def plot_overall_fidelity_comparison(raw_df, star_df, output_dir):
-    """Create overall fidelity comparison with separate STAR lines by code distance."""
+def plot_overall_fidelity_comparison(raw_df, star_df, output_dir, t_cultivation_df=None):
+    """Create overall fidelity comparison with STAR and optional T-cultivation lines."""
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -540,9 +596,49 @@ def plot_overall_fidelity_comparison(raw_df, star_df, output_dir):
             alpha=0.15,
         )
 
+    # Plot optional T-cultivation lines by setting:
+    # (code_distance, factory_physical_size, fidelity_target)
+    if t_cultivation_df is not None and not t_cultivation_df.empty:
+        t_df = t_cultivation_df.copy()
+        t_df["n_qubit"] = t_df["qubit_layout"].apply(get_n_qubit)
+        t_df["fidelity_total"] = pd.to_numeric(
+            t_df.get("fidelity_total"), errors="coerce"
+        )
+        t_df = t_df.dropna(subset=["fidelity_total"])
+        if not t_df.empty:
+            setting_cols = ["code_distance", "factory_physical_size", "fidelity_target"]
+            for setting, setting_df in t_df.groupby(setting_cols):
+                code_distance, factory_physical_size, fidelity_target = setting
+                grouped = setting_df.groupby("n_qubit")["fidelity_total"]
+                means = grouped.mean().sort_index()
+                mins = grouped.min().reindex(means.index)
+                maxs = grouped.max().reindex(means.index)
+                label = (
+                    "T-cultivation "
+                    f"(d={int(code_distance)}, size={int(factory_physical_size)}, "
+                    f"target={fidelity_target:g})"
+                )
+                line = ax.plot(
+                    means.index,
+                    means.values,
+                    marker="^",
+                    linewidth=2,
+                    markersize=8,
+                    linestyle="--",
+                    label=label,
+                    alpha=0.9,
+                )[0]
+                ax.fill_between(
+                    means.index,
+                    mins.values,
+                    maxs.values,
+                    color=line.get_color(),
+                    alpha=0.12,
+                )
+
     ax.set_xlabel("Number of Qubits", fontsize=14)
     ax.set_ylabel("Mean Fidelity", fontsize=14)
-    ax.set_title("Overall Fidelity Comparison: Raw vs STAR", fontsize=16)
+    ax.set_title("Overall Fidelity Comparison: Raw vs STAR vs T-cultivation", fontsize=16)
     ax.tick_params(axis="both", labelsize=12)
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
@@ -565,13 +661,19 @@ def main():
 
     # Load data
     print("Loading data...")
-    raw_df, star_df = load_and_process_data()
-    print(f"Loaded {len(raw_df)} raw results and {len(star_df)} STAR results\n")
+    raw_df, star_df, t_cultivation_df = load_and_process_data()
+    t_count = 0 if t_cultivation_df is None else len(t_cultivation_df)
+    print(
+        f"Loaded {len(raw_df)} raw results, {len(star_df)} STAR results, "
+        f"and {t_count} T-cultivation results\n"
+    )
 
     # Generate comparison CSV
     print("Generating comparison CSV...")
     comparison_csv_path = os.path.join(output_dir, "fidelity_comparison.csv")
-    comparison_df = generate_comparison_csv(raw_df, star_df, comparison_csv_path)
+    comparison_df = generate_comparison_csv(
+        raw_df, star_df, comparison_csv_path, t_cultivation_df=t_cultivation_df
+    )
     print(f"Generated {len(comparison_df)} comparison rows\n")
 
     # Generate plots
@@ -586,7 +688,9 @@ def main():
     plot_star_settings_comparison(star_df, output_dir)
 
     print("\n4. Overall fidelity comparison...")
-    plot_overall_fidelity_comparison(raw_df, star_df, output_dir)
+    plot_overall_fidelity_comparison(
+        raw_df, star_df, output_dir, t_cultivation_df=t_cultivation_df
+    )
 
     print("\n" + "=" * 80)
     print("COMPLETED SUCCESSFULLY!")

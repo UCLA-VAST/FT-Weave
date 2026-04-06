@@ -50,7 +50,7 @@ def t_cultivation_execution(
     epsilon: float = 1e-4,
     num_subfactories: Optional[int] = None,
     synchronize_factory_execution: Optional[bool] = None,
-    print_profile: bool = True,
+    print_profile: bool = False,
 ) -> list[tuple]:
     """
     Execute a quantum circuit using T cultivation.
@@ -58,6 +58,10 @@ def t_cultivation_execution(
     Args:
         circuit: List of instruction dictionaries, where each instruction has the format:
                  {"gate": str, "targets": list[int] | list[tuple[int, int]], "params": dict}
+        n_aods: Number of AODs. If ``1``, factory, gates, moves, and RUS all use AOD 0
+            (fully serialized). If ``>= 2``, **only** the T-factory stages (SE) use AOD 0,
+            with start times taken after ``aod_earliest_available_time[0]``; Clifford gates
+            use AODs ``1 .. n_aods-1``; movement and RUS use ``pick_any_aod`` / ``execute_movement``.
         synchronize_factory_execution: If True, stage-1 restarts are delayed until all
             currently running stage-2 factories complete.
 
@@ -80,10 +84,8 @@ def t_cultivation_execution(
 
     if n_factories < 0:
         raise ValueError("n_factories must be non-negative")
-    if n_aods < 2:
-        raise ValueError(
-            "n_aods must be at least 2: AOD 0 for T factory, AOD > 0 for gates/RUS"
-        )
+    if n_aods < 1:
+        raise ValueError("n_aods must be at least 1")
 
     if not circuit:
         return []
@@ -159,10 +161,18 @@ def t_cultivation_execution(
     aod_earliest_available_time = [0.0] * n_aods
 
     def pick_gate_aod(earliest_start: float) -> tuple[int, float]:
-        """Pick earliest available gate/RUS AOD from ids > 0."""
-        gate_aod_id = min(
-            range(1, n_aods), key=lambda idx: aod_earliest_available_time[idx]
-        )
+        """Pick AOD for Clifford gates.
+
+        With ``n_aods == 1``, all operations share AOD 0 (fully serialized). With
+        ``n_aods >= 2``, gates use AOD indices ``1 .. n_aods-1`` (AOD 0 reserved for
+        the factory pipeline when parallel).
+        """
+        if n_aods == 1:
+            gate_aod_id = 0
+        else:
+            gate_aod_id = min(
+                range(1, n_aods), key=lambda idx: aod_earliest_available_time[idx]
+            )
         start_time = max(earliest_start, aod_earliest_available_time[gate_aod_id])
         return gate_aod_id, start_time
 
@@ -171,6 +181,14 @@ def t_cultivation_execution(
         aod_id = min(range(n_aods), key=lambda idx: aod_earliest_available_time[idx])
         start_time = max(earliest_start, aod_earliest_available_time[aod_id])
         return aod_id, start_time
+
+    def pick_factory_aod(earliest_start: float) -> tuple[int, float]:
+        """T-factory pipeline always uses AOD 0; start time follows its availability."""
+        factory_aod_id = 0
+        start_time = max(
+            earliest_start, aod_earliest_available_time[factory_aod_id]
+        )
+        return factory_aod_id, start_time
 
     def mark_node_completed(node: int):
         if node in completed_nodes:
@@ -207,8 +225,7 @@ def t_cultivation_execution(
         factory_ids = [f.id for f in idle_factories]
         if not factory_ids:
             return
-        aod_id = 0
-        start_time = max(at_time, aod_earliest_available_time[aod_id])
+        aod_id, start_time = pick_factory_aod(at_time)
         logger.debug(
             "Schedule T prep at t=%.3f on idle factories=%s aod_id=%d",
             start_time,
@@ -361,9 +378,11 @@ def t_cultivation_execution(
                 for index in range(len(expanded_circuit))
                 if index not in completed_nodes
             ]
+            for log in execution_log:
+                print(log)
             raise RuntimeError(
                 "No schedulable events remain. Circuit may contain a dependency cycle or unsatisfiable resource constraints. "
-                f"Remaining operation indices: {remaining_nodes}"
+                f"Remaining operation count: {len(remaining_nodes)}"
             )
 
         current_time, _, first_event = heapq.heappop(events)
@@ -414,25 +433,28 @@ def t_cultivation_execution(
                 schedule_t_preparation(local_time)
             if success_factory_ids:
                 stage_2_start_time = local_time + redistribution_delay
+                aod_s2 = same_time_events["stage_1_completion"][0]["aod_id"]
+                stage_2_end = stage_2_start_time + tcfg.SE_STAGE_2
+                aod_earliest_available_time[aod_s2] = max(
+                    aod_earliest_available_time[aod_s2], stage_2_end
+                )
                 write_execution_log(
                     execution_log,
                     start_time=stage_2_start_time,
                     factories=success_factory_ids,
                     operation="SE_stage_2",
-                    aod_assignment=same_time_events["stage_1_completion"][0]["aod_id"],
+                    aod_assignment=aod_s2,
                     targets=None,
                 )
                 heapq.heappush(
                     events,
                     (
-                        stage_2_start_time + tcfg.SE_STAGE_2,
+                        stage_2_end,
                         next(event_counter),
                         {
                             "type": "stage_2_completion",
                             "factory_list": success_factory_ids,
-                            "aod_id": same_time_events["stage_1_completion"][0][
-                                "aod_id"
-                            ],
+                            "aod_id": aod_s2,
                         },
                     ),
                 )
@@ -632,6 +654,11 @@ def t_cultivation_execution(
                 node = qubit_idx_to_node[qubit]
                 mark_node_completed(node)
             if insert_s:
+                aod_s = event["aod_id"]
+                aod_earliest_available_time[aod_s] = max(
+                    aod_earliest_available_time[aod_s],
+                    local_time + tcfg.SE_TIME,
+                )
                 local_time += 1
                 logger.debug("Inserted corrective S gate at t=%.3f", local_time)
             heapq.heappush(

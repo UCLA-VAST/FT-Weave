@@ -39,6 +39,11 @@ class LogicalErrorModel:
     # Code distance for surface code
     code_distance: int = 7
 
+    # Optional logical fidelity for T (T-cultivation); set via
+    # ``integrate_t_cultivation_fidelity_target``. When None, ``get_logical_fidelity("T")``
+    # falls back to ``get_rotation_fidelity(pi/4)``.
+    _t_gate_logical_fidelity: float | None = field(default=None, repr=False)
+
     # Logical error rates at current configuration
     logical_error_rates = {
         "I": 2e-7,  # Identity error
@@ -99,11 +104,38 @@ class LogicalErrorModel:
         self.physical_model = physical_model
         self._compute_logical_error_rates()
 
+    def integrate_t_cultivation_fidelity_target(
+        self,
+        fidelity_target: float,
+        *,
+        target_is_logical_error_rate: bool = True,
+    ) -> None:
+        """Set logical T-gate fidelity from T-cultivation ``TSetting.fidelity_target``.
+
+        By default, ``fidelity_target`` is treated as a logical **error rate** ``p``
+        (e.g. ``1e-8``); logical T fidelity is ``1 - p``. Set
+        ``target_is_logical_error_rate=False`` if ``fidelity_target`` is already a
+        fidelity in ``(0, 1]`` near 1.
+
+        Args:
+            fidelity_target: Value from evaluation / throughput settings.
+            target_is_logical_error_rate: If True (default), store ``1 - fidelity_target``.
+        """
+        ft = float(fidelity_target)
+        if target_is_logical_error_rate:
+            self._t_gate_logical_fidelity = 1.0 - ft
+        else:
+            self._t_gate_logical_fidelity = ft
+
+    def clear_t_gate_logical_fidelity(self) -> None:
+        """Unset integrated T fidelity; ``get_logical_fidelity('T')`` uses rotation model."""
+        self._t_gate_logical_fidelity = None
+
     def get_logical_error_rate(self, operation: str) -> float:
         """Get the logical error rate for a specific operation.
 
         Args:
-            operation: Operation name ('I', 'H', 'S', 'CZ')
+            operation: Operation name ('I', 'H', 'S', 'CZ', 'CNOT', 'T', ...)
 
         Returns:
             Logical error rate
@@ -111,6 +143,8 @@ class LogicalErrorModel:
         Raises:
             KeyError: If operation is not recognized
         """
+        if operation == "T":
+            return 1.0 - self.get_logical_fidelity("T")
         if operation not in self.logical_error_rates:
             raise KeyError(
                 f"Unknown operation: {operation}. Available: {list(self.logical_error_rates.keys())}"
@@ -121,11 +155,16 @@ class LogicalErrorModel:
         """Get the logical fidelity (1 - error_rate) for a specific operation.
 
         Args:
-            operation: Operation name
+            operation: Operation name. For ``'T'``, uses integrated T-cultivation
+                target if set, else ``get_rotation_fidelity(pi/4)``.
 
         Returns:
             Logical fidelity value (between 0 and 1)
         """
+        if operation == "T":
+            if self._t_gate_logical_fidelity is not None:
+                return self._t_gate_logical_fidelity
+            return self.get_rotation_fidelity(math.pi / 4)
         return 1.0 - self.get_logical_error_rate(operation)
 
     def get_rotation_fidelity(self, angle: float) -> float:

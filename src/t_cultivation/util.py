@@ -98,9 +98,13 @@ def expand_multi_target_layers(
     """Expand layer instructions into sequential individual instructions.
 
     Supported expansions:
-    - Rz layers are always expanded to single-target instructions and decomposed
-        via qiskit gridsynth, regardless of `to_decompose`.
-    - T/Tdg layers are always expanded to single-target instructions, regardless
+    - Rz layers are decomposed via qiskit gridsynth, regardless of `to_decompose`.
+        For **multiple qubits sharing the same Rz angle**, the gridsynth template is
+        identical on every qubit: non-injection gates (**H**, **S**, **Sdg**, **X**,
+        **Y**, **Z**, …) are emitted as **one multi-target instruction per template
+        step** (same layer on all those qubits). **T** / **Tdg** steps stay **one
+        instruction per qubit** so factory RUS injection remains per-T.
+    - Bare T/Tdg layers are always expanded to single-target instructions, regardless
         of `to_decompose`.
     - For non-Rz gates, expansion occurs only when `to_decompose=True`:
         - Single-qubit layer: [q0, q1, q2] -> one instruction per qubit.
@@ -141,15 +145,38 @@ def expand_multi_target_layers(
                     raise ValueError("Rz instruction requires numeric params['theta']")
                 rz_templates = gridsynth_rz_templates(float(theta), epsilon=epsilon)
 
-            for target in targets:
-                for template in rz_templates:
-                    gate_instr = {
-                        "gate": template["gate"],
-                        "targets": [target],
-                        "params": dict(template["params"]),
-                    }
-
-                    expanded_circuit.append(gate_instr)
+            # Template-major order: for each gridsynth step, either one parallel
+            # layer on all qubits (H/S/…) or individual T/Tdg per qubit (injection).
+            for template in rz_templates:
+                g = template["gate"]
+                params = dict(template.get("params", {}))
+                if g in ("T", "Tdg"):
+                    for target in targets:
+                        expanded_circuit.append(
+                            {
+                                "gate": g,
+                                "targets": [target],
+                                "params": params,
+                            }
+                        )
+                elif g == "Rz":
+                    # Rare gridsynth fallback; keep per-qubit Rz for scheduling parity.
+                    for target in targets:
+                        expanded_circuit.append(
+                            {
+                                "gate": g,
+                                "targets": [target],
+                                "params": params,
+                            }
+                        )
+                else:
+                    expanded_circuit.append(
+                        {
+                            "gate": g,
+                            "targets": list(targets),
+                            "params": params,
+                        }
+                    )
             continue
 
         if gate_name in {"T", "Tdg"}:
@@ -245,20 +272,17 @@ def compute_longest_path_to_sink(
     For each DAG node, length of the longest path starting at that node (inclusive)
     following successor edges toward sinks. T/Tdg nodes with more downstream work
     get larger values — used to prioritize RUS assignment toward the critical path.
+
+    Implemented with a single backward pass (no recursion). Edges from
+    ``build_circuit_dag`` always go from a smaller instruction index to a larger
+    one, so processing ``num_nodes-1 .. 0`` suffices.
     """
-    memo: dict[int, int] = {}
-
-    def longest_from(u: int) -> int:
-        if u in memo:
-            return memo[u]
+    dp = [1] * num_nodes
+    for u in range(num_nodes - 1, -1, -1):
         outs = successors.get(u, [])
-        if not outs:
-            memo[u] = 1
-        else:
-            memo[u] = 1 + max(longest_from(v) for v in outs)
-        return memo[u]
-
-    return [longest_from(i) for i in range(num_nodes)]
+        if outs:
+            dp[u] = 1 + max(dp[v] for v in outs)
+    return dp
 
 
 # ---------------------------------------------------------------------------

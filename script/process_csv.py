@@ -1713,6 +1713,112 @@ def _normalize_config_types(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _summarize_star_full_trotter_execution(star_df: pd.DataFrame) -> pd.DataFrame:
+    """Summarize STAR execution time per full trotter step."""
+    star_df = star_df.copy()
+    star_df = _coerce_result_cols_numeric(star_df)
+    star_df = _normalize_config_types(star_df)
+    full = aggregate_full_trotter(star_df)
+    summary = (
+        full.groupby(["n_qubits", "code_distance"], as_index=False)
+        .agg(
+            execution_time_mean=("total_time", "mean"),
+            execution_time_std=("total_time", "std"),
+            n_samples=("total_time", "count"),
+        )
+        .assign(method="star")
+    )
+    summary["execution_time_std"] = summary["execution_time_std"].fillna(0.0)
+    return summary
+
+
+def _summarize_t_cultivation_execution(t_df: pd.DataFrame) -> pd.DataFrame:
+    """Summarize T-cultivation execution time per trotter step."""
+    t_df = t_df.copy()
+    numeric_cols = [
+        "n_qubits",
+        "code_distance",
+        "factory_physical_size",
+        "fidelity_target",
+        "step_execution_time",
+    ]
+    for col in numeric_cols:
+        if col in t_df.columns:
+            t_df[col] = pd.to_numeric(t_df[col], errors="coerce")
+
+    summary = (
+        t_df.groupby(
+            ["n_qubits", "code_distance", "factory_physical_size", "fidelity_target"],
+            as_index=False,
+        )
+        .agg(
+            execution_time_mean=("step_execution_time", "mean"),
+            execution_time_std=("step_execution_time", "std"),
+            n_samples=("step_execution_time", "count"),
+        )
+        .assign(method="t_cultivation")
+    )
+    summary["execution_time_std"] = summary["execution_time_std"].fillna(0.0)
+    return summary
+
+
+def process_execution_time_comparison(
+    star_csv: str,
+    t_cultivation_csv: str,
+    output_dir: str,
+):
+    """
+    Generate execution-time comparison CSVs:
+    1) STAR vs T-cultivation
+    2) T-cultivation standalone (three settings)
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    if not os.path.exists(star_csv):
+        raise FileNotFoundError(f"Missing STAR csv: {star_csv}")
+    if not os.path.exists(t_cultivation_csv):
+        raise FileNotFoundError(f"Missing T-cultivation csv: {t_cultivation_csv}")
+
+    star_df = pd.read_csv(star_csv, engine="python", on_bad_lines="skip")
+    t_df = pd.read_csv(t_cultivation_csv, engine="python", on_bad_lines="skip")
+
+    star_summary = _summarize_star_full_trotter_execution(star_df)
+    t_summary = _summarize_t_cultivation_execution(t_df)
+
+    # T-cultivation-only summary (keep all settings explicitly)
+    t_only_path = os.path.join(output_dir, "t_cultivation_execution_time_summary.csv")
+    t_summary.sort_values(
+        ["code_distance", "factory_physical_size", "fidelity_target", "n_qubits"]
+    ).to_csv(t_only_path, index=False)
+
+    # STAR vs T-cultivation comparison
+    star_comp = star_summary.copy()
+    star_comp["factory_physical_size"] = pd.NA
+    star_comp["fidelity_target"] = pd.NA
+
+    comparison_cols = [
+        "method",
+        "n_qubits",
+        "code_distance",
+        "factory_physical_size",
+        "fidelity_target",
+        "execution_time_mean",
+        "execution_time_std",
+        "n_samples",
+    ]
+    comparison = pd.concat(
+        [star_comp[comparison_cols], t_summary[comparison_cols]], ignore_index=True
+    ).sort_values(
+        ["n_qubits", "code_distance", "method", "factory_physical_size", "fidelity_target"]
+    )
+    comparison_path = os.path.join(
+        output_dir, "star_vs_t_cultivation_execution_time_comparison.csv"
+    )
+    comparison.to_csv(comparison_path, index=False)
+
+    print(f"Saved T-cultivation summary CSV to: {t_only_path}")
+    print(f"Saved STAR vs T-cultivation comparison CSV to: {comparison_path}")
+
+
 # ------------------------------------------------------------
 # Main entry
 # ------------------------------------------------------------
@@ -1743,3 +1849,16 @@ if __name__ == "__main__":
     )
     full_trotter_output_dir = "output/analysis_plots/full_trotter"
     process_full_trotter_csv(full_trotter_csv, full_trotter_output_dir)
+
+    execution_time_output_dir = "output/analysis_plots/execution_time_comparison"
+    t_cultivation_execution_csv = (
+        "output/evaluation/fidelity/t_cultivation_circuit_execution_results.csv"
+    )
+    try:
+        process_execution_time_comparison(
+            star_csv=full_trotter_csv,
+            t_cultivation_csv=t_cultivation_execution_csv,
+            output_dir=execution_time_output_dir,
+        )
+    except Exception as e:
+        print(f"Skipping execution-time comparison due to error: {e}")
