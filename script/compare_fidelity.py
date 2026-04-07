@@ -24,6 +24,16 @@ def normalize_star_df(star_df):
     return star_df
 
 
+def format_t_cultivation_setting_label(
+    code_distance, fidelity_target, factory_physical_size
+):
+    return (
+        f"d={int(code_distance)}\n"
+        f"size={int(factory_physical_size)}\n"
+        f"LER={fidelity_target:g}"
+    )
+
+
 def load_and_process_data():
     """Load raw, star, and optional t-cultivation fidelity results."""
     raw_df = pd.read_csv("output/evaluation/fidelity/raw_fidelity_results.csv")
@@ -399,6 +409,232 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
     plt.close(fig)
 
 
+def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
+    """Plot stacked infidelity breakdown for T-cultivation results by setting."""
+
+    stacked_terms = [
+        "fidelity_t_injection",
+        "fidelity_t_teleportation",
+        "fidelity_clifford",
+    ]
+
+    t_df = t_cultivation_df.copy()
+    t_df["n_qubit"] = t_df["qubit_layout"].apply(get_n_qubit)
+    for column in ["fidelity_total", *stacked_terms]:
+        if column in t_df.columns:
+            t_df[column] = pd.to_numeric(t_df[column], errors="coerce")
+
+    t_df = t_df.dropna(subset=["n_qubit", *stacked_terms])
+    if t_df.empty:
+        print("Skipping T-cultivation stacked infidelity plot: no usable data")
+        return
+
+    grouped = (
+        t_df.groupby(
+            ["n_qubit", "code_distance", "fidelity_target", "factory_physical_size"],
+            as_index=False,
+        )[stacked_terms]
+        .mean()
+        .sort_values(
+            ["n_qubit", "code_distance", "factory_physical_size", "fidelity_target"]
+        )
+    )
+
+    settings = [
+        (code_distance, fidelity_target, factory_physical_size)
+        for code_distance, fidelity_target, factory_physical_size in sorted(
+            grouped[["code_distance", "fidelity_target", "factory_physical_size"]]
+            .drop_duplicates()
+            .itertuples(index=False, name=None)
+        )
+    ]
+
+    if len(settings) == 0:
+        print("Skipping T-cultivation stacked infidelity plot: no settings available")
+        return
+
+    n_qubits = sorted(grouped["n_qubit"].unique())
+
+    total_infidelity = (1 - grouped[stacked_terms]).sum(axis=1)
+    grouped = grouped.assign(total_infidelity=total_infidelity)
+    setting_totals = grouped.groupby(
+        ["code_distance", "fidelity_target", "factory_physical_size"]
+    )["total_infidelity"].max()
+    dominant_setting = setting_totals.idxmax()
+    dominant_group = grouped[
+        (grouped["code_distance"] == dominant_setting[0])
+        & (grouped["fidelity_target"] == dominant_setting[1])
+        & (grouped["factory_physical_size"] == dominant_setting[2])
+    ]
+    other_max = setting_totals.drop(dominant_setting).max()
+    dominant_min = dominant_group["total_infidelity"].min()
+
+    use_broken_axis = (
+        pd.notna(other_max) and pd.notna(dominant_min) and other_max < dominant_min
+    )
+
+    if use_broken_axis:
+        fig, (ax_top, ax_bottom) = plt.subplots(
+            2,
+            1,
+            sharex=True,
+            figsize=(12, 6),
+            gridspec_kw={"height_ratios": [1, 2], "hspace": 0.05},
+        )
+        ax_top.spines["bottom"].set_visible(False)
+        ax_bottom.spines["top"].set_visible(False)
+        ax_top.tick_params(labelbottom=False, bottom=False)
+        ax_bottom.tick_params(top=False)
+        bottom_ylim_max = max(other_max * 1.4, other_max + 1e-4, 1e-4)
+        top_ylim_min = max(dominant_min * 0.8, bottom_ylim_max * 1.5)
+        ax_bottom.set_ylim(0, bottom_ylim_max)
+        ax_top.set_ylim(top_ylim_min, grouped["total_infidelity"].max() * 1.08)
+    else:
+        fig, ax_bottom = plt.subplots(figsize=(12, 6))
+        ax_top = None
+    x_group = np.arange(len(n_qubits))
+    group_width = 0.8
+    bar_width = group_width / len(settings)
+
+    xtick_positions = []
+    xtick_labels = []
+
+    cmap = plt.get_cmap("tab10")
+    colors = [cmap(i) for i in range(len(stacked_terms))]
+
+    def draw_bars(ax):
+        for setting_idx, (
+            code_distance,
+            fidelity_target,
+            factory_physical_size,
+        ) in enumerate(settings):
+            offset = (setting_idx - (len(settings) - 1) / 2) * bar_width
+            x = x_group + offset
+
+            subset = (
+                grouped[
+                    (grouped["code_distance"] == code_distance)
+                    & (grouped["fidelity_target"] == fidelity_target)
+                    & (grouped["factory_physical_size"] == factory_physical_size)
+                ]
+                .set_index("n_qubit")
+                .reindex(n_qubits)
+            )
+
+            bottom = np.zeros(len(n_qubits))
+            for term, color in zip(stacked_terms, colors):
+                values = (1 - subset[term]).fillna(0).values
+                label = (
+                    term.replace("fidelity_", "")
+                    .replace("teleportation", "teleport")
+                    .upper()
+                )
+                ax.bar(
+                    x,
+                    values,
+                    bar_width * 0.9,
+                    label=(
+                        label if setting_idx == 0 and ax is ax_bottom else "_nolegend_"
+                    ),
+                    bottom=bottom,
+                    color=color,
+                    alpha=0.85,
+                )
+                bottom += values
+
+            xtick_positions.extend(x.tolist())
+            xtick_labels.extend(
+                [
+                    format_t_cultivation_setting_label(
+                        code_distance, fidelity_target, factory_physical_size
+                    )
+                ]
+                * len(x)
+            )
+
+    draw_bars(ax_bottom)
+    if ax_top is not None:
+        draw_bars(ax_top)
+
+    if ax_top is not None:
+        ax_top.grid(True, alpha=0.3, axis="y")
+        ax_top.tick_params(axis="y", labelsize=12)
+    ax_bottom.set_ylabel("Total Infidelity", fontsize=14, labelpad=22)
+    ax_bottom.tick_params(axis="y", labelsize=12)
+    ax_bottom.grid(True, alpha=0.3, axis="y")
+    ax_bottom.set_xticks(xtick_positions)
+    ax_bottom.set_xticklabels(xtick_labels, fontsize=8)
+    ax_bottom.set_xlabel("T-cultivation Setting", fontsize=12, labelpad=2)
+    ax_bottom.tick_params(axis="x", pad=2)
+
+    if ax_top is not None:
+        ax_top.set_title("T-cultivation Infidelity Breakdown by Setting", fontsize=16)
+        handles, labels = ax_bottom.get_legend_handles_labels()
+        filtered = [
+            (handle, label)
+            for handle, label in zip(handles, labels)
+            if not label.startswith("_")
+        ]
+        if filtered:
+            handles, labels = zip(*filtered)
+            ax_top.legend(
+                handles,
+                labels,
+                loc="upper left",
+                bbox_to_anchor=(0.01, 0.99),
+                fontsize=10,
+                frameon=True,
+                framealpha=0.95,
+            )
+
+        ax_top.text(
+            0,
+            0,
+            "//",
+            transform=ax_top.transAxes,
+            fontsize=16,
+            va="center",
+            ha="left",
+        )
+        ax_bottom.text(
+            0,
+            1,
+            "//",
+            transform=ax_bottom.transAxes,
+            fontsize=16,
+            va="center",
+            ha="left",
+        )
+    else:
+        ax_bottom.set_title(
+            "T-cultivation Infidelity Breakdown by Setting", fontsize=16
+        )
+        handles, labels = ax_bottom.get_legend_handles_labels()
+        filtered = [
+            (handle, label)
+            for handle, label in zip(handles, labels)
+            if not label.startswith("_")
+        ]
+        if filtered:
+            handles, labels = zip(*filtered)
+            ax_bottom.legend(handles, labels, loc="upper left", fontsize=10)
+
+    secax = ax_bottom.secondary_xaxis("bottom", functions=(lambda x: x, lambda x: x))
+    secax.set_xticks(x_group)
+    secax.set_xticklabels([str(n) for n in n_qubits], fontsize=11)
+    secax.set_xlabel("Number of Qubits", fontsize=12, labelpad=10)
+    secax.spines["bottom"].set_position(("outward", 42))
+
+    if ax_top is not None:
+        fig.subplots_adjust(hspace=0.05, top=0.92, bottom=0.20, left=0.12, right=0.98)
+    else:
+        fig.tight_layout()
+    output_path = os.path.join(output_dir, "t_cultivation_infidelity_stacked_best.pdf")
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"T-cultivation infidelity stacked plot saved to: {output_path}")
+    plt.close(fig)
+
+
 def plot_star_settings_comparison(star_df, output_dir):
     """Plot merged STAR ablation comparison: rows=placements × cols=AOD (1,2,5)."""
 
@@ -534,7 +770,9 @@ def plot_star_settings_comparison(star_df, output_dir):
         print(f"STAR ablation plot saved to: {output_path}")
 
 
-def plot_overall_fidelity_comparison(raw_df, star_df, output_dir, t_cultivation_df=None):
+def plot_overall_fidelity_comparison(
+    raw_df, star_df, output_dir, t_cultivation_df=None
+):
     """Create overall fidelity comparison with STAR and optional T-cultivation lines."""
 
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -638,7 +876,9 @@ def plot_overall_fidelity_comparison(raw_df, star_df, output_dir, t_cultivation_
 
     ax.set_xlabel("Number of Qubits", fontsize=14)
     ax.set_ylabel("Mean Fidelity", fontsize=14)
-    ax.set_title("Overall Fidelity Comparison: Raw vs STAR vs T-cultivation", fontsize=16)
+    ax.set_title(
+        "Overall Fidelity Comparison: Raw vs STAR vs T-cultivation", fontsize=16
+    )
     ax.tick_params(axis="both", labelsize=12)
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
@@ -684,10 +924,16 @@ def main():
     print("\n2. STAR infidelity breakdown...")
     plot_star_infidelity_breakdown(star_df, output_dir)
 
-    print("\n3. STAR settings comparison (1 AOD vs 5 AOD)...")
+    print("\n3. T-cultivation infidelity breakdown...")
+    if t_cultivation_df is not None:
+        plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir)
+    else:
+        print("Skipping T-cultivation stacked infidelity plot: no data loaded")
+
+    print("\n4. STAR settings comparison (1 AOD vs 5 AOD)...")
     plot_star_settings_comparison(star_df, output_dir)
 
-    print("\n4. Overall fidelity comparison...")
+    print("\n5. Overall fidelity comparison...")
     plot_overall_fidelity_comparison(
         raw_df, star_df, output_dir, t_cultivation_df=t_cultivation_df
     )

@@ -202,7 +202,14 @@ def run_evaluation_t_cultivation(
                                     magic_state_locations=magic_state_locations,
                                 )
                                 if analyze_result and profiling_file is not None:
+                                    # add "code_distance", "fidelity_target""factory_physical_size" to profiling_results_per_case
                                     for row in profiling_results_per_case:
+                                        row["trial"] = trial
+                                        row["code_distance"] = setting.distance
+                                        row["fidelity_target"] = setting.fidelity_target
+                                        row["factory_physical_size"] = (
+                                            setting.factory_physical_size
+                                        )
                                         if profiling_writer is None:
                                             profiling_writer = csv.DictWriter(
                                                 profiling_file,

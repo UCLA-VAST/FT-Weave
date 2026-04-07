@@ -1,4 +1,5 @@
 # analyze_results.py
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -858,6 +859,11 @@ def aggregate_full_trotter(df: pd.DataFrame) -> pd.DataFrame:
         "decompose_move",
         "parallel_execution",
     ]
+    # T-cultivation profiling rows include trial + factory/fidelity settings; must stay in
+    # the groupby so full-trotter aggregation does not merge distinct settings.
+    for optional in ("trial", "fidelity_target", "factory_physical_size"):
+        if optional in df.columns and optional not in config_cols:
+            config_cols.append(optional)
 
     work = df.copy().reset_index(drop=False).rename(columns={"index": "_row_order"})
 
@@ -1733,28 +1739,23 @@ def _summarize_star_full_trotter_execution(star_df: pd.DataFrame) -> pd.DataFram
 
 
 def _summarize_t_cultivation_execution(t_df: pd.DataFrame) -> pd.DataFrame:
-    """Summarize T-cultivation execution time per trotter step."""
+    """Summarize T-cultivation execution time using available timing columns."""
     t_df = t_df.copy()
-    numeric_cols = [
-        "n_qubits",
-        "code_distance",
-        "factory_physical_size",
-        "fidelity_target",
-        "step_execution_time",
-    ]
-    for col in numeric_cols:
-        if col in t_df.columns:
-            t_df[col] = pd.to_numeric(t_df[col], errors="coerce")
+    t_df = _coerce_result_cols_numeric(t_df)
+    t_df = _normalize_config_types(t_df)
+
+    time_col = "step_execution_time" if "step_execution_time" in t_df.columns else "total_time"
+    group_cols = ["n_qubits", "code_distance"]
+    for optional_col in ["n_aods", "factory_physical_size", "fidelity_target"]:
+        if optional_col in t_df.columns:
+            group_cols.append(optional_col)
 
     summary = (
-        t_df.groupby(
-            ["n_qubits", "code_distance", "factory_physical_size", "fidelity_target"],
-            as_index=False,
-        )
+        t_df.groupby(group_cols, as_index=False)
         .agg(
-            execution_time_mean=("step_execution_time", "mean"),
-            execution_time_std=("step_execution_time", "std"),
-            n_samples=("step_execution_time", "count"),
+            execution_time_mean=(time_col, "mean"),
+            execution_time_std=(time_col, "std"),
+            n_samples=(time_col, "count"),
         )
         .assign(method="t_cultivation")
     )
@@ -1762,61 +1763,431 @@ def _summarize_t_cultivation_execution(t_df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
-def process_execution_time_comparison(
-    star_csv: str,
-    t_cultivation_csv: str,
+def _build_layer_frames(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Build dataframes for full trotter, ZZ layers, and X layer."""
+    work = df.copy()
+    default_cols = {
+        "consider_skip_rus": 0,
+        "tmr_assignment_method": "unknown",
+        "trivial_return": False,
+        "decompose_move": False,
+        "parallel_execution": False,
+    }
+    for col, default_val in default_cols.items():
+        if col not in work.columns:
+            work[col] = default_val
+
+    frames = {"full_trotter": aggregate_full_trotter(work)}
+
+    round_values = pd.to_numeric(work["round"], errors="coerce")
+    zz_df = work[round_values != INDIVIDUAL_ROUND].copy()
+    x_df = work[round_values == INDIVIDUAL_ROUND].copy()
+    if not zz_df.empty:
+        frames["zz_layers"] = zz_df
+    if not x_df.empty:
+        frames["x_layer"] = x_df
+    return frames
+
+
+def _select_best_star_setting_per_aod(layer_df: pd.DataFrame) -> pd.DataFrame:
+    """Keep STAR rows from the best compilation setting for each AOD."""
+    setting_cols = [
+        "trivial_return",
+        "tmr_assignment_method",
+        "consider_skip_rus",
+        "decompose_move",
+        "parallel_execution",
+    ]
+    required_cols = setting_cols + ["placement", "n_aods", "total_time"]
+    missing_cols = [c for c in required_cols if c not in layer_df.columns]
+    if missing_cols:
+        raise ValueError(
+            f"STAR dataframe missing required columns for best-setting search: {missing_cols}"
+        )
+
+    work = layer_df[layer_df["placement"] == "col_based"].copy()
+    if work.empty:
+        return work
+
+    mean_by_setting = (
+        work.groupby(["n_aods"] + setting_cols, as_index=False)["total_time"].mean()
+    )
+    best = (
+        mean_by_setting.sort_values(["n_aods", "total_time"], ascending=[True, True])
+        .groupby("n_aods", as_index=False)
+        .first()
+    )
+    best = best.rename(columns={"total_time": "best_setting_mean_total_time"})
+    merged = work.merge(best[["n_aods"] + setting_cols], on=["n_aods"] + setting_cols)
+    return merged
+
+
+def _summarize_execution_by_qubits(df: pd.DataFrame, method: str) -> pd.DataFrame:
+    group_cols = ["n_qubits", "n_aods"]
+    if "code_distance" in df.columns:
+        group_cols.insert(1, "code_distance")
+
+    summary = (
+        df.groupby(group_cols, as_index=False)
+        .agg(
+            execution_time_mean=("total_time", "mean"),
+            execution_time_std=("total_time", "std"),
+            n_samples=("total_time", "count"),
+        )
+        .assign(method=method)
+    )
+    summary["execution_time_std"] = summary["execution_time_std"].fillna(0.0)
+    return summary
+
+
+def _format_t_cultivation_setting_label(
+    code_distance: float | int,
+    fidelity_target: float,
+    factory_physical_size: float | int,
+) -> str:
+    """Same text as ``format_t_cultivation_setting_label`` in ``compare_fidelity``."""
+    return (
+        f"d={int(code_distance)}\n"
+        f"size={int(factory_physical_size)}\n"
+        f"LER={fidelity_target:g}"
+    )
+
+
+def _format_t_cultivation_setting_inline(
+    code_distance: float | int,
+    fidelity_target: float,
+    factory_physical_size: float | int,
+) -> str:
+    """Single-line setting for subplot titles (below layer name)."""
+    return (
+        f"d={int(code_distance)}, size={int(factory_physical_size)}, "
+        f"LER={fidelity_target:g}"
+    )
+
+
+def _t_cultivation_settings_sorted(
+    t_df: pd.DataFrame,
+) -> list[tuple]:
+    """Unique (code_distance, fidelity_target, factory_physical_size), same order as fidelity bars."""
+    cols = ["code_distance", "fidelity_target", "factory_physical_size"]
+    if not all(c in t_df.columns for c in cols):
+        return []
+    unique = t_df[cols].drop_duplicates()
+    return sorted(unique.itertuples(index=False, name=None))
+
+
+def _dedupe_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep first occurrence when CSV has duplicated column names (e.g. two ``code_distance``)."""
+    if df.columns.duplicated().any():
+        return df.loc[:, ~df.columns.duplicated()].copy()
+    return df
+
+
+# T-cultivation runtime lines vs STAR (matches fidelity evaluation triples).
+# Each tuple is (code_distance, fidelity_target, factory_physical_size).
+T_CULTIVATION_RUNTIME_LINE_SETTINGS: list[tuple[int, float, int]] = [
+    (7, 1e-8, 2),
+    (13, 1e-8, 4),
+    (13, 1e-10, 4),
+]
+
+
+def _plot_star_vs_t_cultivation_best(
+    star_layers: dict[str, pd.DataFrame],
+    t_layers: dict[str, pd.DataFrame],
+    output_dir: str,
+    target_aods: list[int] | None = None,
+):
+    """Compare STAR best-setting runtime against T-cultivation in one 2x3 figure."""
+    if target_aods is None:
+        target_aods = [2, 5]
+
+    os.makedirs(output_dir, exist_ok=True)
+    pretty_name = {
+        "full_trotter": "Full trotter",
+        "zz_layers": "ZZ layers",
+        "x_layer": "X layer",
+    }
+    layer_order = [k for k in ["full_trotter", "zz_layers", "x_layer"] if k in star_layers and k in t_layers]
+    if len(layer_order) == 0:
+        return
+
+    star_dist_all: set[int] = set()
+    t_dist_all: set[int] = set()
+    for layer_name in layer_order:
+        star_best = _select_best_star_setting_per_aod(star_layers[layer_name])
+        if not star_best.empty and "code_distance" in star_best.columns:
+            star_dist_all.update(
+                pd.to_numeric(star_best["code_distance"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .tolist()
+            )
+        t_work = t_layers[layer_name]
+        if not t_work.empty and "code_distance" in t_work.columns:
+            t_dist_all.update(
+                pd.to_numeric(t_work["code_distance"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .tolist()
+            )
+
+    shared_distances = sorted(star_dist_all.intersection(t_dist_all))
+    if len(shared_distances) == 0:
+        return
+
+    for distance in shared_distances:
+        fig, axes = plt.subplots(len(target_aods), len(layer_order), figsize=(16, 8.5))
+        if len(target_aods) == 1:
+            axes = [axes]
+        if len(layer_order) == 1:
+            axes = [[ax] for ax in axes]
+
+        for row_idx, aod in enumerate(target_aods):
+            for col_idx, layer_name in enumerate(layer_order):
+                ax = axes[row_idx][col_idx]
+                star_best = _select_best_star_setting_per_aod(star_layers[layer_name])
+                t_work = t_layers[layer_name]
+                star_d = star_best[star_best["code_distance"] == distance].copy()
+
+                star_summary = _summarize_execution_by_qubits(star_d, method="STAR (best)")
+                star_a = star_summary[star_summary["n_aods"] == aod].sort_values("n_qubits")
+                if not star_a.empty:
+                    ax.errorbar(
+                        star_a["n_qubits"],
+                        star_a["execution_time_mean"],
+                        yerr=star_a["execution_time_std"],
+                        marker="o",
+                        capsize=3,
+                        linewidth=2.0,
+                        color="black",
+                        label="STAR (best, col-based)",
+                    )
+
+                plotted_t = 0
+                if all(
+                    c in t_work.columns
+                    for c in ("code_distance", "fidelity_target", "factory_physical_size")
+                ):
+                    t_candidates = t_work[t_work["n_aods"] == aod].copy()
+                    for cd, ft, fps in T_CULTIVATION_RUNTIME_LINE_SETTINGS:
+                        cd_match = pd.to_numeric(
+                            t_candidates["code_distance"], errors="coerce"
+                        ).astype(int) == int(cd)
+                        ft_match = np.isclose(
+                            pd.to_numeric(t_candidates["fidelity_target"], errors="coerce"),
+                            float(ft),
+                            rtol=0.0,
+                            atol=0.0,
+                        )
+                        mask = (
+                            cd_match
+                            & ft_match
+                            & (t_candidates["factory_physical_size"] == fps)
+                        )
+                        t_setting = t_candidates[mask]
+                        t_summary = _summarize_execution_by_qubits(
+                            t_setting, method="T cultivation"
+                        ).sort_values("n_qubits")
+                        if t_summary.empty:
+                            continue
+                        plotted_t += 1
+                        label = _format_t_cultivation_setting_label(cd, ft, fps)
+                        ax.errorbar(
+                            t_summary["n_qubits"],
+                            t_summary["execution_time_mean"],
+                            yerr=t_summary["execution_time_std"],
+                            marker="s",
+                            capsize=3,
+                            linewidth=1.8,
+                            label=label,
+                        )
+                else:
+                    # Fallback: use up to 3 T-cultivation AOD settings nearest the target AOD.
+                    t_d_fb = t_work[t_work["code_distance"] == distance].copy()
+                    available_aods = sorted(t_d_fb["n_aods"].dropna().astype(int).unique())
+                    aods_for_lines = sorted(
+                        available_aods, key=lambda x: (abs(x - aod), x)
+                    )[:3]
+                    for t_aod in aods_for_lines:
+                        t_a = t_d_fb[t_d_fb["n_aods"] == t_aod].copy()
+                        t_summary = _summarize_execution_by_qubits(
+                            t_a, method="T cultivation"
+                        ).sort_values("n_qubits")
+                        if t_summary.empty:
+                            continue
+                        plotted_t += 1
+                        ax.errorbar(
+                            t_summary["n_qubits"],
+                            t_summary["execution_time_mean"],
+                            yerr=t_summary["execution_time_std"],
+                            marker="s",
+                            capsize=3,
+                            linewidth=1.8,
+                            label=f"T cultivation (setting AOD={t_aod})",
+                        )
+
+                if row_idx == 0:
+                    ax.set_title(pretty_name[layer_name], fontsize=10, pad=10)
+                ax.set_xlabel("n_qubits")
+                if col_idx == 0:
+                    ax.set_ylabel(f"AOD {aod}\nexecution time", fontsize=9)
+                else:
+                    ax.set_ylabel("execution time")
+                ax.grid(True, alpha=0.3)
+                if not star_a.empty or plotted_t > 0:
+                    ax.legend(fontsize=7)
+                else:
+                    ax.text(
+                        0.5,
+                        0.5,
+                        "No data",
+                        transform=ax.transAxes,
+                        ha="center",
+                        va="center",
+                        fontsize=10,
+                    )
+
+        fig.suptitle(
+            f"STAR vs T cultivation (STAR code distance = {distance}) · "
+            "Columns: Full trotter | ZZ layers | X layer · "
+            "Rows: AOD 2 (top), AOD 5 (bottom)",
+            fontsize=10,
+            y=0.99,
+        )
+        fig.tight_layout(rect=(0.05, 0.05, 0.97, 0.90))
+        fig.subplots_adjust(top=0.90, hspace=0.42, wspace=0.28)
+        fig.savefig(
+            os.path.join(
+                output_dir,
+                f"runtime_star_vs_t_cultivation_all_in_one_aod_"
+                f"{'-'.join(str(a) for a in target_aods)}_distance_{distance}.pdf",
+            )
+        )
+        plt.close(fig)
+
+
+def _mask_t_cultivation_triple(
+    df: pd.DataFrame, cd: int, ft: float, fps: int
+) -> pd.Series:
+    """Boolean mask for one (code_distance, fidelity_target, factory_physical_size) setting."""
+    cd_m = pd.to_numeric(df["code_distance"], errors="coerce").astype(int) == int(cd)
+    ft_series = pd.to_numeric(df["fidelity_target"], errors="coerce")
+    ft_m = np.isclose(ft_series, float(ft), rtol=1e-12, atol=1e-20)
+    return cd_m & ft_m & (df["factory_physical_size"] == fps)
+
+
+def _plot_t_cultivation_multi_aod(
+    t_layers: dict[str, pd.DataFrame],
     output_dir: str,
 ):
-    """
-    Generate execution-time comparison CSVs:
-    1) STAR vs T-cultivation
-    2) T-cultivation standalone (three settings)
-    """
+    """T-cultivation AOD comparison: one row per setting (same triples as STAR plot), three columns for layers."""
     os.makedirs(output_dir, exist_ok=True)
-    if not os.path.exists(star_csv):
-        raise FileNotFoundError(f"Missing STAR csv: {star_csv}")
-    if not os.path.exists(t_cultivation_csv):
-        raise FileNotFoundError(f"Missing T-cultivation csv: {t_cultivation_csv}")
+    pretty_name = {
+        "full_trotter": "Full trotter",
+        "zz_layers": "ZZ layers",
+        "x_layer": "X layer",
+    }
+    layer_order = [k for k in ["full_trotter", "zz_layers", "x_layer"] if k in t_layers]
+    if len(layer_order) == 0:
+        return
 
-    star_df = pd.read_csv(star_csv, engine="python", on_bad_lines="skip")
-    t_df = pd.read_csv(t_cultivation_csv, engine="python", on_bad_lines="skip")
+    required = ("code_distance", "fidelity_target", "factory_physical_size")
+    if not all(c in t_layers[layer_order[0]].columns for c in required):
+        print("Skipping T-cultivation multi-AOD plot: missing setting columns.")
+        return
 
-    star_summary = _summarize_star_full_trotter_execution(star_df)
-    t_summary = _summarize_t_cultivation_execution(t_df)
-
-    # T-cultivation-only summary (keep all settings explicitly)
-    t_only_path = os.path.join(output_dir, "t_cultivation_execution_time_summary.csv")
-    t_summary.sort_values(
-        ["code_distance", "factory_physical_size", "fidelity_target", "n_qubits"]
-    ).to_csv(t_only_path, index=False)
-
-    # STAR vs T-cultivation comparison
-    star_comp = star_summary.copy()
-    star_comp["factory_physical_size"] = pd.NA
-    star_comp["fidelity_target"] = pd.NA
-
-    comparison_cols = [
-        "method",
-        "n_qubits",
-        "code_distance",
-        "factory_physical_size",
-        "fidelity_target",
-        "execution_time_mean",
-        "execution_time_std",
-        "n_samples",
-    ]
-    comparison = pd.concat(
-        [star_comp[comparison_cols], t_summary[comparison_cols]], ignore_index=True
-    ).sort_values(
-        ["n_qubits", "code_distance", "method", "factory_physical_size", "fidelity_target"]
+    n_settings = len(T_CULTIVATION_RUNTIME_LINE_SETTINGS)
+    fig, axes = plt.subplots(
+        n_settings,
+        len(layer_order),
+        figsize=(5.2 * len(layer_order), 3.9 * n_settings),
+        squeeze=False,
     )
-    comparison_path = os.path.join(
-        output_dir, "star_vs_t_cultivation_execution_time_comparison.csv"
-    )
-    comparison.to_csv(comparison_path, index=False)
 
-    print(f"Saved T-cultivation summary CSV to: {t_only_path}")
-    print(f"Saved STAR vs T-cultivation comparison CSV to: {comparison_path}")
+    plotted_any = False
+    for row_idx, (cd, ft, fps) in enumerate(T_CULTIVATION_RUNTIME_LINE_SETTINGS):
+        for col_idx, layer_name in enumerate(layer_order):
+            ax = axes[row_idx][col_idx]
+            layer_df = t_layers[layer_name]
+            mask = _mask_t_cultivation_triple(layer_df, cd, ft, fps)
+            sub_df = layer_df.loc[mask].copy()
+            title_setting = _format_t_cultivation_setting_inline(cd, ft, fps)
+            panel_title = f"{pretty_name[layer_name]}\n{title_setting}"
+
+            if sub_df.empty:
+                ax.set_title(panel_title, fontsize=9, pad=16)
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No data",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=9,
+                )
+                ax.set_xlabel("n_qubits")
+                ax.set_ylabel("execution time")
+                ax.grid(True, alpha=0.3)
+                continue
+
+            summary = _summarize_execution_by_qubits(sub_df, method="T cultivation")
+            aod_values = sorted(summary["n_aods"].dropna().astype(int).unique())
+            for aod in aod_values:
+                sub = summary[summary["n_aods"] == aod].sort_values("n_qubits")
+                if sub.empty:
+                    continue
+                plotted_any = True
+                ax.errorbar(
+                    sub["n_qubits"],
+                    sub["execution_time_mean"],
+                    yerr=sub["execution_time_std"],
+                    marker="o",
+                    capsize=3,
+                    linewidth=1.8,
+                    label=f"AOD={aod}",
+                )
+
+            ax.set_title(panel_title, fontsize=9, pad=16)
+            ax.set_xlabel("n_qubits")
+            ax.set_ylabel("execution time")
+            ax.grid(True, alpha=0.3)
+            if len(aod_values) > 0:
+                ax.legend(fontsize=7)
+
+    if not plotted_any:
+        plt.close(fig)
+        return
+
+    fig.suptitle("T-cultivation runtime vs AOD", fontsize=11, y=0.99)
+    fig.tight_layout(rect=(0.06, 0.06, 0.96, 0.93))
+    fig.subplots_adjust(top=0.93, hspace=0.40, wspace=0.28, left=0.09)
+    fig.savefig(os.path.join(output_dir, "runtime_t_cultivation_multi_aod.pdf"))
+    plt.close(fig)
+
+
+def process_t_cultivation_runtime_comparison(
+    star_csv_file: str,
+    t_cultivation_csv_file: str,
+    output_dir: str,
+):
+    """Generate runtime comparison between STAR and T-cultivation profiling results."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    star_df = pd.read_csv(star_csv_file, engine="python", on_bad_lines="skip")
+    t_df = pd.read_csv(t_cultivation_csv_file, engine="python", on_bad_lines="skip")
+    t_df = _dedupe_duplicate_columns(t_df)
+    star_df = _coerce_result_cols_numeric(star_df)
+    star_df = _normalize_config_types(star_df)
+    t_df = _coerce_result_cols_numeric(t_df)
+    t_df = _normalize_config_types(t_df)
+
+    star_layers = _build_layer_frames(star_df)
+    t_layers = _build_layer_frames(t_df)
+
+    _plot_star_vs_t_cultivation_best(star_layers, t_layers, output_dir, target_aods=[2, 5])
+    _plot_t_cultivation_multi_aod(t_layers, output_dir)
+    print("Saved T-cultivation runtime comparison plots to", output_dir)
 
 
 # ------------------------------------------------------------
@@ -1850,15 +2221,13 @@ if __name__ == "__main__":
     full_trotter_output_dir = "output/analysis_plots/full_trotter"
     process_full_trotter_csv(full_trotter_csv, full_trotter_output_dir)
 
-    execution_time_output_dir = "output/analysis_plots/execution_time_comparison"
-    t_cultivation_execution_csv = (
-        "output/evaluation/fidelity/t_cultivation_circuit_execution_results.csv"
+    t_cultivation_profiling_csv = (
+        "output/evaluation/fidelity/t_cultivation_fidelity_profiling_results.csv"
     )
-    try:
-        process_execution_time_comparison(
-            star_csv=full_trotter_csv,
-            t_cultivation_csv=t_cultivation_execution_csv,
-            output_dir=execution_time_output_dir,
+    runtime_compare_output_dir = "output/analysis_plots/t_cultivation_runtime"
+    if os.path.exists(t_cultivation_profiling_csv):
+        process_t_cultivation_runtime_comparison(
+            full_trotter_csv,
+            t_cultivation_profiling_csv,
+            runtime_compare_output_dir,
         )
-    except Exception as e:
-        print(f"Skipping execution-time comparison due to error: {e}")
