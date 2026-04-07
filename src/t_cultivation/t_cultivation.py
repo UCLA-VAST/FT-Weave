@@ -101,7 +101,7 @@ def t_cultivation_execution(
     )
 
     rz_t_by_angle = t_gate_count_per_unique_rz_angle(circuit, epsilon)
-    total_t_expanded = count_t_gates_in_instructions(expanded_circuit)
+    total_t_tdg_gates = count_t_gates_in_instructions(expanded_circuit)
     if rz_t_by_angle:
         logger.info(
             "T+Tdg count per distinct Rz angle (one gridsynth decomposition per angle):"
@@ -112,7 +112,7 @@ def t_cultivation_execution(
                 theta_key,
                 rz_t_by_angle[theta_key],
             )
-    logger.info("Total T+Tdg gates in expanded circuit: %d", total_t_expanded)
+    logger.info("Total T+Tdg gates in expanded circuit: %d", total_t_tdg_gates)
 
     predecessors, successors = build_circuit_dag(expanded_circuit)
     longest_path_to_sink = compute_longest_path_to_sink(
@@ -158,6 +158,7 @@ def t_cultivation_execution(
     execution_log: list[tuple] = []
     current_time = 0.0
     completed_nodes: set[int] = set()
+    t_tdg_implemented_count = 0
     aod_earliest_available_time = [0.0] * n_aods
 
     def pick_gate_aod(earliest_start: float) -> tuple[int, float]:
@@ -185,15 +186,16 @@ def t_cultivation_execution(
     def pick_factory_aod(earliest_start: float) -> tuple[int, float]:
         """T-factory pipeline always uses AOD 0; start time follows its availability."""
         factory_aod_id = 0
-        start_time = max(
-            earliest_start, aod_earliest_available_time[factory_aod_id]
-        )
+        start_time = max(earliest_start, aod_earliest_available_time[factory_aod_id])
         return factory_aod_id, start_time
 
     def mark_node_completed(node: int):
+        nonlocal t_tdg_implemented_count
         if node in completed_nodes:
             return
         completed_nodes.add(node)
+        if expanded_circuit[node]["gate"] in {"T", "Tdg"}:
+            t_tdg_implemented_count += 1
         logger.debug("Completed node=%d gate=%s", node, expanded_circuit[node]["gate"])
         for successor in successors[node]:
             remaining_deps[successor] -= 1
@@ -208,6 +210,58 @@ def t_cultivation_execution(
             len(ready_t),
             len(completed_nodes),
             len(expanded_circuit),
+        )
+
+    def should_schedule_t_preparation_for_remaining_demand() -> bool:
+        """
+        If enough factories already hold magic for all remaining T/Tdg work, skip a new
+        SE round (idle factories stay idle until RUS consumes states).
+
+        Remaining demand uses ``total_t_tdg_gates`` (fixed at expand time) minus
+        ``t_tdg_implemented_count`` (incremented when each T/Tdg node completes).
+        """
+        need = total_t_tdg_gates - t_tdg_implemented_count
+        if need <= 0:
+            return False
+        ready_magic = len(factory_pool.get_wait_for_rus_factories())
+        if ready_magic >= need:
+            logger.debug(
+                "Skip T prep: WAIT_FOR_RUS=%d >= remaining T/Tdg=%d (implemented %d/%d)",
+                ready_magic,
+                need,
+                t_tdg_implemented_count,
+                total_t_tdg_gates,
+            )
+            return False
+        return True
+
+    def maybe_enqueue_rus_start(at_time: float) -> None:
+        """If T gates are ready and factories hold magic, schedule RUS (one pending max)."""
+        if not ready_t:
+            return
+        wait_for_rus_ids = [f.id for f in factory_pool.get_wait_for_rus_factories()]
+        if not wait_for_rus_ids:
+            return
+        pending_rus_start = any(e.get("type") == "rus_start" for _, _, e in events)
+        if pending_rus_start:
+            return
+        heapq.heappush(
+            events,
+            (
+                at_time,
+                next(event_counter),
+                {
+                    "type": "rus_start",
+                    "factory_list": wait_for_rus_ids,
+                    "aod_id": 0,
+                },
+            ),
+        )
+        logger.debug(
+            "Enqueued rus_start at t=%.3f wait_for_rus=%s ready_t_nodes=%d",
+            at_time,
+            wait_for_rus_ids,
+            len(ready_t),
         )
 
     def schedule_t_preparation(at_time: float):
@@ -491,9 +545,6 @@ def t_cultivation_execution(
                         },
                     ),
                 )
-            # In synchronized mode, factories that failed stage 1 can restart now
-            # once every stage-2 factory in this wave has completed stage 2.
-            schedule_t_preparation(local_time)
         if same_time_events["rus_start"]:
             wave_factory_ids: list[int] = []
             for event in same_time_events["rus_start"]:
@@ -679,40 +730,17 @@ def t_cultivation_execution(
         for event in same_time_events["rus_completion"]:
             factory_pool.free_factories(event["factory_list"])
             logger.debug("Freed factories after RUS: %s", event["factory_list"])
-            schedule_t_preparation(current_time)
-            # If there are still magic states waiting at some factories and there are
-            # more ready T/Tdg nodes, keep running RUS batches until no further
-            # teleportation is possible.
-            if ready_t:
-                wait_for_rus_ids = [
-                    f.id for f in factory_pool.get_wait_for_rus_factories()
-                ]
-                if wait_for_rus_ids:
-                    # Avoid enqueueing an identical rus_start event repeatedly; if one
-                    # is already pending, let the existing one handle it.
-                    pending_rus_start = any(
-                        e.get("type") == "rus_start" for _, _, e in events
-                    )
-                    if not pending_rus_start:
-                        heapq.heappush(
-                            events,
-                            (
-                                current_time,
-                                next(event_counter),
-                                {
-                                    "type": "rus_start",
-                                    "factory_list": wait_for_rus_ids,
-                                    # aod_id is not used in the normal rus_start path,
-                                    # but keep a valid value for the event schema.
-                                    "aod_id": 0,
-                                },
-                            ),
-                        )
+
+            maybe_enqueue_rus_start(current_time)
+
+            if should_schedule_t_preparation_for_remaining_demand():
+                schedule_t_preparation(current_time)
 
         for event in same_time_events["op_complete"]:
             node = event["node"]
             mark_node_completed(node)
             schedule_ready_clifford_operations(current_time)
+            maybe_enqueue_rus_start(current_time)
 
     execution_log = clean_up_execution_log(execution_log, current_time)
     for log in execution_log:
@@ -720,9 +748,12 @@ def t_cultivation_execution(
         # logger.info("Execution log: %s", log)
 
     logger.info(
-        "t_cultivation_execution finished: end_time=%.3f log_entries=%d",
+        "t_cultivation_execution finished: end_time=%.3f log_entries=%d "
+        "t_tdg_implemented=%d/%d",
         current_time,
         len(execution_log),
+        t_tdg_implemented_count,
+        total_t_tdg_gates,
     )
     if print_profile:
         profiling = analyze_execution_log(execution_log, n_factories=n_factories)

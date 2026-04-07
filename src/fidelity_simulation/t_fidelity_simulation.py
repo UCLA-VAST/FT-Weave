@@ -1,8 +1,8 @@
 """Logical fidelity estimation for T-cultivation execution of TFIM layers.
 
-Mirrors ``star_fiedlity_simulation.py`` but consumes a **single** flat
-``execution_log`` from ``t_cultivation_execution`` (RUS / T injection path) instead
-of one log per Rz sublayer.
+Mirrors ``star_fiedlity_simulation.py``: ``execution_logs`` is a **list of logs**
+(one per Rz round from ``generate_one_layer_2d_tfim_circuit_t_cultivation``). The
+simulator loops ``for log in execution_logs: for entry in log: ...``.
 
 The Clifford contribution is still derived from ``qc_one_layer`` and
 ``n_trotter_steps``, as in the STAR simulator.
@@ -36,7 +36,7 @@ def simluate_trotter_2d_tfim_fidelity(
     qubit_layout: tuple,
     n_trotter_steps: int,
     qc_one_layer: list[dict],
-    execution_log: list[tuple],
+    execution_logs: list[list[tuple]],
     logical_error_model: LogicalErrorModel,
 ) -> dict:
     """
@@ -53,9 +53,8 @@ def simluate_trotter_2d_tfim_fidelity(
         n_trotter_steps: Number of Trotter steps; scales Clifford counts.
         qc_one_layer: One logical TFIM layer (``logical=True`` from
             ``generate_one_layer_2d_tfim_circuit_cz``).
-        execution_log: Flat log from ``t_cultivation_execution`` for the **full**
-            circuit (all Trotter steps), or a prefix consistent with
-            ``n_trotter_steps``.
+        execution_logs: Per-Rz round logs from ``t_cultivation_execution``, same shape
+            as STAR’s ``rz_logs`` (one inner list per ``Rz`` instruction in order).
         logical_error_model: Surface-code logical error model. For T-cultivation,
             call ``logical_error_model.integrate_t_cultivation_fidelity_target(p)``
             so ``get_logical_fidelity('T')`` uses logical T fidelity ``1 - p`` (default).
@@ -64,6 +63,13 @@ def simluate_trotter_2d_tfim_fidelity(
         Fidelity profile dict aligned with STAR naming where possible.
     """
     _row, _col = qubit_layout
+
+    n_rz_instructions = sum(1 for inst in qc_one_layer if inst.get("gate") == "Rz")
+    if n_rz_instructions != len(execution_logs):
+        raise ValueError(
+            f"Expected {n_rz_instructions} Rz round logs (one per Rz in qc_one_layer), "
+            f"got {len(execution_logs)}"
+        )
 
     factory_state_fidelity = [0.0 for _ in range(n_factories)]
     fidelity_of_rz_injection = 1.0
@@ -74,51 +80,52 @@ def simluate_trotter_2d_tfim_fidelity(
     # Logical T fidelity: use integrate_t_cultivation_fidelity_target on the model, else rotation model.
     t_magic_fidelity = logical_error_model.get_logical_fidelity("T")
 
-    for entry in execution_log:
-        factories, operation, _aod, targets = _unpack_execution_entry(entry)
+    for log in execution_logs:
+        for entry in log:
+            factories, operation, _aod, targets = _unpack_execution_entry(entry)
 
-        if operation in ("move", "return_move", "Barrier"):
-            continue
+            if operation in ("move", "return_move", "Barrier"):
+                continue
 
-        if operation in ("SE_stage_1", "SE_stage_2"):
-            # Factory prep is not part of the STAR analytic model; omit here (extend if needed).
-            continue
+            if operation in ("SE_stage_1", "SE_stage_2"):
+                # Factory prep is not part of the STAR analytic model; omit here (extend if needed).
+                continue
 
-        if operation == "CNOT":
-            # RUS teleportation injection (same structure as STAR).
-            if not isinstance(factories, (list, tuple)):
-                factory_list = [factories] if factories is not None else []
+            if operation == "CNOT":
+                # RUS teleportation injection (same structure as STAR).
+                if not isinstance(factories, (list, tuple)):
+                    factory_list = [factories] if factories is not None else []
+                else:
+                    factory_list = list(factories)
+                if not isinstance(targets, (list, tuple)):
+                    qubit_list = [targets] if targets is not None else []
+                else:
+                    qubit_list = list(targets)
+                for factory_id, _qubit in zip(factory_list, qubit_list):
+                    if not isinstance(factory_id, int):
+                        continue
+                    if not (0 <= factory_id < n_factories):
+                        continue
+                    if factory_state_fidelity[factory_id] == 0.0:
+                        factory_state_fidelity[factory_id] = t_magic_fidelity
+                    fidelity_of_rz_injection *= factory_state_fidelity[factory_id]
+                    fidelity_of_rz_teleportaion *= (
+                        logical_error_model.get_logical_fidelity("CNOT")
+                    )
+            elif operation in ("T", "Tdg"):
+                fidelity_of_t_gate *= logical_error_model.get_logical_fidelity("T")
+            elif operation == "S":
+                fidelity_of_rz_s *= logical_error_model.get_logical_fidelity("S")
+            elif operation in ("RUS_success", "RUS_fail"):
+                # Outcomes are recorded separately; injection noise is tied to CNOT above.
+                continue
+            elif operation in ("H", "CZ"):
+                # Single-qubit / two-qubit Cliffords scheduled on the gate AOD path;
+                # fold into layer-wide counts below instead of per-log line.
+                continue
             else:
-                factory_list = list(factories)
-            if not isinstance(targets, (list, tuple)):
-                qubit_list = [targets] if targets is not None else []
-            else:
-                qubit_list = list(targets)
-            for factory_id, _qubit in zip(factory_list, qubit_list):
-                if not isinstance(factory_id, int):
-                    continue
-                if not (0 <= factory_id < n_factories):
-                    continue
-                if factory_state_fidelity[factory_id] == 0.0:
-                    factory_state_fidelity[factory_id] = t_magic_fidelity
-                fidelity_of_rz_injection *= factory_state_fidelity[factory_id]
-                fidelity_of_rz_teleportaion *= logical_error_model.get_logical_fidelity(
-                    "CNOT"
-                )
-        elif operation in ("T", "Tdg"):
-            fidelity_of_t_gate *= logical_error_model.get_logical_fidelity("T")
-        elif operation == "S":
-            fidelity_of_rz_s *= logical_error_model.get_logical_fidelity("S")
-        elif operation in ("RUS_success", "RUS_fail"):
-            # Outcomes are recorded separately; injection noise is tied to CNOT above.
-            continue
-        elif operation in ("H", "CZ"):
-            # Single-qubit / two-qubit Cliffords scheduled on the gate AOD path;
-            # fold into layer-wide counts below instead of per-log line.
-            continue
-        else:
-            # Unknown ops: ignore for fidelity (extend when new ops are logged).
-            pass
+                # Unknown ops: ignore for fidelity (extend when new ops are logged).
+                pass
 
     n_cnot_per_step = 0
     n_h_per_step = 0

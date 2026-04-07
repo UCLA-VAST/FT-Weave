@@ -226,6 +226,57 @@ def test_t_cultivation_small():
     )
 
 
+def test_t_cultivation_small():
+    circuit = [
+        {"gate": "Rz", "targets": [0,1,2,3], "params": {0.00146}},
+    ]
+
+    logic_qubit_locations = [(0, 0),(0, 1),(0, 2),(0, 3)]
+    magic_state_locations = [(1, 0),(1, 1),(1, 2),(, 3)]
+    n_factories = len(magic_state_locations)
+    update_config(FACTORY_PHYSICAL_SIZE=2)
+    for i in range(10):
+        execution_log = t_cultivation_execution(
+            circuit=circuit,
+            n_factories=n_factories,
+            logic_qubit_locations=logic_qubit_locations,
+            magic_state_locations=magic_state_locations,
+            rng=np.random.default_rng(i),
+            n_aods=2,
+            to_decompose=False,
+        )
+        assert execution_log, "Execution log should not be empty."
+    update_config(FACTORY_PHYSICAL_SIZE=4)
+    for i in range(10):
+        execution_log = t_cultivation_execution(
+            circuit=circuit,
+            n_factories=n_factories,
+            logic_qubit_locations=logic_qubit_locations,
+            magic_state_locations=magic_state_locations,
+            rng=np.random.default_rng(i),
+            n_aods=2,
+            to_decompose=False,
+        )
+        assert execution_log, "Execution log should not be empty."
+    # execution_log = t_cultivation_execution(
+    #     circuit=circuit,
+    #     n_factories=n_factories,
+    #     logic_qubit_locations=logic_qubit_locations,
+    #     magic_state_locations=magic_state_locations,
+    #     rng=np.random.default_rng(42),
+    #     n_aods=2,
+    #     to_decompose=False,
+    # )
+
+    # assert execution_log, "Execution log should not be empty."
+
+    plot_t_cultivation_execution(
+        execution_log=execution_log,
+        n_qubits=len(logic_qubit_locations),
+        n_factories=n_factories,
+        save_path=f"output/circuit_execution/t_cultivation_{len(logic_qubit_locations)}q_with_factories.pdf",
+    )
+
 def test_fig1_fail_case_scheduler_deadlock_reproduces() -> None:
     """
     Regression: Fig1 (Type 1: nf=2, distance-7, LER=1e-8, physical_size=2)
@@ -270,4 +321,6 @@ if __name__ == "__main__":
     if args.fig1_fail:
         run_fig1_fail_case_debug(seed=args.seed, plot=args.plot_on_success)
     else:
-        test_t_cultivation_small()
+        # test_t_cultivation_small()
+        test_t_cultivation_rz()
+    
