@@ -71,14 +71,10 @@ def simluate_trotter_2d_tfim_fidelity(
             f"got {len(execution_logs)}"
         )
 
-    factory_state_fidelity = [0.0 for _ in range(n_factories)]
-    fidelity_of_rz_injection = 1.0
     fidelity_of_rz_teleportaion = 1.0
     fidelity_of_rz_s = 1.0
+    fidelity_of_rz_h = 1.0
     fidelity_of_t_gate = 1.0
-
-    # Logical T fidelity: use integrate_t_cultivation_fidelity_target on the model, else rotation model.
-    t_magic_fidelity = logical_error_model.get_logical_fidelity("T")
 
     for log in execution_logs:
         for entry in log:
@@ -106,9 +102,6 @@ def simluate_trotter_2d_tfim_fidelity(
                         continue
                     if not (0 <= factory_id < n_factories):
                         continue
-                    if factory_state_fidelity[factory_id] == 0.0:
-                        factory_state_fidelity[factory_id] = t_magic_fidelity
-                    fidelity_of_rz_injection *= factory_state_fidelity[factory_id]
                     fidelity_of_rz_teleportaion *= (
                         logical_error_model.get_logical_fidelity("CNOT")
                     )
@@ -116,16 +109,13 @@ def simluate_trotter_2d_tfim_fidelity(
                 fidelity_of_t_gate *= logical_error_model.get_logical_fidelity("T")
             elif operation == "S":
                 fidelity_of_rz_s *= logical_error_model.get_logical_fidelity("S")
+            elif operation == "H":
+                fidelity_of_rz_h *= logical_error_model.get_logical_fidelity("H")
             elif operation in ("RUS_success", "RUS_fail"):
                 # Outcomes are recorded separately; injection noise is tied to CNOT above.
                 continue
-            elif operation in ("H", "CZ"):
-                # Single-qubit / two-qubit Cliffords scheduled on the gate AOD path;
-                # fold into layer-wide counts below instead of per-log line.
-                continue
             else:
-                # Unknown ops: ignore for fidelity (extend when new ops are logged).
-                pass
+                raise ValueError(f"Unexpected operation in execution log: {operation}")
 
     n_cnot_per_step = 0
     n_h_per_step = 0
@@ -138,27 +128,27 @@ def simluate_trotter_2d_tfim_fidelity(
     fidelity_cnot = logical_error_model.get_logical_fidelity("CNOT") ** (
         n_cnot_per_step * n_trotter_steps
     )
-    fidelity_1q = logical_error_model.get_logical_fidelity("H") ** (
+    fidelity_h = logical_error_model.get_logical_fidelity("H") ** (
         n_h_per_step * n_trotter_steps
     )
 
     fidelity_of_rz_layer = (
-        fidelity_of_rz_injection
-        * fidelity_of_rz_teleportaion
+        fidelity_of_rz_teleportaion
         * fidelity_of_rz_s
+        * fidelity_of_rz_h
         * fidelity_of_t_gate
     )
-    fidelity = fidelity_of_rz_layer * fidelity_cnot * fidelity_1q
+    fidelity = fidelity_of_rz_layer * fidelity_cnot * fidelity_h
 
     return {
         "fidelity": fidelity,
         "fidelity_of_rz_layer": fidelity_of_rz_layer,
-        "fidelity_of_rz_injection": fidelity_of_rz_injection,
         "fidelity_of_rz_teleportaion": fidelity_of_rz_teleportaion,
         "fidelity_of_rz_s": fidelity_of_rz_s,
+        "fidelity_of_rz_h": fidelity_of_rz_h,
         "fidelity_of_t_gate": fidelity_of_t_gate,
         "fidelity_cnot": fidelity_cnot,
-        "fidelity_1q": fidelity_1q,
+        "fidelity_h": fidelity_h,
         "n_cnot": n_cnot_per_step * n_trotter_steps,
         "n_h": n_h_per_step * n_trotter_steps,
     }

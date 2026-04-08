@@ -24,7 +24,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     force=True,
 )
-logging.getLogger("src").setLevel(logging.INFO)
+logging.getLogger("src").setLevel(logging.WARNING)
 
 
 @dataclass(frozen=True)
@@ -116,9 +116,12 @@ def run_evaluation_t_cultivation(
         "dt",
         "n_trotter_steps",
         "fidelity_total",
-        "fidelity_t_injection",
-        "fidelity_t_teleportation",
-        "fidelity_clifford",
+        "fidelity_of_rz_teleportaion",
+        "fidelity_of_rz_s",
+        "fidelity_of_rz_h",
+        "fidelity_of_t_gate",
+        "fidelity_cnot",
+        "fidelity_h",
     ]
 
     fidelity_file, fidelity_writer = _ensure_writer(
@@ -230,9 +233,6 @@ def run_evaluation_t_cultivation(
                                     execution_logs=rz_logs,
                                     logical_error_model=logical_error_model,
                                 )
-                                fidelity_clifford = (
-                                    fprof["fidelity_cnot"] * fprof["fidelity_1q"]
-                                )
                                 fidelity_writer.writerow(
                                     {
                                         "trial": trial,
@@ -249,13 +249,16 @@ def run_evaluation_t_cultivation(
                                         "dt": dt,
                                         "n_trotter_steps": n_trotter_steps,
                                         "fidelity_total": fprof["fidelity"],
-                                        "fidelity_t_injection": fprof[
-                                            "fidelity_of_rz_injection"
-                                        ],
-                                        "fidelity_t_teleportation": fprof[
+                                        "fidelity_of_rz_teleportaion": fprof[
                                             "fidelity_of_rz_teleportaion"
                                         ],
-                                        "fidelity_clifford": fidelity_clifford,
+                                        "fidelity_of_rz_s": fprof["fidelity_of_rz_s"],
+                                        "fidelity_of_rz_h": fprof["fidelity_of_rz_h"],
+                                        "fidelity_of_t_gate": fprof[
+                                            "fidelity_of_t_gate"
+                                        ],
+                                        "fidelity_cnot": fprof["fidelity_cnot"],
+                                        "fidelity_h": fprof["fidelity_h"],
                                     }
                                 )
 
@@ -275,7 +278,7 @@ if __name__ == "__main__":
         (8, 8),
         (10, 10),
     ]
-    n_aods = [2, 3, 4, 5]
+    n_aods = [1, 2, 3, 4, 5]
     settings = [
         TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
         TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
