@@ -1,7 +1,13 @@
-import pandas as pd
+import os
+import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
-import os
+import pandas as pd
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 
 def get_n_qubit(layout_str):
@@ -34,14 +40,267 @@ def format_t_cultivation_setting_label(
     )
 
 
+def _sort_t_cultivation_bar_settings(
+    triples: list[tuple],
+) -> list[tuple]:
+    """Order bar clusters: code distance, factory size, then LER decreasing (1e-8 before 1e-10)."""
+
+    def _key(t: tuple) -> tuple:
+        code_distance, fidelity_target, factory_physical_size = t
+        return (
+            int(code_distance),
+            int(factory_physical_size),
+            -np.log10(float(fidelity_target)),
+        )
+
+    return sorted(triples, key=_key)
+
+
+def _t_cultivation_setting_key(row, group_cols: list[str]) -> tuple:
+    """Normalize ``qubit_layout`` and numeric columns for duplicate checks."""
+    parts: list = []
+    for c in group_cols:
+        v = row[c]
+        if c == "qubit_layout":
+            if isinstance(v, str):
+                nr, nc = eval(v)
+            else:
+                nr, nc = int(v[0]), int(v[1])
+            parts.append((nr, nc))
+        elif c in ("factory_physical_size", "n_aods", "n_trotter_steps"):
+            parts.append(int(v))
+        elif c in ("J", "h", "dt"):
+            parts.append(float(v))
+        else:
+            parts.append(str(v))
+    return tuple(parts)
+
+
+def _resolve_t_cultivation_fidelity_csv_path() -> str | None:
+    """Prefer ``evaluation_results.csv`` when it contains T-cultivation fidelity columns.
+
+    You can copy or symlink ``t_cultivation_fidelity_results.csv`` to
+    ``output/evaluation/evaluation_results.csv`` so all tooling reads one file.
+    """
+    required = {
+        "fidelity_total",
+        "code_distance",
+        "fidelity_target",
+        "fidelity_t_injection",
+        "fidelity_t_teleportation",
+        "fidelity_clifford",
+    }
+    candidates = [
+        os.path.join("output", "evaluation", "evaluation_results.csv"),
+        os.path.join(
+            "output", "evaluation", "fidelity", "t_cultivation_fidelity_results.csv"
+        ),
+    ]
+    for path in candidates:
+        if not os.path.isfile(path):
+            continue
+        try:
+            header = pd.read_csv(path, nrows=0)
+        except (OSError, ValueError, pd.errors.EmptyDataError):
+            continue
+        if required.issubset(set(header.columns)):
+            return path
+    return None
+
+
+def _count_cnot_h_tfim_layer(
+    qc_one_layer: list,
+) -> tuple[int, int]:
+    n_cnot = 0
+    n_h = 0
+    for inst in qc_one_layer:
+        g = inst.get("gate")
+        if g == "CNOT":
+            n_cnot += len(inst.get("targets", []))
+        elif g == "H":
+            n_h += len(inst.get("targets", []))
+    return n_cnot, n_h
+
+
+def augment_t_cultivation_df_with_distance9_extrapolation(
+    t_df: pd.DataFrame,
+    *,
+    reference_distance: int = 7,
+    extrapolated_distance: int = 9,
+    fidelity_target: float = 1e-8,
+) -> pd.DataFrame:
+    """Append distance-9 rows by analytic scaling from distance-7 CSV means.
+
+    Uses the same logical TFIM layer as STAR/T-cultivation (``generate_one_layer_2d_tfim_circuit_cz``)
+    only to count CNOT and H applications for the Clifford factor — no T-cultivation
+    execution or ``generate_one_layer_2d_tfim_circuit_t_cultivation``.
+
+    RUS teleportation infidelity is scaled as if ``fidelity_t_teleportation = F_CNOT^n``
+    with ``n`` inferred from the distance-7 mean and the distance-7 logical CNOT
+    fidelity. The factor ``f_inner = f_total / (f_inj * f_tel * f_cliff)`` from the
+    measured distance-7 means captures remaining Rz-path (S, T, …) contributions and
+    is held fixed when forming ``fidelity_total`` at distance 9.
+    """
+    from src.error_model import LogicalErrorModel, PhysicalErrorModel
+    from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
+
+    out = t_df.copy()
+    cd_arr = np.asarray(
+        pd.to_numeric(out["code_distance"], errors="coerce"), dtype=float
+    )
+    ft_arr = np.asarray(
+        pd.to_numeric(out["fidelity_target"], errors="coerce"), dtype=float
+    )
+    ref_mask = (cd_arr == reference_distance) & np.isclose(
+        ft_arr, fidelity_target, rtol=0.0, atol=1e-15
+    )
+    if not ref_mask.any():
+        return out
+
+    group_cols = [
+        "factory_physical_size",
+        "qubit_layout",
+        "placement",
+        "n_aods",
+        "J",
+        "h",
+        "dt",
+        "n_trotter_steps",
+    ]
+    measure_cols = [
+        "fidelity_total",
+        "fidelity_t_injection",
+        "fidelity_t_teleportation",
+        "fidelity_clifford",
+    ]
+    ref_agg = (
+        out.loc[ref_mask, group_cols + measure_cols]
+        .groupby(group_cols, as_index=False)[measure_cols]
+        .mean()
+    )
+
+    existing_keys = set()
+    for i in range(len(out)):
+        if np.isnan(cd_arr[i]) or np.isnan(ft_arr[i]):
+            continue
+        if int(cd_arr[i]) == extrapolated_distance and np.isclose(
+            ft_arr[i], fidelity_target, rtol=0.0, atol=1e-15
+        ):
+            existing_keys.add(_t_cultivation_setting_key(out.iloc[i], group_cols))
+
+    physical_error_model = PhysicalErrorModel("lookahead")
+    lm_ref = LogicalErrorModel(
+        physical_model=physical_error_model, code_distance=reference_distance
+    )
+    lm_ref.integrate_t_cultivation_fidelity_target(fidelity_target)
+    lm_tgt = LogicalErrorModel(
+        physical_model=physical_error_model, code_distance=extrapolated_distance
+    )
+    lm_tgt.integrate_t_cultivation_fidelity_target(fidelity_target)
+
+    f_cnot_ref = lm_ref.get_logical_fidelity("CNOT")
+    f_cnot_tgt = lm_tgt.get_logical_fidelity("CNOT")
+    f_h_tgt = lm_tgt.get_logical_fidelity("H")
+
+    new_rows: list[dict] = []
+
+    for _, row in ref_agg.iterrows():
+        cfg_row = row[group_cols]
+        key = _t_cultivation_setting_key(cfg_row, group_cols)
+        if key in existing_keys:
+            continue
+
+        factory_physical_size = int(cfg_row["factory_physical_size"])
+        n_aods = int(cfg_row["n_aods"])
+        placement = str(cfg_row["placement"])
+        layout_val = cfg_row["qubit_layout"]
+        if isinstance(layout_val, str):
+            n_rows, n_cols = eval(layout_val)
+        else:
+            n_rows, n_cols = int(layout_val[0]), int(layout_val[1])
+        n_qubits = n_rows * n_cols
+        n_factories = n_qubits
+        J = float(cfg_row["J"])
+        h = float(cfg_row["h"])
+        dt = float(cfg_row["dt"])
+        n_trotter_steps = max(1, int(cfg_row["n_trotter_steps"]))
+
+        mean_total = float(row["fidelity_total"])
+        mean_inj = float(row["fidelity_t_injection"])
+        mean_tel = float(row["fidelity_t_teleportation"])
+        mean_cliff = float(row["fidelity_clifford"])
+
+        if (
+            mean_inj <= 0
+            or mean_tel <= 0
+            or mean_cliff <= 0
+            or mean_total <= 0
+            or f_cnot_ref <= 0
+            or f_cnot_ref >= 1.0
+        ):
+            continue
+
+        n_tel = np.log(mean_tel) / np.log(f_cnot_ref)
+        f_tel_tgt = float(f_cnot_tgt**n_tel)
+
+        qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
+            n_qubits=n_qubits,
+            qubit_layout=(n_rows, n_cols),
+            J=J,
+            h=h,
+            dt=dt,
+            logical=True,
+            order=2,
+        )
+        n_cnot_layer, n_h_layer = _count_cnot_h_tfim_layer(qc_one_layer)
+        f_cliff_tgt = (f_cnot_tgt ** (n_cnot_layer * n_trotter_steps)) * (
+            f_h_tgt ** (n_h_layer * n_trotter_steps)
+        )
+
+        denom = mean_inj * mean_tel * mean_cliff
+        if denom <= 0:
+            continue
+        f_inner = mean_total / denom
+        f_total_tgt = mean_inj * f_tel_tgt * f_cliff_tgt * f_inner
+
+        new_rows.append(
+            {
+                "trial": 0,
+                "code_distance": extrapolated_distance,
+                "fidelity_target": fidelity_target,
+                "factory_physical_size": factory_physical_size,
+                "qubit_layout": f"({n_rows}, {n_cols})",
+                "placement": placement,
+                "n_qubits": n_qubits,
+                "n_factories": n_factories,
+                "n_aods": n_aods,
+                "J": J,
+                "h": h,
+                "dt": dt,
+                "n_trotter_steps": n_trotter_steps,
+                "fidelity_total": f_total_tgt,
+                "fidelity_t_injection": mean_inj,
+                "fidelity_t_teleportation": f_tel_tgt,
+                "fidelity_clifford": f_cliff_tgt,
+            }
+        )
+        existing_keys.add(key)
+
+    if new_rows:
+        out = pd.concat([out, pd.DataFrame(new_rows)], ignore_index=True)
+    return out
+
+
 def load_and_process_data():
     """Load raw, star, and optional t-cultivation fidelity results."""
     raw_df = pd.read_csv("output/evaluation/fidelity/raw_fidelity_results.csv")
     star_df = pd.read_csv("output/evaluation/fidelity/star_fidelity_results.csv")
-    t_cultivation_path = "output/evaluation/fidelity/t_cultivation_fidelity_results.csv"
-    t_cultivation_df = (
-        pd.read_csv(t_cultivation_path) if os.path.exists(t_cultivation_path) else None
-    )
+    t_path = _resolve_t_cultivation_fidelity_csv_path()
+    t_cultivation_df = pd.read_csv(t_path) if t_path else None
+    if t_cultivation_df is not None and not t_cultivation_df.empty:
+        t_cultivation_df = augment_t_cultivation_df_with_distance9_extrapolation(
+            t_cultivation_df
+        )
 
     return raw_df, star_df, t_cultivation_df
 
@@ -440,14 +699,16 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
         )
     )
 
-    settings = [
-        (code_distance, fidelity_target, factory_physical_size)
-        for code_distance, fidelity_target, factory_physical_size in sorted(
-            grouped[["code_distance", "fidelity_target", "factory_physical_size"]]
+    settings = _sort_t_cultivation_bar_settings(
+        [
+            (code_distance, fidelity_target, factory_physical_size)
+            for code_distance, fidelity_target, factory_physical_size in grouped[
+                ["code_distance", "fidelity_target", "factory_physical_size"]
+            ]
             .drop_duplicates()
             .itertuples(index=False, name=None)
-        )
-    ]
+        ]
+    )
 
     if len(settings) == 0:
         print("Skipping T-cultivation stacked infidelity plot: no settings available")
@@ -473,12 +734,18 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
         pd.notna(other_max) and pd.notna(dominant_min) and other_max < dominant_min
     )
 
+    # Figure width: modest scaling with qubit groups × settings (typ. ~12–17 in).
+    _n_set = max(1, len(settings))
+    _n_q = max(1, len(n_qubits))
+    fig_w = float(max(11.0, min(17.0, 9.5 + 0.24 * _n_q * _n_set)))
+    fig_h = 6.8 if use_broken_axis else 7.0
+
     if use_broken_axis:
         fig, (ax_top, ax_bottom) = plt.subplots(
             2,
             1,
             sharex=True,
-            figsize=(12, 6),
+            figsize=(fig_w, fig_h),
             gridspec_kw={"height_ratios": [1, 2], "hspace": 0.05},
         )
         ax_top.spines["bottom"].set_visible(False)
@@ -490,7 +757,7 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
         ax_bottom.set_ylim(0, bottom_ylim_max)
         ax_top.set_ylim(top_ylim_min, grouped["total_infidelity"].max() * 1.08)
     else:
-        fig, ax_bottom = plt.subplots(figsize=(12, 6))
+        fig, ax_bottom = plt.subplots(figsize=(fig_w, fig_h))
         ax_top = None
     x_group = np.arange(len(n_qubits))
     group_width = 0.8
@@ -563,9 +830,14 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
     ax_bottom.tick_params(axis="y", labelsize=12)
     ax_bottom.grid(True, alpha=0.3, axis="y")
     ax_bottom.set_xticks(xtick_positions)
-    ax_bottom.set_xticklabels(xtick_labels, fontsize=8)
-    ax_bottom.set_xlabel("T-cultivation Setting", fontsize=12, labelpad=2)
-    ax_bottom.tick_params(axis="x", pad=2)
+    ax_bottom.set_xticklabels(
+        xtick_labels,
+        fontsize=7,
+        linespacing=1.05,
+        ha="center",
+    )
+    ax_bottom.set_xlabel("T-cultivation Setting", fontsize=12, labelpad=10)
+    ax_bottom.tick_params(axis="x", pad=4, length=3)
 
     if ax_top is not None:
         ax_top.set_title("T-cultivation Infidelity Breakdown by Setting", fontsize=16)
@@ -622,13 +894,17 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
     secax = ax_bottom.secondary_xaxis("bottom", functions=(lambda x: x, lambda x: x))
     secax.set_xticks(x_group)
     secax.set_xticklabels([str(n) for n in n_qubits], fontsize=11)
-    secax.set_xlabel("Number of Qubits", fontsize=12, labelpad=10)
-    secax.spines["bottom"].set_position(("outward", 42))
+    secax.set_xlabel("Number of Qubits", fontsize=12, labelpad=14)
+    secax.spines["bottom"].set_position(("outward", 62))
 
     if ax_top is not None:
-        fig.subplots_adjust(hspace=0.05, top=0.92, bottom=0.20, left=0.12, right=0.98)
+        fig.subplots_adjust(
+            hspace=0.05, top=0.92, bottom=0.30, left=0.10, right=0.98
+        )
     else:
-        fig.tight_layout()
+        fig.subplots_adjust(
+            top=0.94, bottom=0.28, left=0.10, right=0.98, wspace=0.2
+        )
     output_path = os.path.join(output_dir, "t_cultivation_infidelity_stacked_best.pdf")
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"T-cultivation infidelity stacked plot saved to: {output_path}")

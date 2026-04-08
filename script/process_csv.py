@@ -2208,6 +2208,10 @@ def process_csv(csv_file: str, output_dir: str):
 
 
 if __name__ == "__main__":
+    # Microarchitecture / timing sweep (e.g. analog rotation or STAR CSV export).
+    # T-cultivation *fidelity* and distance-9 extrapolation use
+    # ``compare_fidelity.load_and_process_data`` (``t_cultivation_fidelity_results.csv``,
+    # or ``evaluation_results.csv`` if it contains the same fidelity columns).
     csv_file = "output/evaluation/evaluation_results.csv"
     output_dir = "output/analysis_plots"
     try:
