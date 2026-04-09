@@ -5,22 +5,26 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+_FIG_FONT_SIZE = 18
+
 plt.rcParams.update(
     {
         "font.family": "serif",
         "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
-        "font.size": 12,
-        "axes.titlesize": 14,
-        "axes.labelsize": 13,
-        "xtick.labelsize": 11,
-        "ytick.labelsize": 11,
-        "legend.fontsize": 11,
+        "font.size": _FIG_FONT_SIZE,
+        "axes.titlesize": _FIG_FONT_SIZE,
+        "axes.labelsize": _FIG_FONT_SIZE,
+        "xtick.labelsize": _FIG_FONT_SIZE,
+        "ytick.labelsize": _FIG_FONT_SIZE,
+        "legend.fontsize": _FIG_FONT_SIZE,
     }
 )
 
 _TARGET_T_FIG_WIDTH = 20.0
-_UPPER_ROW_FIG_WIDTH = _TARGET_T_FIG_WIDTH / 2.0
-_UPPER_ROW_FIG_HEIGHT = 6.0
+_RAW_STACKED_FIG_WIDTH = _TARGET_T_FIG_WIDTH * 0.39
+_STAR_STACKED_FIG_WIDTH = _TARGET_T_FIG_WIDTH * 0.59
+_UPPER_ROW_FIG_HEIGHT = 4.8
+_T_FIG_HEIGHT = 5.6
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _REPO_ROOT not in sys.path:
@@ -50,11 +54,7 @@ def normalize_star_df(star_df):
 def format_t_cultivation_setting_label(
     code_distance, fidelity_target, factory_physical_size
 ):
-    return (
-        f"d={int(code_distance)}\n"
-        f"size={int(factory_physical_size)}\n"
-        f"LER={fidelity_target:g}"
-    )
+    return f"{int(code_distance)}/{int(factory_physical_size)}/{fidelity_target:g}"
 
 
 def _sort_t_cultivation_bar_settings(
@@ -99,14 +99,6 @@ def _resolve_t_cultivation_fidelity_csv_path() -> str | None:
     You can copy or symlink ``t_cultivation_fidelity_results.csv`` to
     ``output/evaluation/evaluation_results.csv`` so all tooling reads one file.
     """
-    legacy_required = {
-        "fidelity_total",
-        "code_distance",
-        "fidelity_target",
-        "fidelity_t_injection",
-        "fidelity_t_teleportation",
-        "fidelity_clifford",
-    }
     current_required = {
         "fidelity_total",
         "code_distance",
@@ -132,9 +124,7 @@ def _resolve_t_cultivation_fidelity_csv_path() -> str | None:
         except (OSError, ValueError, pd.errors.EmptyDataError):
             continue
         header_columns = set(header.columns)
-        if legacy_required.issubset(header_columns) or current_required.issubset(
-            header_columns
-        ):
+        if current_required.issubset(header_columns):
             return path
     return None
 
@@ -167,27 +157,50 @@ def _fidelity_component_label(method: str, column: str) -> str:
     labels = {
         "star": {
             "fidelity_of_rz_injection": "RZ Injection",
-            "fidelity_of_rz_teleportaion": "Teleportation (CNOT)",
-            "fidelity_of_rz_s": "S (Rz decomposition)",
+            "fidelity_of_rz_teleportaion": "Teleportation-CNOT",
+            "fidelity_of_rz_s": "Rz Correction",
             "fidelity_cnot": "CNOT",
             "fidelity_1q": "H",
             "fidelity_of_rz_layer": "RZ Layer",
         },
         "t_cultivation": {
-            "fidelity_of_rz_teleportaion": "Teleportation (CNOT)",
-            "fidelity_of_rz_s": "S (Rz decomposition)",
-            "fidelity_of_rz_h": "H (Rz decomposition)",
+            "fidelity_of_rz_teleportaion": "Teleportation-CNOT",
+            "fidelity_of_rz_s": "Rz decomposition-S",
+            "fidelity_of_rz_h": "Rz decomposition-H",
             "fidelity_of_t_gate": "T",
             "fidelity_cnot": "CNOT",
             "fidelity_h": "H",
-            "fidelity_approximation": "Rz approx",
+            "fidelity_approximation": "Rz approx. error",
             "fidelity_total_gate_only": "Gate-only total",
-            "fidelity_t_injection": "T",
-            "fidelity_t_teleportation": "Teleportation (CNOT)",
-            "fidelity_clifford": "CNOT/H",
         },
     }
     return labels.get(method, {}).get(column, column)
+
+
+def _fidelity_component_color(column: str) -> str:
+    """Return a stable color per semantic component across stacked plots."""
+    color_map = {
+        # Keep CZ/CNOT visually identical across methods.
+        "fidelity_cz": "#1f77b4",
+        "fidelity_cnot": "#1f77b4",
+        # Teleportation channel.
+        "fidelity_of_rz_teleportaion": "#ff7f0e",
+        # S-channel should match between STAR and T-cultivation.
+        "fidelity_of_rz_s": "#2ca02c",
+        # H-channel should match between STAR and T-cultivation.
+        "fidelity_1q": "#8c564b",
+        "fidelity_h": "#8c564b",
+        "fidelity_of_rz_h": "#bcbd22",
+        # Other components.
+        "fidelity_of_rz_injection": "#d62728",
+        "fidelity_of_t_gate": "#9467bd",
+        "fidelity_approximation": "#17becf",
+        "fidelity_move": "#bcbd22",
+        "fidelity_idle": "#7f7f7f",
+        "fidelity_init": "#e377c2",
+        "fidelity_measurement": "#aec7e8",
+    }
+    return color_map.get(column, "#7f7f7f")
 
 
 def _append_component_means(
@@ -289,7 +302,7 @@ def augment_t_cultivation_df_with_distance9_extrapolation(
     only to count CNOT and H applications for the Clifford factor — no T-cultivation
     execution or ``generate_one_layer_2d_tfim_circuit_t_cultivation``.
 
-    RUS teleportation infidelity is scaled as if ``fidelity_t_teleportation = F_CNOT^n``
+    RUS teleportation infidelity is scaled as if ``fidelity_of_rz_teleportaion = F_CNOT^n``
     with ``n`` inferred from the distance-7 mean and the distance-7 logical CNOT
     fidelity. The factor ``f_inner = f_total / (f_inj * f_tel * f_cliff)`` from the
     measured distance-7 means captures remaining Rz-path (S, T, …) contributions and
@@ -310,180 +323,7 @@ def augment_t_cultivation_df_with_distance9_extrapolation(
         "fidelity_h",
     }
     out = t_df.copy()
-    if current_required.issubset(set(out.columns)):
-        cd_arr = np.asarray(
-            pd.to_numeric(out["code_distance"], errors="coerce"), dtype=float
-        )
-        ft_arr = np.asarray(
-            pd.to_numeric(out["fidelity_target"], errors="coerce"), dtype=float
-        )
-        ref_mask = (cd_arr == reference_distance) & np.isclose(
-            ft_arr, fidelity_target, rtol=0.0, atol=1e-15
-        )
-        if not ref_mask.any():
-            return out
-
-        group_cols = [
-            "factory_physical_size",
-            "qubit_layout",
-            "placement",
-            "n_aods",
-            "J",
-            "h",
-            "dt",
-            "n_trotter_steps",
-        ]
-        measure_cols = [
-            "fidelity_total",
-            "fidelity_of_rz_teleportaion",
-            "fidelity_of_rz_s",
-            "fidelity_of_rz_h",
-            "fidelity_of_t_gate",
-            "fidelity_cnot",
-            "fidelity_h",
-        ]
-        ref_agg = (
-            out.loc[ref_mask, group_cols + measure_cols]
-            .groupby(group_cols, as_index=False)[measure_cols]
-            .mean()
-        )
-
-        existing_keys = set()
-        for i in range(len(out)):
-            if np.isnan(cd_arr[i]) or np.isnan(ft_arr[i]):
-                continue
-            if int(cd_arr[i]) == extrapolated_distance and np.isclose(
-                ft_arr[i], fidelity_target, rtol=0.0, atol=1e-15
-            ):
-                existing_keys.add(_t_cultivation_setting_key(out.iloc[i], group_cols))
-
-        physical_error_model = PhysicalErrorModel("lookahead")
-        lm_ref = LogicalErrorModel(
-            physical_model=physical_error_model, code_distance=reference_distance
-        )
-        lm_ref.integrate_t_cultivation_fidelity_target(fidelity_target)
-        lm_tgt = LogicalErrorModel(
-            physical_model=physical_error_model, code_distance=extrapolated_distance
-        )
-        lm_tgt.integrate_t_cultivation_fidelity_target(fidelity_target)
-
-        f_cnot_ref = lm_ref.get_logical_fidelity("CNOT")
-        f_cnot_target = lm_tgt.get_logical_fidelity("CNOT")
-        f_h_ref = lm_ref.get_logical_fidelity("H")
-        f_h_target = lm_tgt.get_logical_fidelity("H")
-        f_s_ref = lm_ref.get_logical_fidelity("S")
-        f_s_target = lm_tgt.get_logical_fidelity("S")
-        f_t_ref = lm_ref.get_logical_fidelity("T")
-        f_t_target = lm_tgt.get_logical_fidelity("T")
-
-        new_rows: list[dict] = []
-
-        for _, row in ref_agg.iterrows():
-            cfg_row = row[group_cols]
-            key = _t_cultivation_setting_key(cfg_row, group_cols)
-            if key in existing_keys:
-                continue
-
-            factory_physical_size = int(cfg_row["factory_physical_size"])
-            n_aods = int(cfg_row["n_aods"])
-            placement = str(cfg_row["placement"])
-            layout_val = cfg_row["qubit_layout"]
-            if isinstance(layout_val, str):
-                n_rows, n_cols = eval(layout_val)
-            else:
-                n_rows, n_cols = int(layout_val[0]), int(layout_val[1])
-            n_qubits = n_rows * n_cols
-            n_factories = n_qubits
-            J = float(cfg_row["J"])
-            h = float(cfg_row["h"])
-            dt = float(cfg_row["dt"])
-            n_trotter_steps = max(1, int(cfg_row["n_trotter_steps"]))
-
-            mean_total = float(row["fidelity_total"])
-            mean_tel = float(row["fidelity_of_rz_teleportaion"])
-            mean_s = float(row["fidelity_of_rz_s"])
-            mean_rz_h = float(row["fidelity_of_rz_h"])
-            mean_t = float(row["fidelity_of_t_gate"])
-            mean_cnot = float(row["fidelity_cnot"])
-            mean_h = float(row["fidelity_h"])
-
-            if (
-                mean_total <= 0
-                or mean_tel <= 0
-                or mean_s <= 0
-                or mean_rz_h <= 0
-                or mean_t <= 0
-                or mean_cnot <= 0
-                or mean_h <= 0
-                or f_cnot_ref <= 0
-                or f_cnot_ref >= 1.0
-                or f_h_ref <= 0
-                or f_h_ref >= 1.0
-                or f_s_ref <= 0
-                or f_s_ref >= 1.0
-                or f_t_ref <= 0
-                or f_t_ref >= 1.0
-            ):
-                continue
-
-            n_tel = np.log(mean_tel) / np.log(f_cnot_ref)
-            n_s = np.log(mean_s) / np.log(f_s_ref)
-            n_rz_h = np.log(mean_rz_h) / np.log(f_h_ref)
-            n_t = np.log(mean_t) / np.log(f_t_ref)
-
-            f_tel_tgt = float(f_cnot_target**n_tel)
-            f_s_gate_tgt = float(f_s_target**n_s)
-            f_rz_h_tgt = float(f_h_target**n_rz_h)
-            f_t_gate_tgt = float(f_t_target**n_t)
-
-            qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
-                n_qubits=n_qubits,
-                qubit_layout=(n_rows, n_cols),
-                J=J,
-                h=h,
-                dt=dt,
-                logical=True,
-                order=2,
-            )
-            n_cnot_layer, n_h_layer = _count_cnot_h_tfim_layer(qc_one_layer)
-            f_cliff_tgt = (f_cnot_target ** (n_cnot_layer * n_trotter_steps)) * (
-                f_h_target ** (n_h_layer * n_trotter_steps)
-            )
-
-            f_total_tgt = (
-                f_tel_tgt * f_s_gate_tgt * f_rz_h_tgt * f_t_gate_tgt * f_cliff_tgt
-            )
-
-            new_rows.append(
-                {
-                    "trial": 0,
-                    "code_distance": extrapolated_distance,
-                    "fidelity_target": fidelity_target,
-                    "factory_physical_size": factory_physical_size,
-                    "qubit_layout": f"({n_rows}, {n_cols})",
-                    "placement": placement,
-                    "n_qubits": n_qubits,
-                    "n_factories": n_factories,
-                    "n_aods": n_aods,
-                    "J": J,
-                    "h": h,
-                    "dt": dt,
-                    "n_trotter_steps": n_trotter_steps,
-                    "fidelity_total": f_total_tgt,
-                    "fidelity_of_rz_teleportaion": f_tel_tgt,
-                    "fidelity_of_rz_s": f_s_gate_tgt,
-                    "fidelity_of_rz_h": f_rz_h_tgt,
-                    "fidelity_of_t_gate": f_t_gate_tgt,
-                    "fidelity_cnot": f_cliff_tgt,
-                    "fidelity_h": f_h_target,
-                }
-            )
-            existing_keys.add(key)
-
-        if new_rows:
-            out = pd.concat([out, pd.DataFrame(new_rows)], ignore_index=True)
-        return out
-
+    assert current_required.issubset(set(out.columns))
     cd_arr = np.asarray(
         pd.to_numeric(out["code_distance"], errors="coerce"), dtype=float
     )
@@ -508,15 +348,28 @@ def augment_t_cultivation_df_with_distance9_extrapolation(
     ]
     measure_cols = [
         "fidelity_total",
-        "fidelity_t_injection",
-        "fidelity_t_teleportation",
-        "fidelity_clifford",
+        "fidelity_of_rz_teleportaion",
+        "fidelity_of_rz_s",
+        "fidelity_of_rz_h",
+        "fidelity_of_t_gate",
+        "fidelity_cnot",
+        "fidelity_h",
     ]
     ref_agg = (
         out.loc[ref_mask, group_cols + measure_cols]
         .groupby(group_cols, as_index=False)[measure_cols]
         .mean()
     )
+    ref_templates = (
+        out.loc[ref_mask]
+        .groupby(group_cols, as_index=False)
+        .first()
+        .reset_index(drop=True)
+    )
+    template_by_key = {
+        _t_cultivation_setting_key(row, group_cols): row.to_dict()
+        for _, row in ref_templates.iterrows()
+    }
 
     existing_keys = set()
     for i in range(len(out)):
@@ -538,8 +391,13 @@ def augment_t_cultivation_df_with_distance9_extrapolation(
     lm_tgt.integrate_t_cultivation_fidelity_target(fidelity_target)
 
     f_cnot_ref = lm_ref.get_logical_fidelity("CNOT")
-    f_cnot_tgt = lm_tgt.get_logical_fidelity("CNOT")
-    f_h_tgt = lm_tgt.get_logical_fidelity("H")
+    f_cnot_target = lm_tgt.get_logical_fidelity("CNOT")
+    f_h_ref = lm_ref.get_logical_fidelity("H")
+    f_h_target = lm_tgt.get_logical_fidelity("H")
+    f_s_ref = lm_ref.get_logical_fidelity("S")
+    f_s_target = lm_tgt.get_logical_fidelity("S")
+    f_t_ref = lm_ref.get_logical_fidelity("T")
+    f_t_target = lm_tgt.get_logical_fidelity("T")
 
     new_rows: list[dict] = []
 
@@ -565,22 +423,41 @@ def augment_t_cultivation_df_with_distance9_extrapolation(
         n_trotter_steps = max(1, int(cfg_row["n_trotter_steps"]))
 
         mean_total = float(row["fidelity_total"])
-        mean_inj = float(row["fidelity_t_injection"])
-        mean_tel = float(row["fidelity_t_teleportation"])
-        mean_cliff = float(row["fidelity_clifford"])
+        mean_tel = float(row["fidelity_of_rz_teleportaion"])
+        mean_s = float(row["fidelity_of_rz_s"])
+        mean_rz_h = float(row["fidelity_of_rz_h"])
+        mean_t = float(row["fidelity_of_t_gate"])
+        mean_cnot = float(row["fidelity_cnot"])
+        mean_h = float(row["fidelity_h"])
 
         if (
-            mean_inj <= 0
+            mean_total <= 0
             or mean_tel <= 0
-            or mean_cliff <= 0
-            or mean_total <= 0
+            or mean_s <= 0
+            or mean_rz_h <= 0
+            or mean_t <= 0
+            or mean_cnot <= 0
+            or mean_h <= 0
             or f_cnot_ref <= 0
             or f_cnot_ref >= 1.0
+            or f_h_ref <= 0
+            or f_h_ref >= 1.0
+            or f_s_ref <= 0
+            or f_s_ref >= 1.0
+            or f_t_ref <= 0
+            or f_t_ref >= 1.0
         ):
             continue
 
         n_tel = np.log(mean_tel) / np.log(f_cnot_ref)
-        f_tel_tgt = float(f_cnot_tgt**n_tel)
+        n_s = np.log(mean_s) / np.log(f_s_ref)
+        n_rz_h = np.log(mean_rz_h) / np.log(f_h_ref)
+        n_t = np.log(mean_t) / np.log(f_t_ref)
+
+        f_tel_tgt = float(f_cnot_target**n_tel)
+        f_s_gate_tgt = float(f_s_target**n_s)
+        f_rz_h_tgt = float(f_h_target**n_rz_h)
+        f_t_gate_tgt = float(f_t_target**n_t)
 
         qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
             n_qubits=n_qubits,
@@ -592,17 +469,15 @@ def augment_t_cultivation_df_with_distance9_extrapolation(
             order=2,
         )
         n_cnot_layer, n_h_layer = _count_cnot_h_tfim_layer(qc_one_layer)
-        f_cliff_tgt = (f_cnot_tgt ** (n_cnot_layer * n_trotter_steps)) * (
-            f_h_tgt ** (n_h_layer * n_trotter_steps)
+        f_cliff_tgt = (f_cnot_target ** (n_cnot_layer * n_trotter_steps)) * (
+            f_h_target ** (n_h_layer * n_trotter_steps)
         )
 
-        denom = mean_inj * mean_tel * mean_cliff
-        if denom <= 0:
-            continue
-        f_inner = mean_total / denom
-        f_total_tgt = mean_inj * f_tel_tgt * f_cliff_tgt * f_inner
+        f_total_tgt = f_tel_tgt * f_s_gate_tgt * f_rz_h_tgt * f_t_gate_tgt * f_cliff_tgt
 
-        new_rows.append(
+        template = template_by_key.get(key, {})
+        new_row = dict(template)
+        new_row.update(
             {
                 "trial": 0,
                 "code_distance": extrapolated_distance,
@@ -618,11 +493,15 @@ def augment_t_cultivation_df_with_distance9_extrapolation(
                 "dt": dt,
                 "n_trotter_steps": n_trotter_steps,
                 "fidelity_total": f_total_tgt,
-                "fidelity_t_injection": mean_inj,
-                "fidelity_t_teleportation": f_tel_tgt,
-                "fidelity_clifford": f_cliff_tgt,
+                "fidelity_of_rz_teleportaion": f_tel_tgt,
+                "fidelity_of_rz_s": f_s_gate_tgt,
+                "fidelity_of_rz_h": f_rz_h_tgt,
+                "fidelity_of_t_gate": f_t_gate_tgt,
+                "fidelity_cnot": f_cliff_tgt,
+                "fidelity_h": f_h_target,
             }
         )
+        new_rows.append(new_row)
         existing_keys.add(key)
 
     if new_rows:
@@ -802,9 +681,6 @@ def generate_comparison_csv(raw_df, star_df, output_path, t_cultivation_df=None)
                         "fidelity_h",
                         "fidelity_approximation",
                         "fidelity_total_gate_only",
-                        "fidelity_t_injection",
-                        "fidelity_t_teleportation",
-                        "fidelity_clifford",
                     ],
                 )
                 comparison_data.append(row)
@@ -832,7 +708,7 @@ def plot_raw_infidelity_breakdown(raw_df, output_dir):
     ]
 
     # Create stacked bar plot showing contribution of each error term
-    fig, ax = plt.subplots(figsize=(_UPPER_ROW_FIG_WIDTH, _UPPER_ROW_FIG_HEIGHT))
+    fig, ax = plt.subplots(figsize=(_RAW_STACKED_FIG_WIDTH, _UPPER_ROW_FIG_HEIGHT))
 
     n_qubits = sorted(raw_df["n_qubit"].unique())
     infidelity_data = {term: [] for term in error_terms}
@@ -845,11 +721,10 @@ def plot_raw_infidelity_breakdown(raw_df, output_dir):
 
     # Create stacked bar chart
     x = np.arange(len(n_qubits))
-    width = 0.42
+    width = 0.30
 
     bottom = np.zeros(len(n_qubits))
-    cmap = plt.get_cmap("tab10")
-    colors = [cmap(i) for i in range(len(error_terms))]
+    colors = [_fidelity_component_color(term) for term in error_terms]
     label_map = {
         "fidelity_idle": "Idle",
         "fidelity_move": "Move",
@@ -870,13 +745,13 @@ def plot_raw_infidelity_breakdown(raw_df, output_dir):
         )
         bottom += values
 
-    ax.set_xlabel("Number of Qubits", fontsize=14)
-    ax.set_ylabel("Total Infidelity", fontsize=14)
-    ax.set_title("Raw Infidelity Breakdown by Error Source", fontsize=16)
+    ax.set_xlabel("Number of Qubits", fontsize=_FIG_FONT_SIZE)
+    ax.set_ylabel("Total Infidelity", fontsize=_FIG_FONT_SIZE)
+    ax.set_title("Raw Infidelity Breakdown by Error Source", fontsize=_FIG_FONT_SIZE)
     ax.set_xticks(x)
-    ax.set_xticklabels(n_qubits, fontsize=12)
-    ax.legend(loc="upper left", fontsize=10)
-    ax.tick_params(axis="y", labelsize=12)
+    ax.set_xticklabels(n_qubits, fontsize=_FIG_FONT_SIZE)
+    ax.legend(loc="upper left", fontsize=_FIG_FONT_SIZE)
+    ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
     ax.grid(True, alpha=0.3, axis="y")
 
     output_path = os.path.join(output_dir, "raw_infidelity_stacked.pdf")
@@ -901,7 +776,7 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
     # Create merged figure for all placements
     placements = sorted(star_df["placement"].unique())
     fig, axes = plt.subplots(
-        len(placements), len(error_terms), figsize=(18, 6 * len(placements))
+        len(placements), len(error_terms), figsize=(16, 5.0 * len(placements))
     )
 
     for placement_idx, placement in enumerate(placements):
@@ -928,23 +803,28 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
                     alpha=0.7,
                 )
 
-            ax.set_xlabel("Number of Qubits", fontsize=14)
-            ax.set_ylabel("Infidelity (1 - Fidelity)", fontsize=14)
+            ax.set_xlabel("Number of Qubits", fontsize=_FIG_FONT_SIZE)
+            ax.set_ylabel("Infidelity (1 - Fidelity)", fontsize=_FIG_FONT_SIZE)
             term_name = _fidelity_component_label("star", term)
-            ax.set_title(term_name, fontsize=16)
+            ax.set_title(term_name, fontsize=_FIG_FONT_SIZE)
             ax.grid(True, alpha=0.3)
             ax.set_yscale("log")
-            ax.tick_params(axis="both", labelsize=12)
+            ax.tick_params(axis="both", labelsize=_FIG_FONT_SIZE)
             if placement_idx == 0:
-                ax.legend(fontsize=10)
+                ax.legend(fontsize=_FIG_FONT_SIZE)
 
     # Set row labels
     for placement_idx, placement in enumerate(placements):
         axes[placement_idx, 0].set_ylabel(
-            f"{placement.upper()}\nInfidelity", fontsize=14, fontweight="bold"
+            f"{placement.upper()}\nInfidelity",
+            fontsize=_FIG_FONT_SIZE,
+            fontweight="bold",
         )
 
-    fig.suptitle("STAR Infidelity Breakdown by Error Type and Placement", fontsize=18)
+    fig.suptitle(
+        "STAR Infidelity Breakdown by Error Type and Placement",
+        fontsize=_FIG_FONT_SIZE,
+    )
     fig.tight_layout()
     output_path = os.path.join(output_dir, "star_infidelity_breakdown.pdf")
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -959,8 +839,7 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
         "fidelity_cnot",
         "fidelity_1q",
     ]
-    cmap = plt.get_cmap("tab10")
-    colors = [cmap(i) for i in range(len(stacked_terms))]
+    colors = [_fidelity_component_color(term) for term in stacked_terms]
 
     if "code_distance" in star_df.columns:
         available_distances = sorted(
@@ -976,7 +855,9 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
         print("Skipping STAR stacked distance cluster plot: no code_distance available")
         return
 
-    fig, ax = plt.subplots(figsize=(_UPPER_ROW_FIG_WIDTH, _UPPER_ROW_FIG_HEIGHT))
+    fig, ax = plt.subplots(
+        figsize=(_STAR_STACKED_FIG_WIDTH, _UPPER_ROW_FIG_HEIGHT * 1.18)
+    )
 
     grouped = (
         star_df[star_df["code_distance"].isin(distances)]
@@ -986,7 +867,7 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
 
     n_qubits = sorted(grouped["n_qubit"].unique())
     x_group = np.arange(len(n_qubits))
-    group_width = 0.6
+    group_width = 0.45
     bar_width = group_width / len(distances)
 
     xtick_positions = []
@@ -1020,20 +901,22 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
         xtick_positions.extend(x.tolist())
         xtick_labels.extend([str(code_distance)] * len(x))
 
-    ax.set_ylabel("Total Infidelity", fontsize=14)
-    ax.set_title("STAR Infidelity Breakdown (Distance 7 and 9)", fontsize=16)
-    ax.tick_params(axis="y", labelsize=12)
+    ax.set_ylabel("Total Infidelity", fontsize=_FIG_FONT_SIZE)
+    ax.set_title(
+        "STAR Infidelity Breakdown (Distance 7 and 9)", fontsize=_FIG_FONT_SIZE
+    )
+    ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
     ax.grid(True, alpha=0.3, axis="y")
-    ax.legend(loc="upper left", fontsize=10)
+    ax.legend(loc="upper left", fontsize=_FIG_FONT_SIZE)
 
     ax.set_xticks(xtick_positions)
-    ax.set_xticklabels(xtick_labels, fontsize=11)
-    ax.set_xlabel("Code Distance", fontsize=12, labelpad=2)
+    ax.set_xticklabels(xtick_labels, fontsize=_FIG_FONT_SIZE)
+    ax.set_xlabel("Code Distance", fontsize=_FIG_FONT_SIZE, labelpad=2)
 
     secax = ax.secondary_xaxis("bottom", functions=(lambda x: x, lambda x: x))
     secax.set_xticks(x_group)
-    secax.set_xticklabels([str(n) for n in n_qubits], fontsize=11)
-    secax.set_xlabel("Number of Qubits", fontsize=12, labelpad=10)
+    secax.set_xticklabels([str(n) for n in n_qubits], fontsize=_FIG_FONT_SIZE)
+    secax.set_xlabel("Number of Qubits", fontsize=_FIG_FONT_SIZE, labelpad=10)
     secax.spines["bottom"].set_position(("outward", 42))
 
     fig.tight_layout()
@@ -1055,20 +938,19 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
         "fidelity_h",
         "fidelity_approximation",
     ]
-    legacy_terms = [
-        "fidelity_t_injection",
-        "fidelity_t_teleportation",
-        "fidelity_clifford",
-        "fidelity_approximation",
-    ]
 
     t_df = t_cultivation_df.copy()
     t_df["n_qubit"] = t_df["qubit_layout"].apply(get_n_qubit)
-    stacked_terms = (
-        current_terms
-        if all(column in t_df.columns for column in current_terms)
-        else legacy_terms
-    )
+
+    if not all(column in t_df.columns for column in current_terms):
+        missing = [column for column in current_terms if column not in t_df.columns]
+        print(
+            "Skipping T-cultivation stacked infidelity plot: "
+            f"missing required columns {missing}"
+        )
+        return
+
+    stacked_terms = current_terms
     for column in ["fidelity_total", *stacked_terms]:
         if column in t_df.columns:
             t_df[column] = pd.to_numeric(t_df[column], errors="coerce")
@@ -1128,7 +1010,7 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
     _n_set = max(1, len(settings))
     _n_q = max(1, len(n_qubits))
     fig_w = float(max(13.0, min(20.0, 10.0 + 0.32 * _n_q * _n_set)))
-    fig_h = 6.8 if use_broken_axis else 7.0
+    fig_h = 6.0 if use_broken_axis else 6.2
 
     if use_broken_axis:
         fig, (ax_top, ax_bottom) = plt.subplots(
@@ -1156,8 +1038,7 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
     xtick_positions = []
     xtick_labels = []
 
-    cmap = plt.get_cmap("tab10")
-    colors = [cmap(i) for i in range(len(stacked_terms))]
+    colors = [_fidelity_component_color(term) for term in stacked_terms]
 
     def draw_bars(ax):
         for setting_idx, (
@@ -1192,6 +1073,9 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
                     bottom=bottom,
                     color=color,
                     alpha=0.85,
+                    edgecolor=None,
+                    linewidth=0.0,
+                    hatch=None,
                 )
                 bottom += values
 
@@ -1207,22 +1091,29 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
 
     if ax_top is not None:
         ax_top.grid(True, alpha=0.3, axis="y")
-        ax_top.tick_params(axis="y", labelsize=12)
-    ax_bottom.set_ylabel("Total Infidelity", fontsize=14, labelpad=12)
-    ax_bottom.tick_params(axis="y", labelsize=12)
+        ax_top.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
+    ax_bottom.set_ylabel("Total Infidelity", fontsize=_FIG_FONT_SIZE, labelpad=12)
+    ax_bottom.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
     ax_bottom.grid(True, alpha=0.3, axis="y")
     ax_bottom.set_xticks(xtick_positions)
     ax_bottom.set_xticklabels(
         xtick_labels,
-        fontsize=9,
+        fontsize=_FIG_FONT_SIZE,
         linespacing=1.1,
         ha="center",
+        rotation=35,
     )
-    ax_bottom.set_xlabel("T-cultivation Setting", fontsize=12, labelpad=10)
-    ax_bottom.tick_params(axis="x", pad=4, length=3)
+    ax_bottom.set_xlabel(
+        "T cultivation setting (distance/#Stage 1 Patch/LER)",
+        fontsize=_FIG_FONT_SIZE,
+        labelpad=-2,
+    )
+    ax_bottom.tick_params(axis="x", pad=1, length=3)
 
     if ax_top is not None:
-        ax_top.set_title("T-cultivation Infidelity Breakdown by Setting", fontsize=16)
+        ax_top.set_title(
+            "T-cultivation Infidelity Breakdown by Setting", fontsize=_FIG_FONT_SIZE
+        )
         handles, labels = ax_bottom.get_legend_handles_labels()
         filtered = [
             (handle, label)
@@ -1234,9 +1125,10 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
             fig.legend(
                 handles,
                 labels,
-                loc="center left",
-                bbox_to_anchor=(0.82, 0.5),
-                fontsize=10,
+                loc="lower center",
+                bbox_to_anchor=(0.5, -0.02),
+                ncol=4,
+                fontsize=_FIG_FONT_SIZE,
                 frameon=True,
                 framealpha=0.95,
             )
@@ -1246,7 +1138,7 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
             0,
             "//",
             transform=ax_top.transAxes,
-            fontsize=16,
+            fontsize=_FIG_FONT_SIZE,
             va="center",
             ha="left",
         )
@@ -1255,13 +1147,13 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
             1,
             "//",
             transform=ax_bottom.transAxes,
-            fontsize=16,
+            fontsize=_FIG_FONT_SIZE,
             va="center",
             ha="left",
         )
     else:
         ax_bottom.set_title(
-            "T-cultivation Infidelity Breakdown by Setting", fontsize=16
+            "T-cultivation Infidelity Breakdown by Setting", fontsize=_FIG_FONT_SIZE
         )
         handles, labels = ax_bottom.get_legend_handles_labels()
         filtered = [
@@ -1274,23 +1166,25 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
             fig.legend(
                 handles,
                 labels,
-                loc="center left",
-                bbox_to_anchor=(0.82, 0.5),
-                fontsize=10,
+                loc="lower center",
+                bbox_to_anchor=(0.5, -0.02),
+                ncol=4,
+                fontsize=_FIG_FONT_SIZE,
                 frameon=True,
                 framealpha=0.95,
             )
 
     secax = ax_bottom.secondary_xaxis("bottom", functions=(lambda x: x, lambda x: x))
     secax.set_xticks(x_group)
-    secax.set_xticklabels([str(n) for n in n_qubits], fontsize=11)
-    secax.set_xlabel("Number of Qubits", fontsize=12, labelpad=14)
-    secax.spines["bottom"].set_position(("outward", 62))
+    secax.set_xticklabels([str(n) for n in n_qubits], fontsize=_FIG_FONT_SIZE)
+    secax.set_xlabel("Number of Qubits", fontsize=_FIG_FONT_SIZE, labelpad=4)
+    secax.tick_params(axis="x", pad=2)
+    secax.spines["bottom"].set_position(("outward", 108))
 
     if ax_top is not None:
-        fig.subplots_adjust(hspace=0.05, top=0.92, bottom=0.30, left=0.08, right=0.81)
+        fig.subplots_adjust(hspace=0.05, top=0.92, bottom=0.53, left=0.08, right=0.97)
     else:
-        fig.subplots_adjust(top=0.94, bottom=0.28, left=0.08, right=0.81, wspace=0.2)
+        fig.subplots_adjust(top=0.94, bottom=0.50, left=0.08, right=0.97, wspace=0.2)
     output_path = os.path.join(output_dir, "t_cultivation_infidelity_stacked_best.pdf")
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"T-cultivation infidelity stacked plot saved to: {output_path}")
@@ -1342,7 +1236,7 @@ def plot_star_settings_comparison(star_df, output_dir):
             continue
 
         fig, axes = plt.subplots(
-            n_placements, len(aod_values), figsize=(18, 6 * n_placements)
+            n_placements, len(aod_values), figsize=(18, 5.0 * n_placements)
         )
         if n_placements == 1:
             axes = axes.reshape(1, len(aod_values))
@@ -1400,12 +1294,12 @@ def plot_star_settings_comparison(star_df, output_dir):
                         label=label,
                     )
 
-                ax.set_xlabel("Number of Qubits", fontsize=14)
-                ax.set_ylabel("Fidelity", fontsize=14)
-                ax.set_title(f"{placement}, AOD={n_aods}", fontsize=16)
+                ax.set_xlabel("Number of Qubits", fontsize=_FIG_FONT_SIZE)
+                ax.set_ylabel("Fidelity", fontsize=_FIG_FONT_SIZE)
+                ax.set_title(f"{placement}, AOD={n_aods}", fontsize=_FIG_FONT_SIZE)
                 ax.grid(True, alpha=0.3)
-                ax.tick_params(axis="both", labelsize=12)
-                ax.legend(fontsize=10)
+                ax.tick_params(axis="both", labelsize=_FIG_FONT_SIZE)
+                ax.legend(fontsize=_FIG_FONT_SIZE)
 
                 current = ax.get_ylim()
                 prev_ylim = col_ylims[col_idx]
@@ -1422,7 +1316,9 @@ def plot_star_settings_comparison(star_df, output_dir):
                 for row_idx in range(n_placements):
                     axes[row_idx, col_idx].set_ylim(col_ylims[col_idx])
 
-        fig.suptitle(f"STAR Ablation Study{title_suffix}", fontsize=18, y=0.995)
+        fig.suptitle(
+            f"STAR Ablation Study{title_suffix}", fontsize=_FIG_FONT_SIZE, y=0.995
+        )
         fig.tight_layout()
         output_path = os.path.join(
             output_dir, f"star_ablation_fidelity{distance_suffix}.pdf"
@@ -1437,7 +1333,7 @@ def plot_overall_fidelity_comparison(
 ):
     """Create overall fidelity comparison with STAR and optional T-cultivation lines."""
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(10, 5.0))
 
     # Plot raw fidelity
     raw_data = (
@@ -1536,14 +1432,22 @@ def plot_overall_fidelity_comparison(
                     alpha=0.12,
                 )
 
-    ax.set_xlabel("Number of Qubits", fontsize=14)
-    ax.set_ylabel("Mean Fidelity", fontsize=14)
+    ax.set_xlabel("Number of Qubits", fontsize=_FIG_FONT_SIZE)
+    ax.set_ylabel("Mean Fidelity", fontsize=_FIG_FONT_SIZE)
     ax.set_title(
-        "Overall Fidelity Comparison: Raw vs STAR vs T-cultivation", fontsize=16
+        "Overall Fidelity Comparison: Raw vs STAR vs T-cultivation",
+        fontsize=_FIG_FONT_SIZE,
     )
-    ax.tick_params(axis="both", labelsize=12)
-    ax.legend(fontsize=10)
+    ax.tick_params(axis="both", labelsize=_FIG_FONT_SIZE)
+    ax.legend(
+        fontsize=_FIG_FONT_SIZE,
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        ncol=1,
+        frameon=True,
+    )
     ax.grid(True, alpha=0.3)
+    fig.subplots_adjust(right=0.74)
 
     output_path = os.path.join(output_dir, "overall_fidelity_comparison.pdf")
     plt.savefig(output_path, dpi=300, bbox_inches="tight")

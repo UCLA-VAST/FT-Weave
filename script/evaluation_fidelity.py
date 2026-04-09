@@ -11,12 +11,12 @@ import csv
 
 
 SETTINGS = [
-    (True, "matching", 0, False, False),
-    (False, "matching", 0, False, False),
-    (False, "matching", 1, False, False),
-    (False, "matching", 2, False, False),
+    # (True, "matching", 0, False, False),
+    # (False, "matching", 0, False, False),
+    # (False, "matching", 1, False, False),
+    # (False, "matching", 2, False, False),
     (False, "matching", 2, True, False),
-    (False, "matching", 0, False, True),
+    # (False, "matching", 0, False, True),
     (False, "matching", 2, False, True),
 ]
 
@@ -249,11 +249,11 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
 if __name__ == "__main__":
     # Define parameter grid
     qubit_layout = [
-        # (4, 4),  # 16 qubits
+        (4, 4),  # 16 qubits
         # (5, 5),  # 25 qubits
-        # (6, 6),  # 36 qubits
+        (6, 6),  # 36 qubits
         # (7, 7),  # 49 qubits
-        # (8, 8),  # 64 qubits
+        (8, 8),  # 64 qubits
         # (9, 9),  # 81 qubits
         (10, 10),  # 100 qubits
     ]
@@ -277,10 +277,8 @@ if __name__ == "__main__":
     star_params = {
         "qubit_layout": qubit_layout,
         "tfim": tfim,
-        "placement_methods": [
-            "col_based",
-            "checkerboard",
-        ],
+        "placement_methods": ["seperate_region_row"],
+        # "placement_methods": ["col_based", "checkerboard", "seperate_region_row"],
         "n_aods": [1, 2, 3, 4, 5],
         "settings": SETTINGS,
         "trials_per_config": 5,
