@@ -185,7 +185,7 @@ def test(
     print_execution_profile(profile=profiling_result)
 
     # pdf_path based on the arguments
-    base_path = f"{prefix}_n{n_qubits}f{n_factories}_{placement}_naod_{n_aods}_tmr_{tmr_assignment_method}_skipRUS_{consider_skip_rus}_trivial-return{trivial_return}.pdf"
+    base_path = f"{prefix}_n{n_qubits}f{n_factories}_{placement}_naod_{n_aods}_tmr_{tmr_assignment_method}_skipRUS_{consider_skip_rus}_trivial-return{trivial_return}_parallel-execution_{parallel_execution}.pdf"
     pdf_path = f"output/circuit_execution_vertical/{base_path}"
     plot_circuit_execution_vertical(
         log, n_factories, figure_height=50, save_path=pdf_path
@@ -253,12 +253,12 @@ if __name__ == "__main__":
     # )
 
     test(
-        n_qubits=25,
-        n_factories=25,
-        qubit_layout=(5, 5),
+        n_qubits=16,
+        n_factories=16,
+        qubit_layout=(4, 4),
         same_angle=True,
         placement="col_based",
-        visualize_rus=False,
+        visualize_rus=True,
         prefix="",
         n_aods=3,
         n_aods_se=3,
@@ -266,4 +266,20 @@ if __name__ == "__main__":
         tmr_assignment_method="matching",
         trivial_return=False,
         parallel_execution=True,
+    )
+
+    test(
+        n_qubits=16,
+        n_factories=16,
+        qubit_layout=(4, 4),
+        same_angle=True,
+        placement="col_based",
+        visualize_rus=True,
+        prefix="",
+        n_aods=3,
+        n_aods_se=3,
+        consider_skip_rus=False,
+        tmr_assignment_method="matching",
+        trivial_return=False,
+        parallel_execution=False,
     )

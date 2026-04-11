@@ -767,13 +767,6 @@ def plot_microarch_comp_setting(df, output_dir, setting_idx=1, tag=""):
 
 # ------------------------------------------------------------
 # Ablation study (col-based placement)
-# Kept for backward compatibility; plot_ablation_combined is the primary entry point
-def plot_ablation(df, output_dir, placement, tag=""):
-    """Legacy ablation plot (single target AOD). Use plot_ablation_combined for gridded layout."""
-    print(
-        f"plot_ablation deprecated for ({placement}); use plot_ablation_combined instead."
-    )
-    return
 
 
 def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=None):
@@ -1113,8 +1106,12 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                 fontsize=_FIG_FONT_SIZE,
                 frameon=True,
             )
-            fig.tight_layout(rect=(0.03, 0.15, 0.98, 0.99))
-            fig.subplots_adjust(top=0.92, bottom=0.15, hspace=0.15, wspace=0.25)
+            # fig.tight_layout(rect=(0.03, 0.15, 0.98, 0.99))
+            # fig.subplots_adjust(top=0.92, bottom=0.15, hspace=0.15, wspace=0.25)
+
+            fig.tight_layout(rect=(0, 0.28, 1, 1))
+            fig.subplots_adjust(bottom=0.15, wspace=0.32)
+
             distance_suffix = f"_distance_{distance}" if distance is not None else ""
             fig.savefig(
                 os.path.join(
@@ -1475,14 +1472,15 @@ def plot_microarch_comp_setting_combined(
                     continue
                 draw_panel(ax, round_name, g_aod, show_title=(row_idx == 0))
                 ax.set_ylim(*ylim_by_round[round_name])
+                ax.tick_params(axis="both", which="major", pad=1)
                 if col_idx == 0:
                     ax.set_ylabel(f"AOD = {aod_value}\n{metric_name}")
                 else:
-                    ax.set_ylabel("")
+                    ax.set_ylabel("", labelpad=0)
                 if row_idx == len(aods_to_plot) - 1:
-                    ax.set_xlabel("Number of Qubits (angles)")
+                    ax.set_xlabel("Number of Qubits (angles)", labelpad=0)
                 else:
-                    ax.set_xlabel("")
+                    ax.set_xlabel("", labelpad=0)
 
         fig.suptitle(
             f"Microarchitecture evaluation - {setting_title} - {metric_name}",
@@ -1497,12 +1495,23 @@ def plot_microarch_comp_setting_combined(
             fontsize=_FIG_FONT_SIZE,
             frameon=True,
         )
-        fig.tight_layout(rect=(0.03, 0.20, 0.98, 0.90))
-        fig.subplots_adjust(top=0.90, bottom=0.22, hspace=0.40, wspace=0.25)
+        fig.tight_layout(
+            rect=(0.04, 0.20, 0.98, 0.90), pad=0.10, w_pad=0.03, h_pad=0.03
+        )
+        fig.subplots_adjust(
+            top=0.90,
+            bottom=0.22,
+            hspace=0.40,
+            wspace=0.25,
+            left=0.04,
+            right=0.98,
+        )
         fig.savefig(
             os.path.join(
                 output_dir, f"fig2_setting_{file_setting_tag}_{file_suffix}.pdf"
-            )
+            ),
+            bbox_inches="tight",
+            pad_inches=0.04,
         )
         plt.close(fig)
 
@@ -2135,11 +2144,12 @@ def _plot_star_vs_t_cultivation_best(
 
             if row_idx == 0:
                 ax.set_title(pretty_name[layer_name], fontsize=_FIG_FONT_SIZE, pad=10)
-            ax.set_xlabel("Number of Qubits")
+            ax.tick_params(axis="both", which="major", pad=1)
+            ax.set_xlabel("Number of Qubits", labelpad=0)
             if col_idx == 0:
                 ax.set_ylabel(f"AOD {aod}\nExecution Time", fontsize=_FIG_FONT_SIZE)
             else:
-                ax.set_ylabel("Execution Time")
+                ax.set_ylabel("Execution Time", labelpad=0)
             ax.set_ylim(bottom=0)
             if layer_name in {"zz_layers", "x_layer"}:
                 if len(star_ref_values) > 0:
@@ -2173,15 +2183,21 @@ def _plot_star_vs_t_cultivation_best(
         y=0.99,
     )
     _apply_shared_bottom_legend(fig, ncol=3)
-    fig.tight_layout(rect=(0.05, 0.22, 0.97, 0.90))
-    fig.subplots_adjust(top=0.90, hspace=0.42, wspace=0.28, bottom=0.22)
-    fig.savefig(
-        os.path.join(
-            output_dir,
-            f"runtime_star_vs_t_cultivation_all_in_one_aod_"
-            f"{'-'.join(str(a) for a in target_aods)}.pdf",
-        )
+    fig.tight_layout(rect=(0.04, 0.22, 0.98, 0.90), pad=0.10, w_pad=0.03, h_pad=0.03)
+    fig.subplots_adjust(
+        top=0.90,
+        hspace=0.42,
+        wspace=0.28,
+        bottom=0.22,
+        left=0.04,
+        right=0.98,
     )
+    filename = os.path.join(
+        output_dir,
+        f"runtime_star_vs_t_cultivation_all_in_one_aod_"
+        f"{'-'.join(str(a) for a in target_aods)}.pdf",
+    )
+    fig.savefig(filename, bbox_inches="tight", pad_inches=0.04)
     plt.close(fig)
 
 
@@ -2280,6 +2296,7 @@ def _plot_t_cultivation_multi_aod(
 
             if row_idx == 0:
                 ax.set_title(pretty_name[layer_name], fontsize=_FIG_FONT_SIZE, pad=12)
+            ax.tick_params(axis="both", which="major", pad=1)
             if col_idx == 0:
                 ax.set_ylabel(f"{row_label}\nExecution Time", fontsize=_FIG_FONT_SIZE)
             else:
@@ -2295,9 +2312,20 @@ def _plot_t_cultivation_multi_aod(
 
     fig.suptitle("T-cultivation runtime vs AOD", fontsize=_FIG_FONT_SIZE, y=0.995)
     _apply_shared_bottom_legend(fig, ncol=5, anchor_y=0.03)
-    fig.tight_layout(rect=(0.12, 0.13, 0.96, 0.93))
-    fig.subplots_adjust(top=0.93, hspace=0.35, wspace=0.32, left=0.14, bottom=0.15)
-    fig.savefig(os.path.join(output_dir, "runtime_t_cultivation_multi_aod.pdf"))
+    fig.tight_layout(rect=(0.04, 0.13, 0.98, 0.93), pad=0.10, w_pad=0.03, h_pad=0.03)
+    fig.subplots_adjust(
+        top=0.93,
+        hspace=0.35,
+        wspace=0.32,
+        left=0.04,
+        right=0.98,
+        bottom=0.15,
+    )
+    fig.savefig(
+        os.path.join(output_dir, "runtime_t_cultivation_multi_aod.pdf"),
+        bbox_inches="tight",
+        pad_inches=0.04,
+    )
     plt.close(fig)
 
 
@@ -2337,7 +2365,6 @@ def process_csv(csv_file: str, output_dir: str):
     df = _normalize_config_types(df)
     # plot_microarch_comp_average_all(df, output_dir + "/microarch_all")
     # plot_microarch_comp_setting(df, output_dir + "/microarch_setting", setting_idx=4)
-    plot_ablation(df, output_dir + "/ablation_checkerboard", "checkerboard")
     plot_nAOD_placement_lines(df, output_dir, setting_idx=6, skip_placements=True)
     plot_nAOD_placement_lines(df, output_dir, setting_idx=4, skip_placements=True)
 

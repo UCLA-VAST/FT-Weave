@@ -4,6 +4,25 @@ import os
 
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
+_FIG_FONT_SIZE = 18
+_TCULT_EXEC_FIGURE_WIDTH = 7
+_BOX_HEIGHT = 0.7
+_BOX_Y_OFFSET = _BOX_HEIGHT / 2
+_BOX_ALPHA = 0.9
+_AOD_MOVE_PURPLE_SHADES = [
+    "#b64abe",
+    "#D8B4FE",
+    "#C084FC",
+    "#A855F7",
+    "#7E22CE",
+]
+_AOD_RETURN_MOVE_GREEN_SHADES = [
+    "#9edc6f",
+    "#d9f7be",
+    "#b7eb8f",
+    "#73d13d",
+    "#389e0d",
+]
 # Color mapping for operations
 color_map = {
     "TUM": "#9ed76c",
@@ -22,6 +41,13 @@ color_map = {
     "SE_stage_2": "#4F64C2",
 }
 
+_TCULT_OP_ALIASES = {
+    "SE Stage 1": "SE_stage_1",
+    "SE Stage 2": "SE_stage_2",
+    "Move": "move",
+    "Return Move": "return_move",
+}
+
 # Color mapping for AOD devices (for border colors)
 aod_colors = [
     "#FF57579A",
@@ -32,9 +58,8 @@ aod_colors = [
     "#B145D9E5",
     "#4825E8CC",
 ]
-max_aod = 5
-alpha_constant = 0.3
 ylim = 93
+_BOX_BORDER_WIDTH = 1
 
 
 def get_aod_border_color(aod_idx: int) -> str:
@@ -98,6 +123,41 @@ def _extract_qubits_from_targets(targets) -> list[int]:
     return sorted(set(qubits))
 
 
+def _canonical_tcult_operation(operation: str) -> str:
+    return _TCULT_OP_ALIASES.get(operation, operation)
+
+
+def _star_box_label(operation: str, value=None, move_vecs=None) -> str:
+    if operation == "Rz":
+        return f"RZ\nθ:{value}"
+    if operation == "S":
+        return f"S\nθ:{value}"
+    if operation == "SE":
+        return "SE"
+    if operation == "CNOT":
+        if value is not None:
+            return f"CNOT\nQ{value}"
+        return "CNOT"
+    if operation in {"move", "return_move"}:
+        if move_vecs and len(move_vecs) >= 2:
+            return f"{move_vecs[0]}\n$\\downarrow$\n{move_vecs[1]}"
+        return ""
+    if value is not None:
+        return f"{operation}\nQ{value}"
+    return operation
+
+
+def _movement_color_for_aod(operation: str, aod_assignment) -> str:
+    if operation == "return_move":
+        shades = _AOD_RETURN_MOVE_GREEN_SHADES
+    else:
+        shades = _AOD_MOVE_PURPLE_SHADES
+
+    if not isinstance(aod_assignment, int) or aod_assignment < 0:
+        return shades[0]
+    return shades[aod_assignment % len(shades)]
+
+
 # ============================================================================
 # VISUALIZATION FUNCTION
 # ============================================================================
@@ -106,6 +166,7 @@ def plot_circuit_execution(
     n_factories,
     save_path="output/circuit_execution.pdf",
     figure_width=16,
+    show_box_text=True,
 ):
     """
     Plot circuit execution timeline showing operations on each factory.
@@ -114,12 +175,14 @@ def plot_circuit_execution(
         execution_log: List of (start_time, end_time, factory_id, operation, qubit)
         n_factories: Number of factories
         save_path: Path to save the figure
+        show_box_text: Whether to render text labels inside operation boxes
     """
     if not execution_log:
         print("No execution log to plot")
         return
     circuit_length = len(execution_log)
-    fig, ax = plt.subplots(figsize=(circuit_length / 10 + 4, max(6, n_factories * 0.8)))
+    fig_width = max(float(figure_width) * 0.3, circuit_length / 10 + 4)
+    fig, ax = plt.subplots(figsize=(fig_width, max(6, n_factories * 0.8)))
 
     # Plot each operation as a rectangle
     max_time = 0
@@ -140,14 +203,13 @@ def plot_circuit_execution(
         color = color_map.get(operation, "#95a5a6")
 
         # Determine border color: use AOD color for move operations, else black
-        alpha = 1
+        alpha = _BOX_ALPHA
         if operation in ["move", "return_move"]:
             border_color = "black"
-            border_width = 2
-            alpha = aod_assignment / max_aod + alpha_constant
+            border_width = _BOX_BORDER_WIDTH
         else:
             border_color = "black"
-            border_width = 1
+            border_width = _BOX_BORDER_WIDTH
 
         if operation == "Barrier":
             continue
@@ -176,12 +238,17 @@ def plot_circuit_execution(
             for idx, factory_id in enumerate(factories):
                 factory_value = _resolve_factory_value(value, idx)
                 factory_move_vecs = _resolve_factory_value(move_vecs, idx)
+                factory_aod = _resolve_factory_value(aod_assignment, idx)
+
+                box_color = color
+                if operation in ["move", "return_move"]:
+                    box_color = _movement_color_for_aod(operation, factory_aod)
 
                 rect = mpatches.Rectangle(
-                    (start_time, factory_id - 0.4),
+                    (start_time, factory_id - _BOX_Y_OFFSET),
                     duration,
-                    0.8,
-                    facecolor=color,
+                    _BOX_HEIGHT,
+                    facecolor=box_color,
                     edgecolor=border_color,
                     linewidth=border_width,
                     zorder=zorder,
@@ -189,17 +256,8 @@ def plot_circuit_execution(
                 )
                 ax.add_patch(rect)
 
-                if operation not in no_text_operations:
-                    if operation == "Rz":
-                        text = f"{operation}\nθ:{factory_value}"
-                    elif operation == "S":
-                        text = f"{operation}\nθ:{factory_value}"
-                    elif operation in ["move", "return_move"] and factory_move_vecs:
-                        text = f"{operation}\n{factory_move_vecs[0]}\n->{factory_move_vecs[1]}"
-                    elif factory_value is not None:
-                        text = f"{operation}\nQ{factory_value}"
-                    else:
-                        text = f"{operation}"
+                if show_box_text and operation not in no_text_operations:
+                    text = _star_box_label(operation, factory_value, factory_move_vecs)
 
                     ax.text(
                         start_time + duration / 2,
@@ -235,13 +293,11 @@ def plot_circuit_execution(
             facecolor=color_map["CNOT"], edgecolor="black", label="CNOT (Injection)"
         ),
         mpatches.Patch(facecolor=color_map["S"], edgecolor="black", label="S gate"),
-        mpatches.Patch(
-            facecolor=color_map["move"], edgecolor="black", label="move (Forward)"
-        ),
+        mpatches.Patch(facecolor=color_map["move"], edgecolor="black", label="Move"),
         mpatches.Patch(
             facecolor=color_map["return_move"],
             edgecolor="black",
-            label="return_move (Return)",
+            label="Return Move",
         ),
         mpatches.Patch(
             facecolor=color_map["RUS_success"],
@@ -267,7 +323,13 @@ def plot_circuit_execution(
         #     label="Barrier",
         # ),
     ]
-    leg = ax.legend(handles=legend_elements, loc="upper right", fontsize=10)
+    leg = ax.legend(
+        handles=legend_elements,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.05),
+        ncol=8,
+        fontsize=10,
+    )
     leg.set_zorder(20)
     plt.tight_layout()
     base_path = save_path.split(".")[0]
@@ -283,6 +345,7 @@ def plot_circuit_execution_vertical(
     n_factories,
     save_path="output/circuit_execution_vertical.pdf",
     figure_height=16,
+    show_box_text=True,
 ):
     """
     Plot circuit execution timeline with vertical time axis (top to bottom).
@@ -293,6 +356,7 @@ def plot_circuit_execution_vertical(
         n_factories: Number of factories
         save_path: Path to save the figure
         figure_height: Height of the figure in inches
+        show_box_text: Whether to render text labels inside operation boxes
     """
     if not execution_log:
         print("No execution log to plot")
@@ -319,14 +383,13 @@ def plot_circuit_execution_vertical(
         color = color_map.get(operation, "#95a5a6")
 
         # Determine border color: use AOD color for move operations, else black
-        alpha = 1
+        alpha = _BOX_ALPHA
         if operation in ["move", "return_move"]:
             border_color = "black"
-            border_width = 2
-            alpha = aod_assignment / max_aod + alpha_constant
+            border_width = _BOX_BORDER_WIDTH
         else:
             border_color = "black"
-            border_width = 1
+            border_width = _BOX_BORDER_WIDTH
 
         if operation == "Barrier":
             continue
@@ -354,14 +417,19 @@ def plot_circuit_execution_vertical(
             for idx, factory_id in enumerate(factories):
                 factory_value = _resolve_factory_value(value, idx)
                 factory_move_vecs = _resolve_factory_value(move_vecs, idx)
+                factory_aod = _resolve_factory_value(aod_assignment, idx)
+
+                box_color = color
+                if operation in ["move", "return_move"]:
+                    box_color = _movement_color_for_aod(operation, factory_aod)
 
                 # Swap coordinates: factory_id on x-axis, time on y-axis
                 # Rectangle: (x, y), width (horizontal = factory dimension), height (vertical = time dimension)
                 rect = mpatches.Rectangle(
-                    (factory_id - 0.4, start_time),
-                    0.8,
+                    (factory_id - _BOX_Y_OFFSET, start_time),
+                    _BOX_HEIGHT,
                     duration,
-                    facecolor=color,
+                    facecolor=box_color,
                     edgecolor=border_color,
                     alpha=alpha,  # Lighter for early moves, darker for later
                     linewidth=border_width,
@@ -369,17 +437,8 @@ def plot_circuit_execution_vertical(
                 )
                 ax.add_patch(rect)
 
-                if operation not in no_text_operations:
-                    if operation == "Rz":
-                        text = f"{operation}\nθ:{factory_value}"
-                    elif operation == "S":
-                        text = f"{operation}\nθ:{factory_value}"
-                    elif operation in ["move", "return_move"] and factory_move_vecs:
-                        text = f"{operation}\n{factory_move_vecs[0]}\n->{factory_move_vecs[1]}"
-                    elif factory_value is not None:
-                        text = f"{operation}\nQ{factory_value}"
-                    else:
-                        text = f"{operation}"
+                if show_box_text and operation not in no_text_operations:
+                    text = _star_box_label(operation, factory_value, factory_move_vecs)
 
                     ax.text(
                         factory_id,
@@ -415,13 +474,11 @@ def plot_circuit_execution_vertical(
             facecolor=color_map["CNOT"], edgecolor="black", label="CNOT (Injection)"
         ),
         mpatches.Patch(facecolor=color_map["S"], edgecolor="black", label="S gate"),
-        mpatches.Patch(
-            facecolor=color_map["move"], edgecolor="black", label="move (Forward)"
-        ),
+        mpatches.Patch(facecolor=color_map["move"], edgecolor="black", label="Move"),
         mpatches.Patch(
             facecolor=color_map["return_move"],
             edgecolor="black",
-            label="return_move (Return)",
+            label="Return Move",
         ),
         mpatches.Patch(
             facecolor=color_map["RUS_success"],
@@ -439,7 +496,13 @@ def plot_circuit_execution_vertical(
             label="TMR:fail",
         ),
     ]
-    leg = ax.legend(handles=legend_elements, loc="upper right", fontsize=10)
+    leg = ax.legend(
+        handles=legend_elements,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.16),
+        ncol=4,
+        fontsize=10,
+    )
     leg.set_zorder(20)
     plt.tight_layout()
     base_path = save_path.split(".")[0]
@@ -456,22 +519,61 @@ def plot_t_cultivation_execution(
     n_factories: int,
     save_path="output/circuit_execution/t_cultivation_execution.pdf",
 ):
-    """Plot T-cultivation timeline with qubit and factory lanes.
-
-    X-axis is time, Y-axis contains logical qubits (q*) and factories (f*).
-    For factory-side CNOT in RUS teleportation, also draw CNOT(T) on target qubits.
-    """
+    """Plot a single T-cultivation timeline with qubit and factory lanes."""
     if not execution_log:
         print("No execution log to plot")
         return
 
     rows = [f"q{i}" for i in range(n_qubits)] + [f"f{i}" for i in range(n_factories)]
+    fig, ax = plt.subplots(figsize=(10.0, max(4, 0.72 * len(rows))))
+    _plot_t_cultivation_execution_on_ax(
+        ax,
+        execution_log,
+        n_qubits=n_qubits,
+        n_factories=n_factories,
+        title="T-Cultivation Execution Timeline",
+        show_legend=True,
+    )
+
+    output_dir = os.path.dirname(save_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"\nT-cultivation plot saved to: {save_path}")
+
+
+def _t_cultivation_legend_handles():
+    legend_ops = [
+        ("H", "H"),
+        ("CNOT", "CNOT"),
+        ("S", "S"),
+        ("T", "T"),
+        ("SE_stage_1", "SE Stage 1"),
+        ("SE_stage_2", "SE Stage 2"),
+        ("move", "Move"),
+        ("return_move", "Return Move"),
+    ]
+    return [
+        mpatches.Patch(facecolor=color_map[key], edgecolor="black", label=label)
+        for key, label in legend_ops
+        if key in color_map
+    ]
+
+
+def _plot_t_cultivation_execution_on_ax(
+    ax,
+    execution_log,
+    *,
+    n_qubits: int,
+    n_factories: int,
+    title: str,
+    show_legend: bool,
+    shared_xmax: float | None = None,
+) -> None:
+    rows = [f"q{i}" for i in range(n_qubits)] + [f"f{i}" for i in range(n_factories)]
     y_pos = {name: idx for idx, name in enumerate(rows)}
-
     max_time = max(entry[1] for entry in execution_log)
-    fig, ax = plt.subplots(figsize=(14, max(4, 0.9 * len(rows))))
-
-    no_text_operations = {"RUS_success", "RUS_fail", "TMR_fail"}
 
     for entry in execution_log:
         (
@@ -484,70 +586,43 @@ def plot_t_cultivation_execution(
             _move_vecs,
         ) = _parse_execution_entry(entry)
 
+        operation = _canonical_tcult_operation(operation)
+
         duration = max(end_time - start_time, 0.1)
         color = color_map.get(operation, "#95a5a6")
 
-        # Factory lanes
-        for idx, factory_id in enumerate(factories):
+        for factory_id in factories:
             row_name = f"f{factory_id}"
             if row_name not in y_pos:
                 continue
             rect = mpatches.Rectangle(
-                (start_time, y_pos[row_name] - 0.35),
+                (start_time, y_pos[row_name] - _BOX_Y_OFFSET),
                 duration,
-                0.7,
+                _BOX_HEIGHT,
                 facecolor=color,
                 edgecolor="black",
-                linewidth=1 if operation not in {"move", "return_move"} else 2,
-                alpha=0.9 if aod_assignment is None else 0.9,
+                linewidth=_BOX_BORDER_WIDTH,
+                alpha=_BOX_ALPHA,
             )
             ax.add_patch(rect)
-            if operation not in no_text_operations:
-                factory_value = _resolve_factory_value(value, idx)
-                text = (
-                    operation
-                    if factory_value is None
-                    else f"{operation}\nQ{factory_value}"
-                )
-                ax.text(
-                    start_time + duration / 2,
-                    y_pos[row_name],
-                    text,
-                    ha="center",
-                    va="center",
-                    fontsize=7,
-                )
 
         qubits = _extract_qubits_from_targets(value)
-
-        # Logical-qubit lanes
         if not factories and qubits:
-            # Normal logical gate path.
             for qubit in qubits:
                 row_name = f"q{qubit}"
                 if row_name not in y_pos:
                     continue
                 rect = mpatches.Rectangle(
-                    (start_time, y_pos[row_name] - 0.35),
+                    (start_time, y_pos[row_name] - _BOX_Y_OFFSET),
                     duration,
-                    0.7,
+                    _BOX_HEIGHT,
                     facecolor=color,
                     edgecolor="black",
-                    linewidth=1,
-                    alpha=0.9,
+                    linewidth=_BOX_BORDER_WIDTH,
+                    alpha=_BOX_ALPHA,
                 )
                 ax.add_patch(rect)
-                if operation not in no_text_operations:
-                    ax.text(
-                        start_time + duration / 2,
-                        y_pos[row_name],
-                        operation,
-                        ha="center",
-                        va="center",
-                        fontsize=7,
-                    )
 
-        # For factory-side CNOT (RUS teleportation), also plot target qubit with suffix.
         if factories and operation == "CNOT" and qubits:
             t_color = color_map.get("CNOT(T)", color)
             for qubit in qubits:
@@ -555,55 +630,105 @@ def plot_t_cultivation_execution(
                 if row_name not in y_pos:
                     continue
                 rect = mpatches.Rectangle(
-                    (start_time, y_pos[row_name] - 0.35),
+                    (start_time, y_pos[row_name] - _BOX_Y_OFFSET),
                     duration,
-                    0.7,
+                    _BOX_HEIGHT,
                     facecolor=t_color,
                     edgecolor="black",
-                    linewidth=1,
-                    alpha=0.9,
+                    linewidth=_BOX_BORDER_WIDTH,
+                    alpha=_BOX_ALPHA,
                 )
                 ax.add_patch(rect)
-                ax.text(
-                    start_time + duration / 2,
-                    y_pos[row_name],
-                    "CNOT(T)",
-                    ha="center",
-                    va="center",
-                    fontsize=7,
-                )
 
-    ax.set_xlim(0, max_time * 1.03)
+    ax.set_xlim(0, shared_xmax if shared_xmax is not None else max_time * 1.03)
     ax.set_ylim(-0.7, len(rows) - 0.3)
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Qubits / Factories")
+    ax.set_xlabel("Time", fontsize=_FIG_FONT_SIZE)
+    ax.set_ylabel("")
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels(rows)
-    ax.set_title("T-Cultivation Execution Timeline")
+    ax.tick_params(axis="x", labelsize=_FIG_FONT_SIZE)
+    ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE - 1)
+    ax.set_title(title, fontsize=_FIG_FONT_SIZE, pad=2)
     ax.grid(axis="x", linestyle="--", alpha=0.35)
 
-    legend_ops = [
-        "H",
-        "CNOT",
-        "CNOT(T)",
-        "S",
-        "T",
-        "Rz",
-        "SE_stage_1",
-        "SE_stage_2",
-        "move",
-        "return_move",
-    ]
-    legend_handles = [
-        mpatches.Patch(facecolor=color_map[op], edgecolor="black", label=op)
-        for op in legend_ops
-        if op in color_map
-    ]
-    ax.legend(handles=legend_handles, loc="upper right", fontsize=8)
+    if show_legend:
+        ax.legend(
+            handles=_t_cultivation_legend_handles(),
+            loc="center left",
+            bbox_to_anchor=(1.0, 0.5),
+            fontsize=_FIG_FONT_SIZE,
+            frameon=True,
+        )
+
+
+def plot_t_cultivation_execution_subfigures(
+    row_plots,
+    save_path="output/circuit_execution/t_cultivation_execution_subfigures.pdf",
+):
+    """Plot multiple T-cultivation timelines as row-wise subfigures.
+
+    row_plots: list of (row_title, execution_log, n_qubits, n_factories)
+    """
+    if not row_plots:
+        print("No row plots to render")
+        return
+
+    row_count = len(row_plots)
+    lane_counts = [n_qubits + n_factories for _, _, n_qubits, n_factories in row_plots]
+    row_height_ratios = [max(0.8, lanes / 3.0) for lanes in lane_counts]
+    global_xmax = (
+        max(
+            max(entry[1] for entry in execution_log)
+            for _, execution_log, _, _ in row_plots
+        )
+        * 1.03
+    )
+
+    fig_height = 0.9 + 0.90 * sum(row_height_ratios)
+    fig, axes = plt.subplots(
+        row_count,
+        1,
+        figsize=(10.0, fig_height),
+        sharex=True,
+        gridspec_kw={"height_ratios": row_height_ratios},
+    )
+    fig.suptitle(
+        "Execution Diagram for One Qubit with 10 T Gates",
+        fontsize=_FIG_FONT_SIZE,
+        y=0.972,
+    )
+    if row_count == 1:
+        axes = [axes]
+
+    for ax, (row_title, execution_log, n_qubits, n_factories) in zip(axes, row_plots):
+        _plot_t_cultivation_execution_on_ax(
+            ax,
+            execution_log,
+            n_qubits=n_qubits,
+            n_factories=n_factories,
+            title=row_title,
+            show_legend=False,
+            shared_xmax=global_xmax,
+        )
+
+    # Only keep the x-axis label/tick labels on the last row.
+    for ax in axes[:-1]:
+        ax.set_xlabel("")
+        ax.tick_params(axis="x", labelbottom=False)
+
+    fig.legend(
+        handles=_t_cultivation_legend_handles(),
+        loc="center right",
+        ncol=1,
+        bbox_to_anchor=(0.97, 0.5),
+        fontsize=max(10, _FIG_FONT_SIZE - 4),
+        frameon=True,
+    )
 
     output_dir = os.path.dirname(save_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"\nT-cultivation plot saved to: {save_path}")
+
+    fig.tight_layout(rect=(0, 0.0, 1, 0.98))
+    fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"\nT-cultivation subfigure plot saved to: {save_path}")

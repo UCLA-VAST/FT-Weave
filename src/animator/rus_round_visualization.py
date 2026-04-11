@@ -50,6 +50,65 @@ def _resolve_entry_value(values, idx: int):
     return values
 
 
+def _parse_location_xy(raw_loc) -> Optional[Tuple[int, int]]:
+    """Parse location from "(x,y)", [x, y], or (x, y) into integer tuple."""
+    if raw_loc is None:
+        return None
+
+    # String form: "(x,y)" or "x,y"
+    if isinstance(raw_loc, str):
+        loc_str = raw_loc.strip().strip("()")
+        parts = [p.strip() for p in loc_str.split(",")]
+        if len(parts) != 2:
+            return None
+        try:
+            return int(float(parts[0])), int(float(parts[1]))
+        except ValueError:
+            return None
+
+    # Sequence form: [x, y] or (x, y)
+    if isinstance(raw_loc, (list, tuple)) and len(raw_loc) == 2:
+        try:
+            return int(float(raw_loc[0])), int(float(raw_loc[1]))
+        except (TypeError, ValueError):
+            return None
+
+    return None
+
+
+def _parse_execution_entry(entry: tuple):
+    """Parse execution log entry across legacy and current tuple formats."""
+    if len(entry) == 5:
+        start_time, end_time, factory_id, operation, aod_assignment = entry
+        value = None
+        move_vecs = None
+    elif len(entry) == 6:
+        start_time, end_time, factory_id, operation, aod_assignment, value = entry
+        move_vecs = None
+    elif len(entry) >= 7:
+        (
+            start_time,
+            end_time,
+            factory_id,
+            operation,
+            aod_assignment,
+            value,
+            move_vecs,
+        ) = entry[:7]
+    else:
+        raise ValueError(f"Unexpected log entry format: {entry}")
+
+    return (
+        start_time,
+        end_time,
+        _normalize_entry_factories(factory_id),
+        operation,
+        aod_assignment,
+        value,
+        move_vecs,
+    )
+
+
 def extract_rus_rounds(execution_log: List[Tuple]) -> List[List[Tuple]]:
     """
     Extract RUS rounds from execution log.
@@ -137,12 +196,12 @@ def extract_assignments_from_round(
     location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
 
     for entry in rus_round:
-        if len(entry) < 4:
+        try:
+            _, _, factory_ids, operation, _aod_assignment, value, move_vecs = (
+                _parse_execution_entry(entry)
+            )
+        except ValueError:
             continue
-        operation = entry[3]
-        factory_ids = _normalize_entry_factories(entry[2])
-        move_vecs = entry[5] if len(entry) > 5 else None
-        qubit_value = entry[4] if len(entry) > 4 else None
 
         # Look for move operations or injection operations (CNOT/SE + RUS_success/RUS_fail)
         for idx, factory_id in enumerate(factory_ids):
@@ -150,32 +209,20 @@ def extract_assignments_from_round(
                 # move/return_move operations have move_vecs = [[from, to], [from, to], ...]
                 factory_move_vecs = _resolve_entry_value(move_vecs, idx)
                 if factory_move_vecs and len(factory_move_vecs) >= 2:
-                    to_loc_str = factory_move_vecs[1]  # e.g., "(0,0)"
-                    # Parse the location string
-                    try:
-                        loc_str = to_loc_str.strip("()")
-                        x, y = map(int, loc_str.split(","))
-                        qubit_loc = (x, y)
-                        if qubit_loc in location_to_qubit:
-                            qubit_id = location_to_qubit[qubit_loc]
-                            assignments[factory_id] = qubit_id
-                    except (ValueError, IndexError):
-                        pass
+                    qubit_loc = _parse_location_xy(factory_move_vecs[1])
+                    if qubit_loc in location_to_qubit:
+                        qubit_id = location_to_qubit[qubit_loc]
+                        assignments[factory_id] = qubit_id
             elif operation == "return_move" and move_vecs:
                 # move/return_move operations have move_vecs = [[from, to], [from, to], ...]
                 factory_move_vecs = _resolve_entry_value(move_vecs, idx)
                 if factory_move_vecs and len(factory_move_vecs) >= 2:
-                    to_loc_str = factory_move_vecs[1]  # e.g., "(0,0)"
-                    # Parse the location string
-                    try:
-                        loc_str = to_loc_str.strip("()")
-                        x, y = map(int, loc_str.split(","))
-                        return_assignments[factory_id] = (x, y)
-                    except (ValueError, IndexError):
-                        pass
+                    return_loc = _parse_location_xy(factory_move_vecs[1])
+                    if return_loc is not None:
+                        return_assignments[factory_id] = return_loc
             elif operation in ["RUS_success", "RUS_fail"]:
                 # Use the qubit from RUS result marker (qubit_value)
-                factory_qubit = _resolve_entry_value(qubit_value, idx)
+                factory_qubit = _resolve_entry_value(value, idx)
                 if (
                     factory_qubit is not None
                     and factory_id is not None
@@ -199,10 +246,12 @@ def extract_rus_results(rus_round: List[Tuple]) -> Dict[int, bool]:
     results = {}
 
     for entry in rus_round:
-        if len(entry) < 4:
+        try:
+            _, _, factory_ids, operation, _aod_assignment, _value, _move_vecs = (
+                _parse_execution_entry(entry)
+            )
+        except ValueError:
             continue
-        operation = entry[3]
-        factory_ids = _normalize_entry_factories(entry[2])
 
         if operation == "RUS_success":
             for factory_id in factory_ids:
@@ -227,10 +276,12 @@ def extract_tmr_failures(rus_round: List[Tuple]) -> set:
     tmr_failures = set()
 
     for entry in rus_round:
-        if len(entry) < 4:
+        try:
+            _, _, factory_ids, operation, _aod_assignment, _value, _move_vecs = (
+                _parse_execution_entry(entry)
+            )
+        except ValueError:
             continue
-        operation = entry[3]
-        factory_ids = _normalize_entry_factories(entry[2])
 
         if operation == "TMR_fail":
             for factory_id in factory_ids:
@@ -257,11 +308,13 @@ def extract_angles_from_round(
     factory_angles = {}
 
     for entry in rus_round:
-        if len(entry) == 5:
-            _, _, factory_ids, operation, value = entry
-        else:
+        try:
+            _, _, factory_ids, operation, _aod_assignment, value, _move_vecs = (
+                _parse_execution_entry(entry)
+            )
+        except ValueError:
             continue
-        factory_ids = _normalize_entry_factories(factory_ids)
+
         if operation == "Rz":
             # Rz operation shows angle preparation
             for idx, factory_id in enumerate(factory_ids):
@@ -329,6 +382,24 @@ def get_box_edge_point(center, box_size, direction_vector):
     return (center[0] + dx_norm * t, center[1] + dy_norm * t)
 
 
+def _batch_intensity(time_key, sorted_times) -> float:
+    """Map batch order to [0, 1] intensity with strong separation."""
+    if not sorted_times:
+        return 0.5
+    denom = max(len(sorted_times) - 1, 1)
+    time_to_intensity = {t: i / denom for i, t in enumerate(sorted_times)}
+    return time_to_intensity.get(time_key, 0.5)
+
+
+def _arrow_style_from_intensity(intensity: float) -> tuple[float, float]:
+    """Return (linewidth, alpha) with inverse thickness/alpha relationship."""
+    # Slight nonlinear boost preserves clear batch separation.
+    boosted = intensity**1.35
+    linewidth = 4.2 - 3.2 * boosted
+    alpha = 0.18 + 0.82 * boosted
+    return linewidth, alpha
+
+
 def plot_rus_round(
     round_idx: int,
     rus_round: List[Tuple],
@@ -368,10 +439,18 @@ def plot_rus_round(
     for entry in rus_round:
         start_time = min(start_time, entry[0])
         end_time = max(end_time, entry[1])
-        if len(entry) >= 4 and entry[3] in ["CNOT"]:
-            qubit_id = entry[4] if len(entry) > 4 else None
-            if qubit_id is not None:
-                qubit_cnot_count[qubit_id] = qubit_cnot_count.get(qubit_id, 0) + 1
+        try:
+            _, _, factory_ids, operation, _aod_assignment, value, _move_vecs = (
+                _parse_execution_entry(entry)
+            )
+        except ValueError:
+            continue
+
+        if operation == "CNOT":
+            for idx, _factory_id in enumerate(factory_ids):
+                qubit_id = _resolve_entry_value(value, idx)
+                if isinstance(qubit_id, int):
+                    qubit_cnot_count[qubit_id] = qubit_cnot_count.get(qubit_id, 0) + 1
 
     duration = end_time - start_time
 
@@ -526,36 +605,41 @@ def plot_rus_round(
     location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
 
     for entry in rus_round:
-        if len(entry) >= 4 and entry[3] in ["move", "return_move"]:
-            start_time = entry[0]
-            end_time = entry[1]
-            factory_id = entry[2]
-            operation = entry[3]
-            move_vecs = entry[5] if len(entry) > 5 else None
-            aod_assignment = entry[6] if len(entry) > 6 else 0
+        try:
+            (
+                start_time,
+                end_time,
+                factory_ids,
+                operation,
+                aod_assignment,
+                _value,
+                move_vecs,
+            ) = _parse_execution_entry(entry)
+        except ValueError:
+            continue
 
-            if move_vecs and len(move_vecs) >= 2:
-                # Extract destination location and find qubit_id
-                to_loc_str = move_vecs[1]  # e.g., "(0,0)"
-                try:
-                    loc_str = to_loc_str.strip("()")
-                    x, y = map(int, loc_str.split(","))
-                    qubit_loc = (x, y)
-                    if qubit_loc in location_to_qubit:
-                        qubit_id = location_to_qubit[qubit_loc]
-                        if operation == "move":
-                            move_times.add((start_time, end_time))
-                            move_info[(qubit_id, factory_id)] = (start_time, end_time)
-                            move_aod_info[(qubit_id, factory_id)] = aod_assignment
-                        else:  # return_move
-                            return_move_times.add((start_time, end_time))
-                            return_move_info[factory_id] = (
-                                start_time,
-                                end_time,
-                            )
-                            return_move_aod_info[factory_id] = aod_assignment
-                except (ValueError, IndexError):
-                    pass
+        if operation in ["move", "return_move"]:
+            for idx, factory_id in enumerate(factory_ids):
+                factory_move_vecs = _resolve_entry_value(move_vecs, idx)
+                factory_aod = _resolve_entry_value(aod_assignment, idx)
+
+                if not (factory_move_vecs and len(factory_move_vecs) >= 2):
+                    continue
+
+                qubit_loc = _parse_location_xy(factory_move_vecs[1])
+                if qubit_loc in location_to_qubit:
+                    qubit_id = location_to_qubit[qubit_loc]
+                    if operation == "move":
+                        move_times.add((start_time, end_time))
+                        move_info[(qubit_id, factory_id)] = (start_time, end_time)
+                        move_aod_info[(qubit_id, factory_id)] = factory_aod
+                    else:  # return_move
+                        return_move_times.add((start_time, end_time))
+                        return_move_info[factory_id] = (
+                            start_time,
+                            end_time,
+                        )
+                        return_move_aod_info[factory_id] = factory_aod
 
     # Draw assignment arrows
     sorted_times = sorted(move_times) if move_times else []
@@ -589,15 +673,13 @@ def plot_rus_round(
                 aod_idx = move_aod_info[(qubit_id, factory_id)]
                 aod_edge_color = get_aod_border_color(aod_idx)
 
-            # Adjust shade based on movement time
+            # Adjust arrow prominence based on routing batch time.
             if (qubit_id, factory_id) in move_info:
                 move_time = move_info[(qubit_id, factory_id)]
-                time_to_intensity = {
-                    t: i / max(len(sorted_times), 1) for i, t in enumerate(sorted_times)
-                }
-                intensity = time_to_intensity.get(move_time, 0.5)
+                intensity = _batch_intensity(move_time, sorted_times)
             else:
                 intensity = 0.5
+            linewidth, alpha = _arrow_style_from_intensity(intensity)
 
             # Draw arrow with AOD color outline
             arrow = FancyArrowPatch(
@@ -605,17 +687,16 @@ def plot_rus_round(
                 end_point,
                 arrowstyle="->",
                 mutation_scale=25,
-                linewidth=2.5 - 2 * intensity,  # Thicker for later moves
+                linewidth=linewidth,
                 color=base_color,
                 # edgecolor=aod_edge_color,
-                alpha=0.3
-                + 0.4 * intensity,  # Lighter for early moves, darker for later
+                alpha=alpha,
                 zorder=5,
                 connectionstyle="arc3,rad=0.2",
             )
             ax.add_patch(arrow)
 
-    sorted_times = sorted(return_move_times) if move_times else []
+    sorted_times = sorted(return_move_times) if return_move_times else []
     for factory_id, (new_x, new_y) in return_assignments.items():
         old_x, old_y = magic_state_locations[factory_id]
         magic_state_locations[factory_id] = (new_x, new_y)
@@ -638,16 +719,13 @@ def plot_rus_round(
             aod_idx = return_move_aod_info[factory_id]
             aod_edge_color = get_aod_border_color(aod_idx)
 
-        # Adjust shade based on movement time
+        # Adjust arrow prominence based on routing batch time.
         if factory_id in return_move_info:
             move_time = return_move_info[factory_id]
-            sorted_times = sorted(move_times) if move_times else []
-            time_to_intensity = {
-                t: i / max(len(sorted_times), 1) for i, t in enumerate(sorted_times)
-            }
-            intensity = time_to_intensity.get(move_time, 0.5)
+            intensity = _batch_intensity(move_time, sorted_times)
         else:
             intensity = 0.5
+        linewidth, alpha = _arrow_style_from_intensity(intensity)
 
         # Draw arrow with AOD color outline
         arrow = FancyArrowPatch(
@@ -655,10 +733,10 @@ def plot_rus_round(
             end_point,
             arrowstyle="->",
             mutation_scale=25,
-            linewidth=2.5 - 2 * intensity,  # Thicker for later moves
+            linewidth=linewidth,
             color=base_color,
             # edgecolor=aod_edge_color,
-            alpha=0.3 + 0.4 * intensity,  # Lighter for early moves, darker for later
+            alpha=alpha,
             zorder=5,
             connectionstyle="arc3,rad=0.2",
         )
@@ -704,7 +782,7 @@ def plot_rus_round(
             width=0.1,
             color=color_rus_success,
             alpha=0.7,
-            label="move:Success",
+            label="Move (RUS success)",
         ),
         mpatches.FancyArrow(
             0,
@@ -714,7 +792,7 @@ def plot_rus_round(
             width=0.1,
             color=color_rus_fail,
             alpha=0.7,
-            label="move:Fail",
+            label="Move (RUS fail)",
         ),
         mpatches.FancyArrow(
             0,
@@ -724,7 +802,7 @@ def plot_rus_round(
             width=0.1,
             color=color_return_move,
             alpha=0.7,
-            label="return_move",
+            label="Return Move",
         ),
     ]
     ax.legend(

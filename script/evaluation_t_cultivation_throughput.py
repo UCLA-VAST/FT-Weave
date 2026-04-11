@@ -2,10 +2,10 @@ import os
 import sys
 import logging
 import argparse
+import csv
 from dataclasses import dataclass
 
 import numpy as np
-import matplotlib.pyplot as plt
 
 # Ensure repository root is on sys.path so `src` is importable when running this script
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -315,23 +315,11 @@ def main(
     factory_counts: list[int],
     metric_mode: str = "cycles_per_t",
     print_profile: bool = False,
+    num_trials: int = 10,
+    output_csv: str = "output/t_cultivation/factory_throughput/t_cultivation_throughput_trials.csv",
 ):
-    # Sweep settings (keep defaults modest so the script runs in reasonable time).
-    # For better stochastic smoothing, increase NUM_TRIALS.
-    num_trials = 10
-
     # In all sweeps: fixed K = 10 T gates per qubit.
     k_per_qubit = 10
-    plt.rcParams.update(
-        {
-            "font.size": 14,
-            "axes.titlesize": 15,
-            "axes.labelsize": 14,
-            "xtick.labelsize": 13,
-            "ytick.labelsize": 13,
-            "legend.fontsize": 12,
-        }
-    )
     settings = [
         TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
         TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
@@ -343,31 +331,21 @@ def main(
     os.makedirs(output_dir, exist_ok=True)
     first_trial_dir = os.path.join(output_dir, "first_trial_timelines")
     os.makedirs(first_trial_dir, exist_ok=True)
+    csv_dir = os.path.dirname(output_csv)
+    if csv_dir:
+        os.makedirs(csv_dir, exist_ok=True)
     first_trial_jobs: list[tuple[TSetting, str, SweepSpec, int, int]] = []
+    trial_rows: list[dict] = []
     try:
         # ------------------------------------------------------------------
         # Type 1: 1 qubit, fixed K=10, sweep number of factories
-        #   Row 1: circuit duration, Row 2: throughput
         # ------------------------------------------------------------------
-        fig1, axes1 = plt.subplots(2, 1, figsize=(8.5, 8.0), sharex=True)
-        fig1_duration_ymax = 0.0
-        fig1_metric_ymax = 0.0
         spec_fig1 = SweepSpec(
             n_qubits=1, k_t_per_qubit=k_per_qubit, layers_parallel=False
         )
-        ax_time = axes1[0]
-        ax_thr = axes1[1]
-        for idx, setting in enumerate(settings):
+        for setting_idx, setting in enumerate(settings):
             apply_setting(setting)
-            means_fig1: list[float] = []
-            lower_err_fig1: list[float] = []
-            upper_err_fig1: list[float] = []
-            means_time_fig1: list[float] = []
-            lower_err_time_fig1: list[float] = []
-            upper_err_time_fig1: list[float] = []
             for nf in factory_counts:
-                trial_values_fig1: list[float] = []
-                trial_times_fig1: list[float] = []
                 logging.info(
                     "Fig1 [distance-%d, LER=%g] nf=%d (%d trials)",
                     setting.distance,
@@ -376,22 +354,19 @@ def main(
                     num_trials,
                 )
                 for t in range(num_trials):
-                    seed = 1000000 * settings.index(setting) + 1000 * nf + t
+                    seed = 1000000 * setting_idx + 1000 * nf + t
                     try:
                         _, makespan = metrics_for_seed(
                             spec=spec_fig1,
                             n_factories=nf,
                             seed=seed,
                         )
-                        trial_values_fig1.append(
-                            metric_from_makespan(
-                                spec=spec_fig1,
-                                n_factories=nf,
-                                makespan=makespan,
-                                metric_mode=metric_mode,
-                            )
+                        metric_value = metric_from_makespan(
+                            spec=spec_fig1,
+                            n_factories=nf,
+                            makespan=makespan,
+                            metric_mode=metric_mode,
                         )
-                        trial_times_fig1.append(makespan)
                     except RuntimeError as e:
                         logging.warning(
                             "Fig1 failed [distance-%d, LER=%g] nf=%d: %s",
@@ -400,17 +375,30 @@ def main(
                             nf,
                             e,
                         )
-                        trial_values_fig1.append(0.0)
-                        trial_times_fig1.append(0.0)
-                m, vmin, vmax = mean_min_max(trial_values_fig1)
-                means_fig1.append(m)
-                lower_err_fig1.append(max(0.0, m - vmin))
-                upper_err_fig1.append(max(0.0, vmax - m))
-                mt, tmin, tmax = mean_min_max(trial_times_fig1)
-                means_time_fig1.append(mt)
-                lower_err_time_fig1.append(max(0.0, mt - tmin))
-                upper_err_time_fig1.append(max(0.0, tmax - mt))
-                seed0 = 1000000 * settings.index(setting) + 1000 * nf
+                        makespan = 0.0
+                        metric_value = 0.0
+
+                    trial_rows.append(
+                        {
+                            "figure": "fig1",
+                            "setting_index": setting_idx,
+                            "distance": setting.distance,
+                            "fidelity_target": setting.fidelity_target,
+                            "factory_physical_size": setting.factory_physical_size,
+                            "metric_mode": metric_mode,
+                            "trial": t,
+                            "seed": seed,
+                            "n_qubits": spec_fig1.n_qubits,
+                            "k_t_per_qubit": spec_fig1.k_t_per_qubit,
+                            "layers_parallel": spec_fig1.layers_parallel,
+                            "ratio": "",
+                            "n_factories": nf,
+                            "makespan": makespan,
+                            "metric_value": metric_value,
+                        }
+                    )
+
+                seed0 = 1000000 * setting_idx + 1000 * nf
                 first_trial_jobs.append(
                     (
                         setting,
@@ -426,79 +414,15 @@ def main(
                         seed0,
                     )
                 )
-            fig1_duration_ymax = max(
-                fig1_duration_ymax,
-                max(
-                    (m + e for m, e in zip(means_time_fig1, upper_err_time_fig1)),
-                    default=0.0,
-                ),
-            )
-            fig1_metric_ymax = max(
-                fig1_metric_ymax,
-                max((m + e for m, e in zip(means_fig1, upper_err_fig1)), default=0.0),
-            )
-            ax_thr.errorbar(
-                factory_counts,
-                means_fig1,
-                yerr=[lower_err_fig1, upper_err_fig1],
-                capsize=3,
-                marker="o",
-                label=_setting_subtitle(setting),
-            )
-            ax_time.errorbar(
-                factory_counts,
-                means_time_fig1,
-                yerr=[lower_err_time_fig1, upper_err_time_fig1],
-                capsize=3,
-                marker="o",
-                label=_setting_subtitle(setting),
-            )
-        ax_thr.set_xlabel("Number of factories")
-        ax_thr.grid(True, alpha=0.3)
-        ax_thr.tick_params(axis="both", labelsize=13)
-        ax_thr.legend(fontsize=11)
-
-        ax_time.set_xlabel("Number of factories")
-        ax_time.grid(True, alpha=0.3)
-        ax_time.tick_params(axis="both", labelsize=13)
-        ax_time.legend(fontsize=11)
-
-        axes1[0].set_ylabel("Circuit duration")
-        if metric_mode == "throughput":
-            axes1[1].set_ylabel("Single-factory throughput (T / time / factory)")
-        else:
-            axes1[1].set_ylabel("Cycles per T per factory")
-        fig1.suptitle("1 qubit, K=10 T gates, factories sweep", fontsize=18)
-        fig1.tight_layout()
-        fig1_duration_ylim_top = max(1.0, fig1_duration_ymax * 1.08)
-        fig1_metric_ylim_top = max(1.0, fig1_metric_ymax * 1.08)
-        axes1[0].set_ylim(0.0, fig1_duration_ylim_top)
-        axes1[1].set_ylim(0.0, fig1_metric_ylim_top)
 
         # ------------------------------------------------------------------
         # Type 2: qubit count 1..10, factory/qubit ratio in {1,2,4,8}
-        #   Row 1: circuit duration, Row 2: throughput
         # ------------------------------------------------------------------
         qubit_counts = list(range(1, 11))
         ratios = [1, 2, 4, 8]
-        fig2, axes2 = plt.subplots(
-            2, len(settings), figsize=(6 * len(settings), 8.0), sharex="col"
-        )
-        if len(settings) == 1:
-            axes2 = np.asarray(axes2).reshape(2, 1)
-        fig2_duration_ymax = 0.0
-        fig2_metric_ymax = 0.0
-        for idx, setting in enumerate(settings):
-            ax_time = axes2[0, idx]
-            ax_thr = axes2[1, idx]
+        for setting_idx, setting in enumerate(settings):
             apply_setting(setting)
             for ratio in ratios:
-                means_fig2: list[float] = []
-                lower_err_fig2: list[float] = []
-                upper_err_fig2: list[float] = []
-                means_time_fig2: list[float] = []
-                lower_err_time_fig2: list[float] = []
-                upper_err_time_fig2: list[float] = []
                 for n_qubits in qubit_counts:
                     n_factories = ratio * n_qubits
                     spec = SweepSpec(
@@ -506,11 +430,9 @@ def main(
                         k_t_per_qubit=k_per_qubit,
                         layers_parallel=True,
                     )
-                    trial_values_fig2: list[float] = []
-                    trial_times_fig2: list[float] = []
                     for t in range(num_trials):
                         seed = (
-                            2000000 * settings.index(setting)
+                            2000000 * setting_idx
                             + 100000 * ratio
                             + 1000 * n_factories
                             + 13 * n_qubits
@@ -523,15 +445,12 @@ def main(
                                 seed=seed,
                                 print_profile=print_profile,
                             )
-                            trial_values_fig2.append(
-                                metric_from_makespan(
-                                    spec=spec,
-                                    n_factories=n_factories,
-                                    makespan=makespan,
-                                    metric_mode=metric_mode,
-                                )
+                            metric_value = metric_from_makespan(
+                                spec=spec,
+                                n_factories=n_factories,
+                                makespan=makespan,
+                                metric_mode=metric_mode,
                             )
-                            trial_times_fig2.append(makespan)
                         except RuntimeError as e:
                             logging.warning(
                                 "Type2 failed [%s] ratio=%d nq=%d nf=%d: %s",
@@ -541,18 +460,31 @@ def main(
                                 n_factories,
                                 e,
                             )
-                            trial_values_fig2.append(0.0)
-                            trial_times_fig2.append(0.0)
-                    m, vmin, vmax = mean_min_max(trial_values_fig2)
-                    means_fig2.append(m)
-                    lower_err_fig2.append(max(0.0, m - vmin))
-                    upper_err_fig2.append(max(0.0, vmax - m))
-                    mt, tmin, tmax = mean_min_max(trial_times_fig2)
-                    means_time_fig2.append(mt)
-                    lower_err_time_fig2.append(max(0.0, mt - tmin))
-                    upper_err_time_fig2.append(max(0.0, tmax - mt))
+                            makespan = 0.0
+                            metric_value = 0.0
+
+                        trial_rows.append(
+                            {
+                                "figure": "fig2",
+                                "setting_index": setting_idx,
+                                "distance": setting.distance,
+                                "fidelity_target": setting.fidelity_target,
+                                "factory_physical_size": setting.factory_physical_size,
+                                "metric_mode": metric_mode,
+                                "trial": t,
+                                "seed": seed,
+                                "n_qubits": spec.n_qubits,
+                                "k_t_per_qubit": spec.k_t_per_qubit,
+                                "layers_parallel": spec.layers_parallel,
+                                "ratio": ratio,
+                                "n_factories": n_factories,
+                                "makespan": makespan,
+                                "metric_value": metric_value,
+                            }
+                        )
+
                     seed0 = (
-                        2000000 * settings.index(setting)
+                        2000000 * setting_idx
                         + 100000 * ratio
                         + 1000 * n_factories
                         + 13 * n_qubits
@@ -574,87 +506,20 @@ def main(
                             seed0,
                         )
                     )
-                ax_thr.errorbar(
-                    qubit_counts,
-                    means_fig2,
-                    yerr=[lower_err_fig2, upper_err_fig2],
-                    capsize=3,
-                    marker="o",
-                    label=f"f/q={ratio}",
-                )
-                ax_time.errorbar(
-                    qubit_counts,
-                    means_time_fig2,
-                    yerr=[lower_err_time_fig2, upper_err_time_fig2],
-                    capsize=3,
-                    marker="o",
-                    label=f"f/q={ratio}",
-                )
-                fig2_duration_ymax = max(
-                    fig2_duration_ymax,
-                    max(
-                        (m + e for m, e in zip(means_time_fig2, upper_err_time_fig2)),
-                        default=0.0,
-                    ),
-                )
-                fig2_metric_ymax = max(
-                    fig2_metric_ymax,
-                    max(
-                        (m + e for m, e in zip(means_fig2, upper_err_fig2)), default=0.0
-                    ),
-                )
-            ax_thr.set_xlabel("Number of qubits")
-            ax_thr.grid(True, alpha=0.3)
-            ax_thr.legend(fontsize=12)
-            ax_thr.tick_params(axis="both", labelsize=13)
-
-            ax_time.set_xlabel("Number of qubits")
-            ax_time.grid(True, alpha=0.3)
-            ax_time.set_title(_setting_subtitle(setting), fontsize=14)
-            ax_time.legend(fontsize=12)
-            ax_time.tick_params(axis="both", labelsize=13)
-
-        axes2[0, 0].set_ylabel("Circuit duration")
-        if metric_mode == "throughput":
-            axes2[1, 0].set_ylabel("Single-factory throughput (T / time / factory)")
-        else:
-            axes2[1, 0].set_ylabel("Cycles per T per factory")
-        fig2.suptitle("Qubits 1..10, K=10, ratio sweep (factories/qubits)", fontsize=18)
-        fig2.tight_layout()
-        fig2_duration_ylim_top = max(1.0, fig2_duration_ymax * 1.08)
-        fig2_metric_ylim_top = max(1.0, fig2_metric_ymax * 1.08)
-        for _ax in axes2[0, :]:
-            _ax.set_ylim(0.0, fig2_duration_ylim_top)
-        for _ax in axes2[1, :]:
-            _ax.set_ylim(0.0, fig2_metric_ylim_top)
 
         # ------------------------------------------------------------------
         # Type 3: fixed 10 qubits, factories 10..1
-        #   Row 1: circuit duration, Row 2: throughput
         # ------------------------------------------------------------------
         n_qubits_fixed = 10
         factory_counts_fig3 = list(range(10, 0, -1))
         spec_fig3 = SweepSpec(
             n_qubits=n_qubits_fixed, k_t_per_qubit=k_per_qubit, layers_parallel=True
         )
-        fig3, axes3 = plt.subplots(2, 1, figsize=(8.5, 8.0), sharex=True)
-        fig3_duration_ymax = 0.0
-        fig3_metric_ymax = 0.0
-        ax_time = axes3[0]
-        ax_thr = axes3[1]
-        for idx, setting in enumerate(settings):
+        for setting_idx, setting in enumerate(settings):
             apply_setting(setting)
-            means: list[float] = []
-            lower_err_fig3: list[float] = []
-            upper_err_fig3: list[float] = []
-            means_time_fig3: list[float] = []
-            lower_err_time_fig3: list[float] = []
-            upper_err_time_fig3: list[float] = []
             for n_factories in factory_counts_fig3:
-                trial_values: list[float] = []
-                trial_times: list[float] = []
                 for t in range(num_trials):
-                    seed = 3000000 * settings.index(setting) + 1000 * n_factories + t
+                    seed = 3000000 * setting_idx + 1000 * n_factories + t
                     try:
                         _, makespan = metrics_for_seed(
                             spec=spec_fig3,
@@ -662,15 +527,12 @@ def main(
                             seed=seed,
                             print_profile=print_profile,
                         )
-                        trial_values.append(
-                            metric_from_makespan(
-                                spec=spec_fig3,
-                                n_factories=n_factories,
-                                makespan=makespan,
-                                metric_mode=metric_mode,
-                            )
+                        metric_value = metric_from_makespan(
+                            spec=spec_fig3,
+                            n_factories=n_factories,
+                            makespan=makespan,
+                            metric_mode=metric_mode,
                         )
-                        trial_times.append(makespan)
                     except RuntimeError as e:
                         logging.warning(
                             "Type3 failed [distance-%d, LER=%g] nf=%d: %s",
@@ -679,17 +541,30 @@ def main(
                             n_factories,
                             e,
                         )
-                        trial_values.append(0.0)
-                        trial_times.append(0.0)
-                m, vmin, vmax = mean_min_max(trial_values)
-                means.append(m)
-                lower_err_fig3.append(max(0.0, m - vmin))
-                upper_err_fig3.append(max(0.0, vmax - m))
-                mt, tmin, tmax = mean_min_max(trial_times)
-                means_time_fig3.append(mt)
-                lower_err_time_fig3.append(max(0.0, mt - tmin))
-                upper_err_time_fig3.append(max(0.0, tmax - mt))
-                seed0 = 3000000 * settings.index(setting) + 1000 * n_factories
+                        makespan = 0.0
+                        metric_value = 0.0
+
+                    trial_rows.append(
+                        {
+                            "figure": "fig3",
+                            "setting_index": setting_idx,
+                            "distance": setting.distance,
+                            "fidelity_target": setting.fidelity_target,
+                            "factory_physical_size": setting.factory_physical_size,
+                            "metric_mode": metric_mode,
+                            "trial": t,
+                            "seed": seed,
+                            "n_qubits": spec_fig3.n_qubits,
+                            "k_t_per_qubit": spec_fig3.k_t_per_qubit,
+                            "layers_parallel": spec_fig3.layers_parallel,
+                            "ratio": "",
+                            "n_factories": n_factories,
+                            "makespan": makespan,
+                            "metric_value": metric_value,
+                        }
+                    )
+
+                seed0 = 3000000 * setting_idx + 1000 * n_factories
                 first_trial_jobs.append(
                     (
                         setting,
@@ -705,79 +580,34 @@ def main(
                         seed0,
                     )
                 )
-            fig3_duration_ymax = max(
-                fig3_duration_ymax,
-                max(
-                    (m + e for m, e in zip(means_time_fig3, upper_err_time_fig3)),
-                    default=0.0,
-                ),
-            )
-            fig3_metric_ymax = max(
-                fig3_metric_ymax,
-                max((m + e for m, e in zip(means, upper_err_fig3)), default=0.0),
-            )
 
-            ax_thr.errorbar(
-                factory_counts_fig3,
-                means,
-                yerr=[lower_err_fig3, upper_err_fig3],
-                capsize=3,
-                marker="o",
-                label=_setting_subtitle(setting),
-            )
-            ax_time.errorbar(
-                factory_counts_fig3,
-                means_time_fig3,
-                yerr=[lower_err_time_fig3, upper_err_time_fig3],
-                capsize=3,
-                marker="o",
-                label=_setting_subtitle(setting),
-            )
-        ax_thr.set_xlabel("Number of factories")
-        ax_thr.grid(True, alpha=0.3)
-        ax_thr.tick_params(axis="both", labelsize=13)
-        ax_thr.legend(fontsize=11)
-
-        ax_time.set_xlabel("Number of factories")
-        ax_time.grid(True, alpha=0.3)
-        ax_time.tick_params(axis="both", labelsize=13)
-        ax_time.legend(fontsize=11)
-
-        axes3[0].set_ylabel("Circuit duration")
-        if metric_mode == "throughput":
-            axes3[1].set_ylabel("Single-factory throughput (T / time / factory)")
-        else:
-            axes3[1].set_ylabel("Cycles per T per factory")
-        fig3.suptitle("10 qubits, K=10, factories sweep 10->1", fontsize=18)
-        fig3.tight_layout()
-        fig3_duration_ylim_top = max(1.0, fig3_duration_ymax * 1.08)
-        fig3_metric_ylim_top = max(1.0, fig3_metric_ymax * 1.08)
-        axes3[0].set_ylim(0.0, fig3_duration_ylim_top)
-        axes3[1].set_ylim(0.0, fig3_metric_ylim_top)
-
-        fig1.savefig(
-            f"{output_dir}/fig_1_t_cultivation_one_qubit_vs_factories.pdf",
-            dpi=200,
-        )
-        logging.info(
-            "Saved plot: %s",
-            f"{output_dir}/fig_1_t_cultivation_one_qubit_vs_factories.pdf",
-        )
-        fig2.savefig(f"{output_dir}/fig_2_t_cultivation_ratio_sweep.pdf", dpi=200)
-        logging.info(
-            "Saved plot: %s",
-            f"{output_dir}/fig_2_t_cultivation_ratio_sweep.pdf",
-        )
-        fig3.savefig(
-            f"{output_dir}/fig_3_t_cultivation_10q_factory_sweep.pdf",
-            dpi=200,
-        )
-        logging.info(
-            "Saved plot: %s",
-            f"{output_dir}/fig_3_t_cultivation_10q_factory_sweep.pdf",
-        )
+        fieldnames = [
+            "figure",
+            "setting_index",
+            "distance",
+            "fidelity_target",
+            "factory_physical_size",
+            "metric_mode",
+            "trial",
+            "seed",
+            "n_qubits",
+            "k_t_per_qubit",
+            "layers_parallel",
+            "ratio",
+            "n_factories",
+            "makespan",
+            "metric_value",
+        ]
+        with open(output_csv, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(trial_rows)
+        logging.info("Saved CSV: %s (%d rows)", output_csv, len(trial_rows))
 
         for setting, path, spec, n_factories, seed in first_trial_jobs:
+            # Only plot d13, ler1e-08
+            if setting.distance != 13 or setting.fidelity_target != 1e-8:
+                continue
             apply_setting(setting)
             try:
                 _, _, log = run_t_cultivation_metrics(
@@ -796,13 +626,18 @@ def main(
                 continue
             if print_profile:
                 plot_t_cultivation_execution(log, spec.n_qubits, n_factories, path)
-            plt.close()
-        if first_trial_jobs:
+        plotted_jobs = [
+            j
+            for j in first_trial_jobs
+            if j[0].distance == 13 and j[0].fidelity_target == 1e-8
+        ]
+        if plotted_jobs:
             logging.info(
                 "Wrote %d first-trial execution timeline PDFs under %s",
-                len(first_trial_jobs),
+                len(plotted_jobs),
                 first_trial_dir,
             )
+
     finally:
         # Restore original config so this script does not leak global settings.
         update_config(
@@ -828,17 +663,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Evaluate T-cultivation duration + throughput/cycles-per-T sweeps."
     )
-    parser.add_argument(
-        "--metric-mode",
-        choices=["throughput", "cycles_per_t"],
-        default="cycles_per_t",
-        help="Bottom-row metric to plot (default: cycles_per_t).",
-    )
-    args = parser.parse_args()
 
-    factory_counts = list(range(1, 10))
+    filename = (
+        "output/t_cultivation/factory_throughput/t_cultivation_throughput_trials.csv"
+    )
+
+    args = parser.parse_args()
+    num_trials = 10
+    metric_mode = "cycles_per_t"
+    factory_counts = list(range(1, 21))
     main(
         factory_counts,
-        metric_mode=args.metric_mode,
+        metric_mode=metric_mode,
         print_profile=True,
+        num_trials=num_trials,
+        output_csv=filename,
     )

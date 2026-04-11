@@ -105,6 +105,7 @@ def simluate_trotter_2d_tfim_fidelity(
                     fidelity_of_rz_teleportaion *= (
                         logical_error_model.get_logical_fidelity("CNOT")
                     )
+                    fidelity_of_t_gate *= logical_error_model.get_logical_fidelity("T")
             elif operation in ("T", "Tdg"):
                 fidelity_of_t_gate *= logical_error_model.get_logical_fidelity("T")
             elif operation == "S":

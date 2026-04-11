@@ -74,7 +74,10 @@ def simulate_TMR_preparation(
     for factory_id in factory_id_list:
         factory = factory_pool.get_factory_by_id(factory_id)
         if factory.success_rate is not None:
-            outcome = simulate_angle_preparation(factory.success_rate, rng)
+            # outcome = simulate_angle_preparation(factory.success_rate, rng)
+            outcome = (
+                rng.random() < 0.8
+            )  # ! override with success rate to test RUS visualization
             factory.set_tmr_state(outcome)
             # if outcome:
             #     count += 1
