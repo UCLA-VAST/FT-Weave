@@ -966,6 +966,9 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
             )
 
         def _draw_execution_panel(ax, round_name, aod_value, show_title):
+            ax.set_axisbelow(True)
+            ax.grid(True, alpha=0.3)
+            x_vals = []
             for setting_idx in setting_indices:
                 label, round_data = agg_data[setting_idx]
                 if round_name not in round_data:
@@ -974,7 +977,7 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                 g_aod = g_round[g_round["n_aods"] == aod_value]
                 if g_aod.empty:
                     continue
-                x_vals = sorted(g_aod[SWEEP_COL].dropna().unique())
+                x_vals = sorted(set(x_vals).union(g_aod[SWEEP_COL].dropna().unique()))
                 mean_vals = g_aod["total_time_mean"]
                 min_vals = g_aod["total_time_min"]
                 max_vals = g_aod["total_time_max"]
@@ -990,7 +993,12 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                     color=setting_color_map[setting_idx],
                     label=label,
                 )
-            ax.set_xticks([])
+            ax.set_xticks(x_vals)
+            ax.set_xticklabels(
+                _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup),
+                rotation=45,
+                ha="right",
+            )
             # Don't set ylim for ablation execution time - let it auto-scale
             if show_title:
                 ax.set_title(
@@ -998,6 +1006,8 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                 )
 
         def _draw_movement_panel(ax, round_name, aod_value, show_title):
+            ax.set_axisbelow(True)
+            ax.grid(True, alpha=0.3)
             x_vals_all = []
             for label_idx in setting_indices:
                 label, round_data = agg_data[label_idx]
@@ -1050,7 +1060,11 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                     for idx in range(len(x_vals))
                 ]
             )
-            ax.set_xticklabels([])
+            ax.set_xticklabels(
+                _format_nqubit_ticklabels(x_vals, round_name, round_angle_lookup),
+                rotation=45,
+                ha="right",
+            )
             ax.set_ylim(*movement_ylim_by_round[round_name])
             if show_title:
                 ax.set_title(
@@ -1300,12 +1314,16 @@ def plot_microarch_comp_setting_combined(
             if g_aod.empty:
                 continue
 
-            total_mean = pd.to_numeric(g_aod["total_time_mean"], errors="coerce")
-            total_std = pd.to_numeric(g_aod["total_time_std"], errors="coerce").fillna(
-                0.0
+            total_min = pd.to_numeric(
+                g_aod.get("total_time_min", g_aod["total_time_mean"]),
+                errors="coerce",
             )
-            y_mins_exec.extend((total_mean - total_std).tolist())
-            y_maxs_exec.extend((total_mean + total_std).tolist())
+            total_max = pd.to_numeric(
+                g_aod.get("total_time_max", g_aod["total_time_mean"]),
+                errors="coerce",
+            )
+            y_mins_exec.extend(total_min.tolist())
+            y_maxs_exec.extend(total_max.tolist())
 
             x_vals = sorted(g_aod[SWEEP_COL].dropna().unique())
             theo_vals = _theoretical_bound_values(round_name, x_vals)
@@ -1470,6 +1488,8 @@ def plot_microarch_comp_setting_combined(
                 if g_aod.empty:
                     ax.axis("off")
                     continue
+                ax.set_axisbelow(True)
+                ax.grid(True, alpha=0.3)
                 draw_panel(ax, round_name, g_aod, show_title=(row_idx == 0))
                 ax.set_ylim(*ylim_by_round[round_name])
                 ax.tick_params(axis="both", which="major", pad=1)

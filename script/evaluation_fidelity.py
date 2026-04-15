@@ -279,15 +279,16 @@ if __name__ == "__main__":
         "tfim": tfim,
         "placement_methods": ["seperate_region_row"],
         # "placement_methods": ["col_based", "checkerboard", "seperate_region_row"],
-        "n_aods": [1, 2, 3, 4, 5],
+        # "n_aods": [1, 2, 3, 4, 5],
+        "n_aods": [1, 5],
         "settings": SETTINGS,
         "trials_per_config": 5,
     }
     # run_evaluation_raw(params=params, physical_error_model=physical_error_model)
 
     logical_error_models = [
-        # LogicalErrorModel(physical_model=physical_error_model, code_distance=7),
-        LogicalErrorModel(physical_model=physical_error_model, code_distance=9),
+        LogicalErrorModel(physical_model=physical_error_model, code_distance=7),
+        # LogicalErrorModel(physical_model=physical_error_model, code_distance=9),
     ]
 
     run_evaluation_star(

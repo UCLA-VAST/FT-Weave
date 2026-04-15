@@ -833,11 +833,11 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
 
     # Create one clustered stacked chart by distance, averaged over STAR configurations
     stacked_terms = [
+        "fidelity_cnot",
+        "fidelity_1q",
         "fidelity_of_rz_injection",
         "fidelity_of_rz_teleportaion",
         "fidelity_of_rz_s",
-        "fidelity_cnot",
-        "fidelity_1q",
     ]
     colors = [_fidelity_component_color(term) for term in stacked_terms]
 
@@ -901,6 +901,11 @@ def plot_star_infidelity_breakdown(star_df, output_dir):
         xtick_positions.extend(x.tolist())
         xtick_labels.extend([str(code_distance)] * len(x))
 
+    # Set y-axis ticks for better readability
+    yticks = np.arange(0, 0.0061, 0.001)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels([f"{y:.3f}" for y in yticks])
+
     ax.set_ylabel("Total Infidelity", fontsize=_FIG_FONT_SIZE)
     ax.set_title(
         "STAR Infidelity Breakdown (Distance 7 and 9)", fontsize=_FIG_FONT_SIZE
@@ -930,12 +935,12 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
     """Plot stacked infidelity breakdown for T-cultivation results by setting."""
 
     current_terms = [
+        "fidelity_cnot",
+        "fidelity_h",
         "fidelity_of_rz_teleportaion",
         "fidelity_of_rz_s",
         "fidelity_of_rz_h",
         "fidelity_of_t_gate",
-        "fidelity_cnot",
-        "fidelity_h",
         "fidelity_approximation",
     ]
 
@@ -1010,7 +1015,7 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
     _n_set = max(1, len(settings))
     _n_q = max(1, len(n_qubits))
     fig_w = float(max(13.0, min(20.0, 10.0 + 0.32 * _n_q * _n_set)))
-    fig_h = 6.0 if use_broken_axis else 6.2
+    fig_h = 9.5 if use_broken_axis else 10.0
 
     if use_broken_axis:
         fig, (ax_top, ax_bottom) = plt.subplots(
@@ -1031,6 +1036,7 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
     else:
         fig, ax_bottom = plt.subplots(figsize=(fig_w, fig_h))
         ax_top = None
+        ax_bottom.set_ylim(0, 0.006)
     x_group = np.arange(len(n_qubits))
     group_width = 0.95
     bar_width = group_width / len(settings)
@@ -1088,8 +1094,20 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
     draw_bars(ax_bottom)
     if ax_top is not None:
         draw_bars(ax_top)
+        # Store top_ylim_min for later use in ticks
+        top_ylim_min = ax_top.get_ylim()[0]
+    else:
+        top_ylim_min = None
 
+    # Set y-axis ticks for better readability on the lower (cropped) axis.
+    yticks = np.array([0.000, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.010])
+    ax_bottom.set_yticks(yticks)
+    ax_bottom.set_yticklabels([f"{y:.3f}" for y in yticks])
     if ax_top is not None:
+        # Keep default top-axis ticks and add one explicit 0.010 tick.
+        top_ticks = ax_top.get_yticks()
+        if ax_top.get_ylim()[0] <= 0.010 <= ax_top.get_ylim()[1]:
+            ax_top.set_yticks(np.sort(np.unique(np.append(top_ticks, 0.010))))
         ax_top.grid(True, alpha=0.3, axis="y")
         ax_top.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
     ax_bottom.set_ylabel("Total Infidelity", fontsize=_FIG_FONT_SIZE, labelpad=12)
@@ -1126,7 +1144,7 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
                 handles,
                 labels,
                 loc="lower center",
-                bbox_to_anchor=(0.5, -0.02),
+                bbox_to_anchor=(0.5, 0.18),
                 ncol=4,
                 fontsize=_FIG_FONT_SIZE,
                 frameon=True,
@@ -1167,7 +1185,7 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
                 handles,
                 labels,
                 loc="lower center",
-                bbox_to_anchor=(0.5, -0.02),
+                bbox_to_anchor=(0.5, 0.18),
                 ncol=4,
                 fontsize=_FIG_FONT_SIZE,
                 frameon=True,
@@ -1182,9 +1200,9 @@ def plot_t_cultivation_infidelity_breakdown(t_cultivation_df, output_dir):
     secax.spines["bottom"].set_position(("outward", 108))
 
     if ax_top is not None:
-        fig.subplots_adjust(hspace=0.05, top=0.92, bottom=0.53, left=0.08, right=0.97)
+        fig.subplots_adjust(hspace=0.05, top=0.85, bottom=0.53, left=0.08, right=0.97)
     else:
-        fig.subplots_adjust(top=0.94, bottom=0.50, left=0.08, right=0.97, wspace=0.2)
+        fig.subplots_adjust(top=0.88, bottom=0.50, left=0.08, right=0.97, wspace=0.2)
     output_path = os.path.join(output_dir, "t_cultivation_infidelity_stacked_best.pdf")
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"T-cultivation infidelity stacked plot saved to: {output_path}")
