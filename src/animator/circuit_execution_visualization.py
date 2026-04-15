@@ -60,6 +60,9 @@ aod_colors = [
 ]
 ylim = 93
 _BOX_BORDER_WIDTH = 1
+_AXIS_LABEL_FONT_SIZE = 24
+_TITLE_FONT_SIZE = 28
+_LEGEND_FONT_SIZE = 20
 
 
 def get_aod_border_color(aod_idx: int) -> str:
@@ -181,7 +184,7 @@ def plot_circuit_execution(
         print("No execution log to plot")
         return
     circuit_length = len(execution_log)
-    fig_width = max(float(figure_width) * 0.3, circuit_length / 10 + 4)
+    fig_width = max(float(figure_width) * 0.45, circuit_length / 10 + 4.5)
     fig, ax = plt.subplots(figsize=(fig_width, max(6, n_factories * 0.8)))
 
     # Plot each operation as a rectangle
@@ -265,20 +268,30 @@ def plot_circuit_execution(
                         text,
                         ha="center",
                         va="center",
-                        fontsize=7,
+                        fontsize=10,
                         fontweight="bold",
                         color="black",
+                        linespacing=0.9,
+                        clip_on=True,
                     )
 
     # Configure axes
     ax.set_xlim(0, max_time * 1.01)
     ax.set_ylim(-0.5, n_factories - 0.5)
-    ax.set_xlabel("Time (circuit moments)", fontsize=12, fontweight="bold")
-    ax.set_ylabel("Magic State Factory ID", fontsize=12, fontweight="bold")
+    ax.set_xlabel(
+        "Time (circuit moments)",
+        fontsize=_AXIS_LABEL_FONT_SIZE,
+        fontweight="bold",
+    )
+    ax.set_ylabel(
+        "Magic State Factory ID",
+        fontsize=_AXIS_LABEL_FONT_SIZE,
+        fontweight="bold",
+    )
     ax.set_yticks(range(n_factories))
     ax.set_title(
         "Circuit Execution Timeline: Magic State Factories",
-        fontsize=14,
+        fontsize=_TITLE_FONT_SIZE,
         fontweight="bold",
     )
     ax.grid(axis="x", alpha=0.3, linestyle="--")
@@ -326,12 +339,14 @@ def plot_circuit_execution(
     leg = ax.legend(
         handles=legend_elements,
         loc="upper center",
-        bbox_to_anchor=(0.5, -0.05),
-        ncol=8,
-        fontsize=10,
+        bbox_to_anchor=(0.5, -0.14),
+        ncol=len(legend_elements),
+        fontsize=_LEGEND_FONT_SIZE,
+        columnspacing=1.2,
+        handletextpad=0.5,
     )
     leg.set_zorder(20)
-    plt.tight_layout()
+    plt.tight_layout(rect=(0, 0.12, 1, 1))
     base_path = save_path.split(".")[0]
     output_dir = os.path.dirname(base_path)
     if output_dir:
@@ -446,21 +461,31 @@ def plot_circuit_execution_vertical(
                         text,
                         ha="center",
                         va="center",
-                        fontsize=7,
+                        fontsize=8,
                         fontweight="bold",
                         color="black",
+                        linespacing=0.9,
+                        clip_on=True,
                     )
 
     # Configure axes
     # Invert y-axis so time goes from top to bottom
     ax.set_ylim(max(e[1] for e in execution_log) * 1.01, 0)
     ax.set_xlim(-0.5, n_factories - 0.5)
-    ax.set_ylabel("Time (circuit moments)", fontsize=12, fontweight="bold")
-    ax.set_xlabel("Magic State Factory ID", fontsize=12, fontweight="bold")
+    ax.set_ylabel(
+        "Time (circuit moments)",
+        fontsize=_AXIS_LABEL_FONT_SIZE,
+        fontweight="bold",
+    )
+    ax.set_xlabel(
+        "Magic State Factory ID",
+        fontsize=_AXIS_LABEL_FONT_SIZE,
+        fontweight="bold",
+    )
     ax.set_xticks(range(n_factories))
     ax.set_title(
         "Circuit Execution Timeline: Magic State Factories (Vertical Time)",
-        fontsize=14,
+        fontsize=_TITLE_FONT_SIZE,
         fontweight="bold",
     )
     ax.grid(axis="y", alpha=0.3, linestyle="--")
@@ -499,12 +524,14 @@ def plot_circuit_execution_vertical(
     leg = ax.legend(
         handles=legend_elements,
         loc="upper center",
-        bbox_to_anchor=(0.5, -0.16),
-        ncol=4,
-        fontsize=10,
+        bbox_to_anchor=(0.5, -0.14),
+        ncol=len(legend_elements),
+        fontsize=_LEGEND_FONT_SIZE,
+        columnspacing=1.2,
+        handletextpad=0.5,
     )
     leg.set_zorder(20)
-    plt.tight_layout()
+    plt.tight_layout(rect=(0, 0.12, 1, 1))
     base_path = save_path.split(".")[0]
     output_dir = os.path.dirname(base_path)
     if output_dir:

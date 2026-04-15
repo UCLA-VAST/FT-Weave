@@ -263,6 +263,32 @@ def extract_rus_results(rus_round: List[Tuple]) -> Dict[int, bool]:
     return results
 
 
+def extract_rus_failed_qubits(rus_round: List[Tuple]) -> set[int]:
+    """Extract qubit IDs that encountered RUS_fail in this round."""
+    failed_qubits = set()
+
+    for entry in rus_round:
+        try:
+            _, _, factory_ids, operation, _aod_assignment, value, _move_vecs = (
+                _parse_execution_entry(entry)
+            )
+        except ValueError:
+            continue
+
+        if operation != "RUS_fail":
+            continue
+
+        for idx, factory_id in enumerate(factory_ids):
+            qubit_value = _resolve_entry_value(value, idx)
+            if isinstance(qubit_value, int):
+                failed_qubits.add(qubit_value)
+            elif factory_id is not None:
+                # Fallback for logs where qubit id is not carried in value.
+                failed_qubits.add(factory_id)
+
+    return failed_qubits
+
+
 def extract_tmr_failures(rus_round: List[Tuple]) -> set:
     """
     Extract TMR failure information for factories in a round.
@@ -467,17 +493,18 @@ def plot_rus_round(
 
     # Create figure
     if len(logic_qubit_locations) < 30:
-        fig, ax = plt.subplots(figsize=(10, 10))
+        fig, ax = plt.subplots(figsize=(8.5, 10))
     else:
-        fig, ax = plt.subplots(figsize=(13, 13))
+        fig, ax = plt.subplots(figsize=(11, 13))
 
-    # Determine axis limits with padding (include both initial and current factory locations)
+    # Determine axis limits with tighter padding.
     all_locations = logic_qubit_locations + magic_state_locations
     all_x = [loc[0] for loc in all_locations]
     all_y = [loc[1] for loc in all_locations]
 
-    x_min, x_max = min(all_x) - 1, max(all_x) + 1
-    y_min, y_max = min(all_y) - 1, max(all_y) + 1
+    axis_padding = 0.45
+    x_min, x_max = min(all_x) - axis_padding, max(all_x) + axis_padding
+    y_min, y_max = min(all_y) - axis_padding, max(all_y) + axis_padding
 
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
@@ -486,25 +513,33 @@ def plot_rus_round(
 
     # Color scheme
     color_qubit = "#E8F4F8"
+    color_qubit_fail = "#9EC3CF"
     color_factory = "#FFF9E6"
     color_qubit_border = "#0099CC"
     color_factory_border = "#FF9900"
-    color_rus_success = "#00AA00"
-    color_rus_fail = "#DD0000"
-    color_return_move = "#b64abe"
+    color_forward_move = "#8B5CF6"
+    color_return_move = "#16A34A"
 
     box_width = 0.6
     box_height = 0.5
+    rus_failed_qubits = extract_rus_failed_qubits(rus_round)
+    for factory_id, is_success in rus_results.items():
+        if not is_success and factory_id in assignments:
+            rus_failed_qubits.add(assignments[factory_id])
 
     # Draw logical qubits
     for qubit_id, (x, y) in enumerate(logic_qubit_locations):
+        qubit_facecolor = (
+            color_qubit_fail if qubit_id in rus_failed_qubits else color_qubit
+        )
+
         # Qubit box
         box = FancyBboxPatch(
             (x - 0.3, y - 0.3),
             box_width,
             box_height,
             boxstyle="round,pad=0.05",
-            facecolor=color_qubit,
+            facecolor=qubit_facecolor,
             edgecolor=color_qubit_border,
             linewidth=2,
             zorder=10,
@@ -518,7 +553,7 @@ def plot_rus_round(
             f"Q{qubit_id}",
             ha="center",
             va="center",
-            fontsize=9,
+            fontsize=12,
             fontweight="bold",
             zorder=11,
         )
@@ -537,7 +572,7 @@ def plot_rus_round(
             angle_str,
             ha="center",
             va="center",
-            fontsize=8,
+            fontsize=10,
             style="italic",
             zorder=11,
         )
@@ -570,7 +605,7 @@ def plot_rus_round(
             f"F{factory_id}",
             ha="center",
             va="center",
-            fontsize=9,
+            fontsize=12,
             fontweight="bold",
             zorder=11,
         )
@@ -587,7 +622,7 @@ def plot_rus_round(
             angle_str,
             ha="center",
             va="center",
-            fontsize=8,
+            fontsize=10,
             style="italic",
             zorder=11,
         )
@@ -660,18 +695,8 @@ def plot_rus_round(
             start_point = get_box_edge_point((x_f, y_f), box_size, (dx, dy))
             end_point = get_box_edge_point((x_q, y_q), box_size, (-dx, -dy))
 
-            # Determine if this is a move or return_move operation
-            assert factory_id in rus_results
-            if rus_results[factory_id]:
-                base_color = color_rus_success  # green
-            else:
-                base_color = color_rus_fail  # red
-
-            # Get AOD assignment for edge color
-            aod_edge_color = "black"
-            if (qubit_id, factory_id) in move_aod_info:
-                aod_idx = move_aod_info[(qubit_id, factory_id)]
-                aod_edge_color = get_aod_border_color(aod_idx)
+            # Forward move color is independent of RUS pass/fail.
+            base_color = color_forward_move
 
             # Adjust arrow prominence based on routing batch time.
             if (qubit_id, factory_id) in move_info:
@@ -709,15 +734,7 @@ def plot_rus_round(
         start_point = get_box_edge_point((old_x, old_y), box_size, (dx, dy))
         end_point = get_box_edge_point((new_x, new_y), box_size, (-dx, -dy))
 
-        # Determine if this is a move or return_move operation
-        assert factory_id in rus_results
         base_color = color_return_move
-
-        # Get AOD assignment for edge color
-        aod_edge_color = "black"
-        if factory_id in return_move_aod_info:
-            aod_idx = return_move_aod_info[factory_id]
-            aod_edge_color = get_aod_border_color(aod_idx)
 
         # Adjust arrow prominence based on routing batch time.
         if factory_id in return_move_info:
@@ -743,13 +760,14 @@ def plot_rus_round(
         ax.add_patch(arrow)
 
     # Labels and title
-    ax.set_xlabel("X Position", fontsize=10, fontweight="bold")
-    ax.set_ylabel("Y Position", fontsize=10, fontweight="bold")
+    ax.set_xlabel("X Position", fontsize=13, fontweight="bold")
+    ax.set_ylabel("Y Position", fontsize=13, fontweight="bold")
     ax.set_title(
         f"RUS round {round_idx + 1}: duration {duration}, RUS time: {rus_time}",
-        fontsize=14,
+        fontsize=17,
         fontweight="bold",
     )
+    ax.tick_params(axis="both", which="major", labelsize=11)
 
     # Grid
     ax.grid(True, alpha=0.2, linestyle="--")
@@ -761,6 +779,12 @@ def plot_rus_round(
             edgecolor=color_qubit_border,
             linewidth=2,
             label="$Q_L$",
+        ),
+        mpatches.Patch(
+            facecolor=color_qubit_fail,
+            edgecolor=color_qubit_border,
+            linewidth=2,
+            label="$Q_L$ (RUS fail)",
         ),
         mpatches.Patch(
             facecolor=color_factory,
@@ -780,19 +804,9 @@ def plot_rus_round(
             1,
             0,
             width=0.1,
-            color=color_rus_success,
+            color=color_forward_move,
             alpha=0.7,
-            label="Move (RUS success)",
-        ),
-        mpatches.FancyArrow(
-            0,
-            0,
-            1,
-            0,
-            width=0.1,
-            color=color_rus_fail,
-            alpha=0.7,
-            label="Move (RUS fail)",
+            label="Forward Move",
         ),
         mpatches.FancyArrow(
             0,
@@ -807,15 +821,15 @@ def plot_rus_round(
     ]
     ax.legend(
         handles=legend_elements,
-        loc="center left",
-        bbox_to_anchor=(1, 0.5),
-        ncol=1,
-        fontsize=10,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.12),
+        ncol=6,
+        fontsize=11,
         frameon=True,
         fancybox=True,
     )
 
-    plt.tight_layout()
+    plt.tight_layout(rect=(0, 0.16, 1, 1))
     return fig, magic_state_locations
 
 

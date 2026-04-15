@@ -9,8 +9,8 @@ import numpy as np
 # ============================================================================
 # CONFIGURATION CONSTANTS
 # ============================================================================
-# SE_STAGE_1 = 10
-SE_STAGE_1 = 8  # for MSC-3
+SE_STAGE_1 = 10
+# SE_STAGE_1 = 8  # for MSC-3
 SE_STAGE_2 = 4
 CNOT_TIME = 1
 SE_TIME = 1

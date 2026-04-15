@@ -1473,6 +1473,133 @@ def plot_overall_fidelity_comparison(
     plt.close()
 
 
+def print_star_vs_t_cultivation_improvement_ratio(star_df, t_cultivation_df) -> None:
+    """Print STAR/T-cultivation fidelity ratios at matched code distance and qubit count."""
+    if t_cultivation_df is None or t_cultivation_df.empty:
+        print("Skipping STAR vs T-cultivation ratio: no T-cultivation data loaded")
+        return
+    if "code_distance" not in star_df.columns:
+        print("Skipping STAR vs T-cultivation ratio: STAR has no code_distance column")
+        return
+
+    star_data = normalize_star_df(star_df).copy()
+    star_data["n_qubit"] = star_data["qubit_layout"].apply(get_n_qubit)
+    star_data["fidelity"] = pd.to_numeric(star_data["fidelity"], errors="coerce")
+    star_data["code_distance"] = pd.to_numeric(
+        star_data["code_distance"], errors="coerce"
+    )
+    star_data = star_data.dropna(subset=["code_distance", "n_qubit", "fidelity"])
+    if star_data.empty:
+        print("Skipping STAR vs T-cultivation ratio: STAR data is not usable")
+        return
+
+    t_data = t_cultivation_df.copy()
+    t_data["n_qubit"] = t_data["qubit_layout"].apply(get_n_qubit)
+    t_data["fidelity_total"] = pd.to_numeric(t_data["fidelity_total"], errors="coerce")
+    t_data["code_distance"] = pd.to_numeric(t_data["code_distance"], errors="coerce")
+    t_data = t_data.dropna(subset=["code_distance", "n_qubit", "fidelity_total"])
+    if t_data.empty:
+        print("Skipping STAR vs T-cultivation ratio: T-cultivation data is not usable")
+        return
+
+    # Average across each method's internal settings, then compare matched distance/qubit points.
+    star_grouped = (
+        star_data.groupby(["code_distance", "n_qubit"], as_index=False)["fidelity"]
+        .mean()
+        .rename(columns={"fidelity": "star_fidelity"})
+    )
+    t_grouped = (
+        t_data.groupby(["code_distance", "n_qubit"], as_index=False)["fidelity_total"]
+        .mean()
+        .rename(columns={"fidelity_total": "t_cultivation_fidelity"})
+    )
+
+    merged = (
+        star_grouped.merge(t_grouped, on=["code_distance", "n_qubit"], how="inner")
+        .sort_values(["code_distance", "n_qubit"])
+        .reset_index(drop=True)
+    )
+    if merged.empty:
+        print(
+            "Skipping STAR vs T-cultivation ratio: no overlapping "
+            "(code_distance, n_qubit) points"
+        )
+        return
+
+    eps = 1e-15
+    merged["star_infidelity"] = 1.0 - merged["star_fidelity"]
+    merged["t_cultivation_infidelity"] = 1.0 - merged["t_cultivation_fidelity"]
+
+    merged["infidelity_reduction_abs"] = (
+        merged["t_cultivation_infidelity"] - merged["star_infidelity"]
+    )
+    merged["infidelity_reduction_pct"] = (
+        merged["infidelity_reduction_abs"]
+        / np.clip(merged["t_cultivation_infidelity"], eps, None)
+    ) * 100.0
+    merged["infidelity_reduction_factor"] = np.clip(
+        merged["t_cultivation_infidelity"], eps, None
+    ) / np.clip(merged["star_infidelity"], eps, None)
+
+    print("\nSTAR vs T-cultivation infidelity reduction (same distance):")
+    print(
+        "  Columns: distance, n_qubit, STAR infidelity, "
+        "T-cultivation infidelity, reduction(abs), reduction(%), reduction_factor"
+    )
+    for _, row in merged.iterrows():
+        print(
+            "  "
+            f"d={int(row['code_distance'])}, "
+            f"n={int(row['n_qubit'])}, "
+            f"STAR_inf={row['star_infidelity']:.8e}, "
+            f"T_inf={row['t_cultivation_infidelity']:.8e}, "
+            f"red_abs={row['infidelity_reduction_abs']:.8e}, "
+            f"red_pct={row['infidelity_reduction_pct']:.3f}%, "
+            f"factor={row['infidelity_reduction_factor']:.6f}"
+        )
+
+    # Distance-level aggregate and geometric mean of reduction factor across qubit sizes.
+    by_distance = (
+        merged.groupby("code_distance", as_index=False)[
+            [
+                "star_infidelity",
+                "t_cultivation_infidelity",
+                "infidelity_reduction_abs",
+                "infidelity_reduction_pct",
+            ]
+        ]
+        .mean()
+        .sort_values("code_distance")
+    )
+
+    geom_rows = []
+    for code_distance, dist_df in merged.groupby("code_distance"):
+        factors = np.clip(dist_df["infidelity_reduction_factor"].to_numpy(), eps, None)
+        geomean_factor = float(np.exp(np.mean(np.log(factors))))
+        geom_rows.append(
+            {
+                "code_distance": code_distance,
+                "geomean_reduction_factor": geomean_factor,
+            }
+        )
+    geomean_by_distance = pd.DataFrame(geom_rows)
+    by_distance = by_distance.merge(
+        geomean_by_distance, on="code_distance", how="left"
+    ).sort_values("code_distance")
+
+    print("\nDistance-level summary (includes geomean reduction factor):")
+    for _, row in by_distance.iterrows():
+        print(
+            "  "
+            f"d={int(row['code_distance'])}: "
+            f"mean_STAR_inf={row['star_infidelity']:.8e}, "
+            f"mean_T_inf={row['t_cultivation_infidelity']:.8e}, "
+            f"mean_red_abs={row['infidelity_reduction_abs']:.8e}, "
+            f"mean_red_pct={row['infidelity_reduction_pct']:.3f}%, "
+            f"geomean_factor={row['geomean_reduction_factor']:.6f}"
+        )
+
+
 def main():
     """Main function to generate comparison CSV and plots."""
     print("=" * 80)
@@ -1499,6 +1626,9 @@ def main():
         raw_df, star_df, comparison_csv_path, t_cultivation_df=t_cultivation_df
     )
     print(f"Generated {len(comparison_df)} comparison rows\n")
+
+    print_star_vs_t_cultivation_improvement_ratio(star_df, t_cultivation_df)
+    print()
 
     # Generate plots
     print("Generating plots...")

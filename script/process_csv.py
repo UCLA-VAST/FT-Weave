@@ -192,6 +192,13 @@ def _add_standard_y_ticks_with_star_reference(ax, star_values: np.ndarray) -> No
     ax.set_yticks(y_ticks)
 
 
+def _build_aod_color_map(aod_values: list[int]) -> dict[int, tuple]:
+    """Return a consistent color map keyed by AOD count."""
+    unique_aods = sorted({int(v) for v in aod_values})
+    cmap = plt.get_cmap("tab10")
+    return {aod: cmap(i % 10) for i, aod in enumerate(unique_aods)}
+
+
 def _setting_filter(df: pd.DataFrame, setting: tuple) -> pd.Series:
     return (
         (df["trivial_return"] == setting[0])
@@ -310,6 +317,55 @@ def _get_theoretical_lower_bound(
     ]
     full_trotter_bounds = [x + zz * 8 for x, zz in zip(x_layer_bounds, zz_layer_bounds)]
 
+    return {
+        "x_layer": x_layer_bounds,
+        "zz_layer": zz_layer_bounds,
+        "full_trotter": full_trotter_bounds,
+    }
+
+
+def _get_theoretical_lower_bound_t_cultivation(
+    n_values: list,
+    code_distance: int | None = None,
+    fidelity_target: float | None = None,
+) -> dict[str, list]:
+    """Calculate theoretical lower bounds for T-cultivation execution time.
+
+    Uses the per-T-gate expectation model from the in-code comments:
+    - stage-1 factory attempts: d=7 -> 2*10, d=13 -> 10
+    - stage-2 factory attempts: LER=1e-8 -> 1.1*4, LER=1e-10 -> 2.5*4
+    - RUS expected retries: 50% success -> factor 2
+    - S-gate overhead: +1
+
+    The returned bounds reuse STAR's layer-shape and scale it by the expected
+    T-cultivation work factor for the selected setting.
+    """
+
+    n_t_per_qubit = 40
+
+    # Stage-1: success-rate-dependent expected attempts.
+    if code_distance is not None and int(code_distance) == 7:
+        stage1_factor = 2.0 * 10.0
+    else:
+        stage1_factor = 10.0
+
+    # Stage-2: depends on LER target used by T-cultivation setting.
+    if fidelity_target is not None and np.isclose(float(fidelity_target), 1e-10):
+        stage2_factor = (1 / 0.4) * (4.0 + stage1_factor)
+    else:
+        stage2_factor = (1 / 0.9) * (4.0 + stage1_factor)
+
+    rus_factor = 2.0 + 1.0
+    s_gate_overhead = 1.0
+    t_cultivation_scale = stage2_factor + rus_factor + s_gate_overhead
+
+    # for x layer bound, we can assume some parallelization and only count half the T gates per qubit
+    x_layer_bounds = [t_cultivation_scale * n_t_per_qubit for _ in n_values]
+
+    # for zz layer bound, we can assume more parallelization and only count a quarter of the T gates per qubit
+    zz_layer_bounds = [t_cultivation_scale * (n_t_per_qubit / 2) for _ in n_values]
+
+    full_trotter_bounds = [x + 8 * zz for x, zz in zip(x_layer_bounds, zz_layer_bounds)]
     return {
         "x_layer": x_layer_bounds,
         "zz_layer": zz_layer_bounds,
@@ -1602,8 +1658,14 @@ def plot_nAOD_placement_lines_combined(
         )
     else:
         distance_values = [None]
-    min_aods = first_grouped["n_aods"].min()
-    max_aods = first_grouped["n_aods"].max()
+    all_aods = sorted(
+        {
+            int(aod)
+            for grouped in agg_data.values()
+            for aod in grouped["n_aods"].dropna().astype(int).unique()
+        }
+    )
+    aod_color_map = _build_aod_color_map(all_aods)
     execution_mode = _format_setting_title(setting_label, setting_idx)
 
     figure_title = f"AOD number comparison, {execution_mode}"
@@ -1613,14 +1675,11 @@ def plot_nAOD_placement_lines_combined(
         else (setting_label or "auto").replace(" ", "_").replace(",", "")
     )
 
-    cmap_placement = plt.get_cmap("tab10")
-    base_colors = [cmap_placement(i) for i in range(10)]
-
     round_items = list(agg_data.items())
 
     def _draw_aod_round(ax, round_name, grouped):
         placements_to_plot = [placement] if placement else ["col_based", "checkerboard"]
-        for p_idx, p in enumerate(placements_to_plot):
+        for p in placements_to_plot:
             if p not in grouped["placement"].unique():
                 continue
             sub = grouped[grouped["placement"] == p]
@@ -1639,8 +1698,8 @@ def plot_nAOD_placement_lines_combined(
                     yerr=[err_lower, err_upper],
                     marker="o",
                     capsize=3,
-                    color=base_colors[p_idx % len(base_colors)],
-                    alpha=0.3 + 0.7 * (aod - min_aods) / (max_aods - min_aods + 1e-5),
+                    color=aod_color_map.get(int(aod)),
+                    alpha=1.0,
                     label=f"#AOD={aod}",
                 )
 
@@ -2251,6 +2310,15 @@ def _plot_t_cultivation_multi_aod(
         print("Skipping T-cultivation multi-AOD plot: missing setting columns.")
         return
 
+    all_t_aods = sorted(
+        pd.to_numeric(t_layers[layer_order[0]]["n_aods"], errors="coerce")
+        .dropna()
+        .astype(int)
+        .unique()
+        .tolist()
+    )
+    aod_color_map = _build_aod_color_map(all_t_aods)
+
     n_settings = len(T_CULTIVATION_RUNTIME_LINE_SETTINGS)
     fig, axes = plt.subplots(
         n_settings,
@@ -2311,7 +2379,31 @@ def _plot_t_cultivation_multi_aod(
                     marker="o",
                     capsize=3,
                     linewidth=1.8,
+                    color=aod_color_map.get(int(aod)),
                     label=f"AOD={aod}",
+                )
+
+            # Overlay theoretical lower bound for this layer as a dotted line.
+            x_vals = sorted(summary["n_qubits"].dropna().astype(int).unique())
+            if len(x_vals) > 0:
+                bounds = _get_theoretical_lower_bound_t_cultivation(
+                    x_vals,
+                    code_distance=cd,
+                    fidelity_target=ft,
+                )
+                if layer_name == "full_trotter":
+                    y_bound = bounds["full_trotter"]
+                elif layer_name == "zz_layers":
+                    y_bound = bounds["zz_layer"]
+                else:
+                    y_bound = bounds["x_layer"]
+                ax.plot(
+                    x_vals,
+                    y_bound,
+                    color="black",
+                    linestyle=":",
+                    linewidth=1.6,
+                    label="theoretical lower bound",
                 )
 
             if row_idx == 0:
@@ -2349,6 +2441,463 @@ def _plot_t_cultivation_multi_aod(
     plt.close(fig)
 
 
+def _print_runtime_speedup_by_setting(
+    star_layers: dict[str, pd.DataFrame],
+    t_layers: dict[str, pd.DataFrame],
+    *,
+    target_aods: list[int] | None = None,
+) -> None:
+    """Print runtime speedup = STAR execution time / T-cultivation execution time.
+
+    Comparison is done on matched ``n_qubits`` points for each:
+    - layer (full_trotter / zz_layers / x_layer)
+    - AOD value
+    - STAR code distance (typically 7 or 9)
+    - T-cultivation setting (code_distance, fidelity_target, factory_physical_size)
+    """
+    if target_aods is None:
+        target_aods = [2, 5]
+
+    # Align with plotting comparison setting.
+    setting_4 = SETTINGS[4]
+    layer_order = [
+        k
+        for k in ["full_trotter", "zz_layers", "x_layer"]
+        if k in star_layers and k in t_layers
+    ]
+    if len(layer_order) == 0:
+        print("Runtime speedup summary skipped: no overlapping STAR/T layer frames.")
+        return
+
+    print("\nRuntime ratio summary (ratio = T runtime / STAR runtime):")
+    printed_any = False
+    eps = 1e-15
+
+    for layer_name in layer_order:
+        star_filtered = star_layers[layer_name][
+            _setting_filter(star_layers[layer_name], setting_4)
+        ].copy()
+        t_work = t_layers[layer_name].copy()
+
+        if star_filtered.empty or t_work.empty:
+            continue
+
+        if "code_distance" not in star_filtered.columns:
+            continue
+
+        star_filtered["code_distance"] = pd.to_numeric(
+            star_filtered["code_distance"], errors="coerce"
+        )
+        star_distances = sorted(
+            star_filtered["code_distance"].dropna().astype(int).unique().tolist()
+        )
+        star_distances = [d for d in [7, 9] if d in star_distances] or star_distances
+        if len(star_distances) == 0:
+            continue
+
+        if not all(
+            c in t_work.columns
+            for c in ("code_distance", "fidelity_target", "factory_physical_size")
+        ):
+            continue
+
+        for aod in target_aods:
+            t_aod = t_work[pd.to_numeric(t_work["n_aods"], errors="coerce") == int(aod)]
+            if t_aod.empty:
+                continue
+
+            for sd in star_distances:
+                star_sd = star_filtered[
+                    pd.to_numeric(star_filtered["code_distance"], errors="coerce")
+                    == int(sd)
+                ].copy()
+                star_summary = _summarize_execution_by_qubits(star_sd, method="STAR")
+                star_summary = star_summary[
+                    pd.to_numeric(star_summary["n_aods"], errors="coerce") == int(aod)
+                ].copy()
+                if star_summary.empty:
+                    continue
+                star_summary = star_summary[["n_qubits", "execution_time_mean"]].rename(
+                    columns={"execution_time_mean": "star_runtime"}
+                )
+
+                for cd, ft, fps in T_CULTIVATION_RUNTIME_LINE_SETTINGS:
+                    mask = _mask_t_cultivation_triple(t_aod, cd, ft, fps)
+                    t_setting = t_aod.loc[mask].copy()
+                    t_summary = _summarize_execution_by_qubits(
+                        t_setting, method="T cultivation"
+                    )
+                    if t_summary.empty:
+                        continue
+                    t_summary = t_summary[["n_qubits", "execution_time_mean"]].rename(
+                        columns={"execution_time_mean": "t_runtime"}
+                    )
+
+                    merged = (
+                        star_summary.merge(t_summary, on="n_qubits", how="inner")
+                        .sort_values("n_qubits")
+                        .reset_index(drop=True)
+                    )
+                    if merged.empty:
+                        continue
+
+                    merged["ratio_t_over_star"] = np.clip(
+                        merged["t_runtime"], eps, None
+                    ) / np.clip(merged["star_runtime"], eps, None)
+
+                    ratios = merged["ratio_t_over_star"].to_numpy(dtype=float)
+                    geomean_ratio = float(
+                        np.exp(np.mean(np.log(np.clip(ratios, eps, None))))
+                    )
+                    mean_ratio = float(np.mean(ratios))
+
+                    print(
+                        "  "
+                        f"layer={layer_name}, AOD={int(aod)}, STAR_d={int(sd)} vs "
+                        f"T(d={int(cd)}, size={int(fps)}, LER={float(ft):g}): "
+                        f"n_points={len(merged)}, "
+                        f"geomean_ratio_t_over_star={geomean_ratio:.4f}x, "
+                        f"mean_ratio_t_over_star={mean_ratio:.4f}x"
+                    )
+                    printed_any = True
+
+    if not printed_any:
+        print("  No matched points found for runtime speedup computation.")
+
+
+def _print_requested_runtime_improvements(
+    star_df: pd.DataFrame,
+    t_df: pd.DataFrame,
+) -> None:
+    """Print concise average runtime improvements between plotted lines."""
+    eps = 1e-15
+
+    # Build full-trotter frames safely (fills missing config columns for T-cultivation).
+    star_full = _build_layer_frames(star_df).get("full_trotter", pd.DataFrame()).copy()
+    t_full = _build_layer_frames(t_df).get("full_trotter", pd.DataFrame()).copy()
+
+    # Keep STAR aligned with plotted runtime setting.
+    star_setting = SETTINGS[4]
+    star_ref = star_full[_setting_filter(star_full, star_setting)].copy()
+
+    def _geomean_ratio(num: np.ndarray, den: np.ndarray) -> float:
+        r = np.clip(num, eps, None) / np.clip(den, eps, None)
+        return float(np.exp(np.mean(np.log(np.clip(r, eps, None)))))
+
+    print("\nAverage runtime improvements between plotted lines:")
+
+    # 1) Distance improvements
+    print("  [Distance]")
+    if not star_ref.empty and "code_distance" in star_ref.columns:
+        sg = star_ref.groupby(
+            ["code_distance", "n_qubits", "n_aods"], as_index=False
+        ).agg(runtime=("total_time", "mean"))
+        d9 = sg[sg["code_distance"] == 9][["n_qubits", "n_aods", "runtime"]].rename(
+            columns={"runtime": "rt9"}
+        )
+        d7 = sg[sg["code_distance"] == 7][["n_qubits", "n_aods", "runtime"]].rename(
+            columns={"runtime": "rt7"}
+        )
+        m = d9.merge(d7, on=["n_qubits", "n_aods"], how="inner")
+        if m.empty:
+            print("    STAR d9/d7: unavailable")
+        else:
+            for aod in sorted(
+                pd.to_numeric(m["n_aods"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+            ):
+                sub = m[pd.to_numeric(m["n_aods"], errors="coerce") == int(aod)]
+                g = _geomean_ratio(sub["rt9"].to_numpy(), sub["rt7"].to_numpy())
+                print(f"    STAR d9/d7, AOD={aod}: avg_ratio={g:.4f}x")
+    else:
+        print("    STAR d9/d7: unavailable")
+
+    if not t_full.empty and "code_distance" in t_full.columns:
+        tg = t_full.groupby(
+            [
+                "code_distance",
+                "n_qubits",
+                "n_aods",
+                "fidelity_target",
+                "factory_physical_size",
+            ],
+            as_index=False,
+        ).agg(runtime=("total_time", "mean"))
+
+        def _select_t_runtime(code_distance: int, ler: float) -> pd.DataFrame:
+            cd = pd.to_numeric(tg["code_distance"], errors="coerce")
+            ft = pd.to_numeric(tg["fidelity_target"], errors="coerce")
+            return tg[
+                (cd == int(code_distance))
+                & np.isclose(ft, float(ler), rtol=0.0, atol=1e-20)
+            ][["n_qubits", "n_aods", "runtime"]].copy()
+
+        def _print_pair_by_aod(
+            numerator_df: pd.DataFrame,
+            denominator_df: pd.DataFrame,
+            label: str,
+        ) -> None:
+            m = numerator_df.merge(
+                denominator_df,
+                on=["n_qubits", "n_aods"],
+                how="inner",
+                suffixes=("_num", "_den"),
+            )
+            if m.empty:
+                print(f"    {label}: unavailable")
+                return
+            g_all = _geomean_ratio(
+                m["runtime_num"].to_numpy(), m["runtime_den"].to_numpy()
+            )
+            print(f"    {label}: avg_ratio={g_all:.4f}x")
+            for aod in sorted(
+                pd.to_numeric(m["n_aods"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+            ):
+                sub = m[pd.to_numeric(m["n_aods"], errors="coerce") == int(aod)]
+                g = _geomean_ratio(
+                    sub["runtime_num"].to_numpy(), sub["runtime_den"].to_numpy()
+                )
+                print(f"      AOD={aod}: avg_ratio={g:.4f}x")
+
+        t_d13_ler_1e10 = _select_t_runtime(13, 1e-10)
+        t_d13_ler_1e8 = _select_t_runtime(13, 1e-8)
+        t_d7_ler_1e8 = _select_t_runtime(7, 1e-8)
+
+        # Requested T-only distance comparison under different LER.
+        _print_pair_by_aod(
+            t_d13_ler_1e10,
+            t_d7_ler_1e8,
+            "T d13 (LER=1e-10) / d7 (LER=1e-8)",
+        )
+        _print_pair_by_aod(
+            t_d13_ler_1e10,
+            t_d13_ler_1e8,
+            "T d13 (LER=1e-10) / d13 (LER=1e-8)",
+        )
+        _print_pair_by_aod(
+            t_d7_ler_1e8,
+            t_d13_ler_1e8,
+            "T d7 (LER=1e-8) / d13 (LER=1e-8)",
+        )
+
+        # Requested cross-method comparison: T d13 (1e-8) / STAR d9.
+        if not star_ref.empty and "code_distance" in star_ref.columns:
+            s9 = sg[sg["code_distance"] == 9][["n_qubits", "n_aods", "runtime"]].copy()
+            _print_pair_by_aod(
+                t_d13_ler_1e8,
+                s9,
+                "T d13 (LER=1e-8) / STAR d9",
+            )
+            _print_pair_by_aod(
+                t_d7_ler_1e8,
+                s9,
+                "T d7 (LER=1e-8) / STAR d9",
+            )
+        else:
+            print("    T d13 (LER=1e-8) / STAR d9: unavailable")
+    else:
+        print("    T distance ratios: unavailable")
+
+    # 2) AOD improvements (AOD i / AOD i+1)
+    print("  [AOD]")
+    if not star_ref.empty:
+        sga = star_ref.groupby(
+            ["code_distance", "n_qubits", "n_aods"], as_index=False
+        ).agg(runtime=("total_time", "mean"))
+        for d in sorted(
+            pd.to_numeric(sga["code_distance"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .unique()
+        ):
+            sd = sga[sga["code_distance"] == d]
+            aods = sorted(
+                pd.to_numeric(sd["n_aods"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+            )
+            for a1, a2 in zip(aods[:-1], aods[1:]):
+                l = sd[sd["n_aods"] == a1][["n_qubits", "runtime"]].rename(
+                    columns={"runtime": "r1"}
+                )
+                r = sd[sd["n_aods"] == a2][["n_qubits", "runtime"]].rename(
+                    columns={"runtime": "r2"}
+                )
+                m = l.merge(r, on="n_qubits", how="inner")
+                if m.empty:
+                    continue
+                g = _geomean_ratio(m["r1"].to_numpy(), m["r2"].to_numpy())
+                print(f"    STAR d={int(d)} AOD {a1}/{a2}: avg_ratio={g:.4f}x")
+
+    if not t_full.empty and all(
+        c in t_full.columns
+        for c in ("code_distance", "fidelity_target", "factory_physical_size")
+    ):
+        tga = t_full.groupby(
+            [
+                "code_distance",
+                "fidelity_target",
+                "factory_physical_size",
+                "n_qubits",
+                "n_aods",
+            ],
+            as_index=False,
+        ).agg(runtime=("total_time", "mean"))
+        for (d, ler, fps), grp in tga.groupby(
+            ["code_distance", "fidelity_target", "factory_physical_size"]
+        ):
+            aods = sorted(
+                pd.to_numeric(grp["n_aods"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+            )
+            for a1, a2 in zip(aods[:-1], aods[1:]):
+                l = grp[grp["n_aods"] == a1][["n_qubits", "runtime"]].rename(
+                    columns={"runtime": "r1"}
+                )
+                r = grp[grp["n_aods"] == a2][["n_qubits", "runtime"]].rename(
+                    columns={"runtime": "r2"}
+                )
+                m = l.merge(r, on="n_qubits", how="inner")
+                if m.empty:
+                    continue
+                g = _geomean_ratio(m["r1"].to_numpy(), m["r2"].to_numpy())
+                print(
+                    f"    T d={int(d)}, LER={float(ler):g}, size={int(fps)} AOD {a1}/{a2}: "
+                    f"avg_ratio={g:.4f}x"
+                )
+
+    # 3) Micro-architecture improvements (placement/col_based)
+    print("  [Micro-arch placement]")
+    if not star_ref.empty:
+        sm = star_ref.groupby(
+            ["code_distance", "placement", "n_aods", "n_qubits"], as_index=False
+        ).agg(runtime=("total_time", "mean"))
+        for placement_name in ["seperate_region_row", "checkerboard"]:
+            for d in sorted(
+                pd.to_numeric(sm["code_distance"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+            ):
+                for aod in sorted(
+                    pd.to_numeric(sm["n_aods"], errors="coerce")
+                    .dropna()
+                    .astype(int)
+                    .unique()
+                ):
+                    p = sm[
+                        (sm["placement"] == placement_name)
+                        & (
+                            pd.to_numeric(sm["code_distance"], errors="coerce")
+                            == int(d)
+                        )
+                        & (pd.to_numeric(sm["n_aods"], errors="coerce") == int(aod))
+                    ][["n_qubits", "runtime"]].rename(columns={"runtime": "rp"})
+                    c = sm[
+                        (sm["placement"] == "col_based")
+                        & (
+                            pd.to_numeric(sm["code_distance"], errors="coerce")
+                            == int(d)
+                        )
+                        & (pd.to_numeric(sm["n_aods"], errors="coerce") == int(aod))
+                    ][["n_qubits", "runtime"]].rename(columns={"runtime": "rc"})
+                    m = p.merge(c, on="n_qubits", how="inner")
+                    if m.empty:
+                        continue
+                    g = _geomean_ratio(m["rp"].to_numpy(), m["rc"].to_numpy())
+                    print(
+                        f"    {placement_name}/col_based, d={int(d)}, AOD={int(aod)}: avg_ratio={g:.4f}x"
+                    )
+
+    # 4) Ablation improvements (vanilla/setting)
+    print("  [Ablation vs Vanilla]")
+    ablation_labels = [
+        "Vanilla",
+        "Opt. return",
+        "Opt. return + part. RUS",
+        "Opt. return + skip whole RUS",
+        "Opt. decomp. return + skip whole RUS",
+        "Opt. return + async. RUS",
+        "Opt. return + skip whole RUS + async. RUS",
+    ]
+    if not star_full.empty:
+        star_ablation = star_full.copy()
+        base = star_ablation[_setting_filter(star_ablation, SETTINGS[0])].copy()
+        bg = base.groupby(["code_distance", "n_aods", "n_qubits"], as_index=False).agg(
+            rt_base=("total_time", "mean")
+        )
+        for idx in range(1, min(len(SETTINGS), len(ablation_labels))):
+            s = star_ablation[_setting_filter(star_ablation, SETTINGS[idx])].copy()
+            if s.empty:
+                continue
+            sg = s.groupby(["code_distance", "n_aods", "n_qubits"], as_index=False).agg(
+                rt_set=("total_time", "mean")
+            )
+            m = bg.merge(sg, on=["code_distance", "n_aods", "n_qubits"], how="inner")
+            if m.empty:
+                continue
+            g = _geomean_ratio(m["rt_base"].to_numpy(), m["rt_set"].to_numpy())
+            print(f"    Vanilla/{ablation_labels[idx]}: avg_speedup={g:.4f}x")
+
+        # Additional pairwise comparisons requested by user.
+        print("  [Ablation pairwise]")
+        pairwise_setting_indices = [
+            (2, 1),  # Opt. return + part. RUS / Opt. return
+            (3, 2),  # Opt. return + skip whole RUS / Opt. return + part. RUS
+            (
+                3,
+                4,
+            ),  # Opt. return + skip whole RUS / Opt. decomp. return + skip whole RUS
+            (4, 5),  # Opt. decomp. return + skip whole RUS / Opt. return + async. RUS
+            (
+                5,
+                6,
+            ),  # Opt. return + async. RUS / Opt. return + skip whole RUS + async. RUS
+        ]
+
+        for num_idx, den_idx in pairwise_setting_indices:
+            if num_idx >= len(SETTINGS) or den_idx >= len(SETTINGS):
+                continue
+            num_df = star_ablation[
+                _setting_filter(star_ablation, SETTINGS[num_idx])
+            ].copy()
+            den_df = star_ablation[
+                _setting_filter(star_ablation, SETTINGS[den_idx])
+            ].copy()
+            if num_df.empty or den_df.empty:
+                continue
+
+            num_g = num_df.groupby(
+                ["code_distance", "n_aods", "n_qubits"], as_index=False
+            ).agg(rt_num=("total_time", "mean"))
+            den_g = den_df.groupby(
+                ["code_distance", "n_aods", "n_qubits"], as_index=False
+            ).agg(rt_den=("total_time", "mean"))
+            m_pair = num_g.merge(
+                den_g,
+                on=["code_distance", "n_aods", "n_qubits"],
+                how="inner",
+            )
+            if m_pair.empty:
+                continue
+
+            g_pair = _geomean_ratio(
+                m_pair["rt_num"].to_numpy(), m_pair["rt_den"].to_numpy()
+            )
+            print(
+                f"    {ablation_labels[num_idx]}/{ablation_labels[den_idx]}: "
+                f"avg_ratio={g_pair:.4f}x"
+            )
+
+
 def process_t_cultivation_runtime_comparison(
     star_csv_file: str,
     t_cultivation_csv_file: str,
@@ -2372,6 +2921,7 @@ def process_t_cultivation_runtime_comparison(
         star_layers, t_layers, output_dir, target_aods=[2, 5]
     )
     _plot_t_cultivation_multi_aod(t_layers, output_dir)
+    _print_requested_runtime_improvements(star_df, t_df)
     print("Saved T-cultivation runtime comparison plots to", output_dir)
 
 
