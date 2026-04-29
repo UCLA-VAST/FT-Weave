@@ -76,6 +76,8 @@ def simluate_trotter_2d_tfim_fidelity(
     fidelity_of_rz_h = 1.0
     fidelity_of_t_gate = 1.0
 
+    n_cnot = 0
+    n_s = 0
     for log in execution_logs:
         for entry in log:
             factories, operation, _aod, targets = _unpack_execution_entry(entry)
@@ -106,10 +108,12 @@ def simluate_trotter_2d_tfim_fidelity(
                         logical_error_model.get_logical_fidelity("CNOT")
                     )
                     fidelity_of_t_gate *= logical_error_model.get_logical_fidelity("T")
+                    n_cnot += 1
             elif operation in ("T", "Tdg"):
                 fidelity_of_t_gate *= logical_error_model.get_logical_fidelity("T")
             elif operation == "S":
                 fidelity_of_rz_s *= logical_error_model.get_logical_fidelity("S")
+                n_s += 1
             elif operation == "H":
                 fidelity_of_rz_h *= logical_error_model.get_logical_fidelity("H")
             elif operation in ("RUS_success", "RUS_fail"):
@@ -150,6 +154,7 @@ def simluate_trotter_2d_tfim_fidelity(
         "fidelity_of_t_gate": fidelity_of_t_gate,
         "fidelity_cnot": fidelity_cnot,
         "fidelity_h": fidelity_h,
-        "n_cnot": n_cnot_per_step * n_trotter_steps,
+        "n_cnot": n_cnot + n_cnot_per_step * n_trotter_steps,
         "n_h": n_h_per_step * n_trotter_steps,
+        "n_s": n_s,
     }

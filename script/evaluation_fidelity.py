@@ -11,12 +11,11 @@ import csv
 
 
 SETTINGS = [
-    # (True, "matching", 0, False, False),
-    # (False, "matching", 0, False, False),
-    # (False, "matching", 1, False, False),
-    # (False, "matching", 2, False, False),
+    (True, "matching", 0, False, False),
+    (False, "matching", 0, False, False),
+    (False, "matching", 1, False, False),
+    (False, "matching", 2, False, False),
     (False, "matching", 2, True, False),
-    # (False, "matching", 0, False, True),
     (False, "matching", 2, False, True),
 ]
 
@@ -218,6 +217,36 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                                         execution_logs=rz_logs,
                                         logical_error_model=logical_error_model,
                                     )
+                                    total_depth = None
+                                    if analyze_result and profiling_results_per_case:
+                                        total_depth = float(
+                                            sum(
+                                                float(r.get("total_time", 0.0))
+                                                for r in profiling_results_per_case
+                                            )
+                                        )
+                                    n_cnot = float(result.get("n_cnot", 0.0))
+                                    n_h = float(result.get("n_h", 0.0))
+                                    n_s = float(result.get("n_s", 0.0))
+                                    p_i = float(
+                                        logical_error_model.get_logical_error_rate("I")
+                                    )
+                                    if total_depth is None:
+                                        n_idle = None
+                                        fidelity_idle = None
+                                        fidelity_with_idle = None
+                                    else:
+                                        n_idle = (
+                                            (n_cols * n_rows) * total_depth
+                                            - 2.0 * n_cnot
+                                            - n_h
+                                            - n_s
+                                        )
+                                        n_idle = max(0.0, float(n_idle))
+                                        fidelity_idle = float((1.0 - p_i) ** n_idle)
+                                        fidelity_with_idle = (
+                                            float(result["fidelity"]) * fidelity_idle
+                                        )
                                     row = {
                                         "trial": trial,
                                         "code_distance": logical_error_model.code_distance,
@@ -230,6 +259,10 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                                         "trivial_return": trivial_ret,
                                         "decompose_move": decompose_move,
                                         "parallel_execution": parallel_execution,
+                                        "total_depth": total_depth,
+                                        "n_idle": n_idle,
+                                        "fidelity_idle_model": fidelity_idle,
+                                        "fidelity_with_idle": fidelity_with_idle,
                                         **result,
                                     }
                                     if result_writer is None:
@@ -274,22 +307,55 @@ if __name__ == "__main__":
         "qubit_layout": qubit_layout,
         "tfim": tfim,
     }
+
+    # fidelity evaluation for star compilation
     star_params = {
         "qubit_layout": qubit_layout,
         "tfim": tfim,
-        "placement_methods": ["seperate_region_row"],
-        # "placement_methods": ["col_based", "checkerboard", "seperate_region_row"],
-        # "n_aods": [1, 2, 3, 4, 5],
-        "n_aods": [1, 5],
-        "settings": SETTINGS,
+        "placement_methods": ["col_based"],
+        "n_aods": [2, 3, 4],
+        "settings": [SETTINGS[4]],
         "trials_per_config": 5,
     }
     # run_evaluation_raw(params=params, physical_error_model=physical_error_model)
 
     logical_error_models = [
         LogicalErrorModel(physical_model=physical_error_model, code_distance=7),
-        # LogicalErrorModel(physical_model=physical_error_model, code_distance=9),
+        LogicalErrorModel(physical_model=physical_error_model, code_distance=9),
+        LogicalErrorModel(physical_model=physical_error_model, code_distance=13),
     ]
+
+    run_evaluation_star(
+        params=star_params,
+        logical_error_models=logical_error_models,
+        analyze_result=True,
+    )
+
+    # architecture study
+    star_params = {
+        "qubit_layout": qubit_layout,
+        "tfim": tfim,
+        "placement_methods": ["seperate_region_row", "checkerboard"],
+        "n_aods": [1, 5],
+        "settings": [SETTINGS[4]],
+        "trials_per_config": 5,
+    }
+
+    run_evaluation_star(
+        params=star_params,
+        logical_error_models=logical_error_models,
+        analyze_result=True,
+    )
+
+    # ablation study
+    star_params = {
+        "qubit_layout": qubit_layout,
+        "tfim": tfim,
+        "placement_methods": ["col_based"],
+        "n_aods": [1, 5],
+        "settings": SETTINGS,
+        "trials_per_config": 5,
+    }
 
     run_evaluation_star(
         params=star_params,

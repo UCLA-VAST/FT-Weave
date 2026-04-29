@@ -28,7 +28,13 @@ def calculate_success_rate(angle, code_distance):
         b = 0.469195
         c = 0.494559
     elif code_distance == 9:
-        initialization_error = 0.7872
+        initialization_error = 0.7872  # from suc7
+        k = code_distance // 2
+        physical_theta = convert_logical_angle_to_physical_angle(angle, code_distance)
+        p_ideal = np.sin(physical_theta) ** (2 * k) + np.cos(physical_theta) ** (2 * k)
+        return initialization_error * p_ideal
+    elif code_distance == 13:
+        initialization_error = 0.6636  # from suc5
         k = code_distance // 2
         physical_theta = convert_logical_angle_to_physical_angle(angle, code_distance)
         p_ideal = np.sin(physical_theta) ** (2 * k) + np.cos(physical_theta) ** (2 * k)

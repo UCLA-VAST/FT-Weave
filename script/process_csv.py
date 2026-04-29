@@ -112,93 +112,6 @@ MERGED_ROUND_NAME = "merged_rounds_except_4"
 INDIVIDUAL_ROUND = 4
 
 
-def _apply_shared_bottom_legend(fig, ncol: int = 4, anchor_y: float = 0.01) -> None:
-    """Collapse subplot legends into a single figure legend at the bottom."""
-    handles: list = []
-    labels: list[str] = []
-    for ax in fig.axes:
-        handles_local, labels_local = ax.get_legend_handles_labels()
-        for handle, label in zip(handles_local, labels_local):
-            if not label or label.startswith("_") or label in labels:
-                continue
-            handles.append(handle)
-            labels.append(label)
-        ax_legend = ax.get_legend()
-        if ax_legend is not None:
-            ax_legend.remove()
-
-    if handles:
-        fig.legend(
-            handles,
-            labels,
-            loc="lower center",
-            bbox_to_anchor=(0.5, anchor_y),
-            ncol=ncol,
-            fontsize=_FIG_FONT_SIZE,
-            frameon=True,
-        )
-
-
-def _add_star_reference_tick(ax, star_values: np.ndarray) -> None:
-    """Add a readable y-tick near STAR duration in mixed STAR vs T plots.
-
-    Generates nice round ticks (5000, 10000, etc.) and adds star median as one extra tick.
-    """
-    if star_values.size == 0:
-        return
-    star_values = star_values[np.isfinite(star_values)]
-    if star_values.size == 0:
-        return
-    star_tick = float(np.median(star_values))
-    if star_tick <= 0:
-        return
-
-    y_min, y_max = ax.get_ylim()
-    if not np.isfinite(y_min) or not np.isfinite(y_max) or y_max <= y_min:
-        return
-
-    # Generate nice round ticks (multiples of 5000)
-    tick_step = 5000
-    base_ticks = []
-    tick = max(tick_step, int(np.floor(y_min / tick_step)) * tick_step)
-    if tick == 0:
-        tick = tick_step
-    while tick <= y_max:
-        if tick >= y_min:
-            base_ticks.append(tick)
-        tick += tick_step
-
-    # Add star reference tick and sort
-    y_ticks = sorted(set(float(v) for v in [*base_ticks, star_tick] if np.isfinite(v)))
-    ax.set_yticks(y_ticks)
-
-
-def _add_standard_y_ticks_with_star_reference(ax, star_values: np.ndarray) -> None:
-    """Use regular y-ticks and keep the STAR reference tick as an extra marker."""
-    if star_values.size == 0:
-        return
-    star_values = star_values[np.isfinite(star_values)]
-    if star_values.size == 0:
-        return
-    star_tick = float(np.median(star_values))
-    if star_tick <= 0:
-        return
-
-    locator = mticker.MaxNLocator(nbins=4, prune="lower")
-    ax.yaxis.set_major_locator(locator)
-    y_ticks = list(ax.get_yticks())
-    y_ticks.append(star_tick)
-    y_ticks = sorted(set(float(v) for v in y_ticks if np.isfinite(v)))
-    ax.set_yticks(y_ticks)
-
-
-def _build_aod_color_map(aod_values: list[int]) -> dict[int, tuple]:
-    """Return a consistent color map keyed by AOD count."""
-    unique_aods = sorted({int(v) for v in aod_values})
-    cmap = plt.get_cmap("tab10")
-    return {aod: cmap(i % 10) for i, aod in enumerate(unique_aods)}
-
-
 def _setting_filter(df: pd.DataFrame, setting: tuple) -> pd.Series:
     return (
         (df["trivial_return"] == setting[0])
@@ -209,86 +122,17 @@ def _setting_filter(df: pd.DataFrame, setting: tuple) -> pd.Series:
     )
 
 
-def _format_setting_title(setting_label: str | None, setting_idx: int) -> str:
-    """Convert internal setting tags to presentation labels for figure titles."""
-    if setting_label is not None:
-        label = str(setting_label).strip().lower().replace(" ", "_")
-        if label in {"setting_4", "sync", "sync_exec", "sync._exec."}:
-            return "Sync. Execution"
-        if label in {"setting_6", "async", "async_exec", "async._exec."}:
-            return "Async. Execution"
-        return str(setting_label)
-
-    if setting_idx == 4:
-        return "Sync. Execution"
-    if setting_idx == 6:
-        return "Async. Execution"
-    return "Execution"
+def _filter_col_based(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "placement" not in df.columns:
+        return df
+    return df[df["placement"] == "col_based"].copy()
 
 
-def _get_available_settings(df: pd.DataFrame, max_settings: int = 2) -> list[tuple]:
-    setting_cols = [
-        "trivial_return",
-        "tmr_assignment_method",
-        "consider_skip_rus",
-        "decompose_move",
-        "parallel_execution",
-    ]
-    available = (
-        df.groupby(setting_cols, dropna=False)
-        .size()
-        .reset_index(name="count")
-        .sort_values("count", ascending=False)
-    )
-    return [
-        tuple(row[col] for col in setting_cols)
-        for _, row in available.head(max_settings).iterrows()
-    ]
-
-
-def _get_circuit_lower_bound_components() -> dict[str, tuple[int, int]]:
-    """Return the number of CNOT and H gate layers surrounding each Rz round.
-
-    Parses the logical TFIM circuit (CNOT/Rz/CNOT ZZ layers + H/Rz/H transverse field)
-    and groups non-Rz instructions between consecutive Rz instructions.
-    Trailing instructions after the last Rz are attributed to the last round.
-
-    The gate-layer structure is identical for all even-by-even periodic lattices,
-    so a fixed 4x4 representative layout is used.
-
-    Returns:
-        dict mapping "round_i" and "full_trotter" -> (n_cnot_layers, n_h_layers)
-    """
-    global _LOWER_BOUND_COMPONENTS
-    if _LOWER_BOUND_COMPONENTS is not None:
-        return _LOWER_BOUND_COMPONENTS
-
-    qc = generate_one_layer_2d_tfim_circuit_cz(
-        n_qubits=16, qubit_layout=(4, 4), J=1.0, h=1.0, dt=1.0, logical=True, order=2
-    )
-
-    rz_positions = [i for i, inst in enumerate(qc) if inst.get("gate") == "Rz"]
-    n_rz = len(rz_positions)
-
-    components: dict[str, tuple[int, int]] = {}
-    prev_pos = 0
-    for rz_idx, rz_pos in enumerate(rz_positions):
-        segment = qc[prev_pos:rz_pos]
-        n_cnot = sum(1 for inst in segment if inst.get("gate") == "CNOT")
-        n_h = sum(1 for inst in segment if inst.get("gate") == "H")
-        if rz_idx == n_rz - 1:
-            trailing = qc[rz_pos + 1 :]
-            n_cnot += sum(1 for inst in trailing if inst.get("gate") == "CNOT")
-            n_h += sum(1 for inst in trailing if inst.get("gate") == "H")
-        components[f"round_{rz_idx}"] = (n_cnot, n_h)
-        prev_pos = rz_pos + 1
-
-    total_cnot = sum(c for c, _ in components.values())
-    total_h = sum(h for _, h in components.values())
-    components["full_trotter"] = (total_cnot, total_h)
-
-    _LOWER_BOUND_COMPONENTS = components
-    return components
+def _build_aod_color_map(aod_values: list[int]) -> dict[int, tuple]:
+    """Return a consistent color map keyed by AOD count."""
+    unique_aods = sorted({int(v) for v in aod_values})
+    cmap = plt.get_cmap("tab10")
+    return {aod: cmap(i % 10) for i, aod in enumerate(unique_aods)}
 
 
 # ------------------------------
@@ -582,6 +426,23 @@ def _format_round_title(round_name: str) -> str:
     return round_name
 
 
+def _format_setting_title(setting_label: str | None, setting_idx: int) -> str:
+    """Convert internal setting tags to presentation labels for figure titles."""
+    if setting_label is not None:
+        label = str(setting_label).strip().lower().replace(" ", "_")
+        if label in {"setting_4", "sync", "sync_exec", "sync._exec."}:
+            return "Sync. Execution"
+        if label in {"setting_6", "async", "async_exec", "async._exec."}:
+            return "Async. Execution"
+        return str(setting_label)
+
+    if setting_idx == 4:
+        return "Sync. Execution"
+    if setting_idx == 6:
+        return "Async. Execution"
+    return "Execution"
+
+
 def _format_microarch_placement_label(placement: str) -> str:
     normalized = str(placement).strip().lower()
     if normalized == "col_based":
@@ -609,6 +470,81 @@ def _format_nqubit_ticklabels(
         else:
             labels.append(str(n_qubits))
     return labels
+
+
+def _add_star_reference_tick(ax, star_values: np.ndarray) -> None:
+    """Add a readable y-tick near STAR duration in mixed STAR vs T plots."""
+    if star_values.size == 0:
+        return
+    star_values = star_values[np.isfinite(star_values)]
+    if star_values.size == 0:
+        return
+    star_tick = float(np.median(star_values))
+    if star_tick <= 0:
+        return
+
+    y_min, y_max = ax.get_ylim()
+    if not np.isfinite(y_min) or not np.isfinite(y_max) or y_max <= y_min:
+        return
+
+    tick_step = 5000
+    base_ticks = []
+    tick = max(tick_step, int(np.floor(y_min / tick_step)) * tick_step)
+    if tick == 0:
+        tick = tick_step
+    while tick <= y_max:
+        if tick >= y_min:
+            base_ticks.append(tick)
+        tick += tick_step
+
+    y_ticks = sorted(set(float(v) for v in [*base_ticks, star_tick] if np.isfinite(v)))
+    ax.set_yticks(y_ticks)
+
+
+def _add_standard_y_ticks_with_star_reference(ax, star_values: np.ndarray) -> None:
+    """Use regular y-ticks and keep the STAR reference tick as an extra marker."""
+    if star_values.size == 0:
+        return
+    star_values = star_values[np.isfinite(star_values)]
+    if star_values.size == 0:
+        return
+    star_tick = float(np.median(star_values))
+    if star_tick <= 0:
+        return
+
+    locator = mticker.MaxNLocator(nbins=4, prune="lower")
+    ax.yaxis.set_major_locator(locator)
+    y_ticks = list(ax.get_yticks())
+    y_ticks.append(star_tick)
+    y_ticks = sorted(set(float(v) for v in y_ticks if np.isfinite(v)))
+    ax.set_yticks(y_ticks)
+
+
+def _apply_shared_bottom_legend(fig, ncol: int = 4, anchor_y: float = 0.01) -> None:
+    """Collapse subplot legends into one shared figure legend at the bottom."""
+    handles: list = []
+    labels: list[str] = []
+    for ax in fig.axes:
+        handles_local, labels_local = ax.get_legend_handles_labels()
+        for handle, label in zip(handles_local, labels_local):
+            if not label or label.startswith("_") or label in labels:
+                continue
+            handles.append(handle)
+            labels.append(label)
+        ax_legend = ax.get_legend()
+        if ax_legend is not None:
+            ax_legend.remove()
+
+    if handles:
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, anchor_y),
+            ncol=ncol,
+            fontsize=_FIG_FONT_SIZE,
+            frameon=True,
+        )
 
 
 def _plot_movement_bar(df, line_col, prefix, output_dir):
@@ -852,6 +788,9 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
         "Opt. return + skip whole RUS + async. RUS",
     ]
 
+    # Slightly larger typography for ablation figures only.
+    ablation_font_size = _FIG_FONT_SIZE + 2
+
     # Aggregate per round (use dfs_dict keys to determine available rounds)
     round_order = ["full_trotter", MERGED_ROUND_NAME, f"round_{INDIVIDUAL_ROUND}"]
     round_names = [r for r in round_order if r in dfs_dict]
@@ -1039,6 +978,10 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                 max_vals = g_aod["total_time_max"]
                 err_lower = mean_vals - min_vals
                 err_upper = max_vals - mean_vals
+                print(
+                    f"    [Ablation execution] distance={distance}, round={_format_round_title(round_name)}, "
+                    f"AOD={int(aod_value)}, setting={label}: {mean_vals.tolist()}"
+                )
                 ax.errorbar(
                     x_vals,
                     mean_vals,
@@ -1055,10 +998,13 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                 rotation=45,
                 ha="right",
             )
+            ax.tick_params(labelsize=ablation_font_size)
             # Don't set ylim for ablation execution time - let it auto-scale
             if show_title:
                 ax.set_title(
-                    _format_round_title(round_name), fontsize=_FIG_FONT_SIZE, pad=10
+                    _format_round_title(round_name),
+                    fontsize=ablation_font_size,
+                    pad=10,
                 )
 
         def _draw_movement_panel(ax, round_name, aod_value, show_title):
@@ -1121,10 +1067,13 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                 rotation=45,
                 ha="right",
             )
+            ax.tick_params(labelsize=ablation_font_size)
             ax.set_ylim(*movement_ylim_by_round[round_name])
             if show_title:
                 ax.set_title(
-                    _format_round_title(round_name), fontsize=_FIG_FONT_SIZE, pad=10
+                    _format_round_title(round_name),
+                    fontsize=ablation_font_size,
+                    pad=10,
                 )
 
         for metric_name, draw_panel, file_suffix in [
@@ -1132,11 +1081,11 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
             ("Movement Time", _draw_movement_panel, "movement"),
         ]:
             # Use taller subplots for execution time to prevent line crowding
-            height_multiplier = 5.5 if metric_name == "Execution Time" else 4.4
+            height_multiplier = 6.8 if metric_name == "Execution Time" else 5.6
             fig, axes = plt.subplots(
                 len(aods_to_plot),
                 len(round_names),
-                figsize=(5.8 * len(round_names), height_multiplier * len(aods_to_plot)),
+                figsize=(6.9 * len(round_names), height_multiplier * len(aods_to_plot)),
                 squeeze=False,
             )
 
@@ -1145,17 +1094,20 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                     ax = axes[row_idx, col_idx]
                     draw_panel(ax, round_name, aod_value, show_title=(row_idx == 0))
                     if col_idx == 0:
-                        ax.set_ylabel(f"AOD = {aod_value}\n{metric_name}")
+                        ax.set_ylabel(
+                            f"AOD = {aod_value}\n{metric_name}",
+                            fontsize=ablation_font_size,
+                        )
                     else:
                         ax.set_ylabel("")
                     if row_idx == len(aods_to_plot) - 1:
-                        ax.set_xlabel("Number of Qubits")
+                        ax.set_xlabel("Number of Qubits", fontsize=ablation_font_size)
                     else:
                         ax.set_xlabel("")
 
             fig.suptitle(
                 f"Ablation Study, {metric_name}, distance={distance}",
-                fontsize=_FIG_FONT_SIZE,
+                fontsize=ablation_font_size,
                 y=0.995,
             )
             handles = [
@@ -1171,23 +1123,25 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
             fig.legend(
                 handles=handles,
                 loc="lower center",
-                bbox_to_anchor=(0.5, -0.005),
+                bbox_to_anchor=(0.5, -0.035),
                 ncol=4,
-                fontsize=_FIG_FONT_SIZE,
+                fontsize=ablation_font_size,
                 frameon=True,
             )
             # fig.tight_layout(rect=(0.03, 0.15, 0.98, 0.99))
             # fig.subplots_adjust(top=0.92, bottom=0.15, hspace=0.15, wspace=0.25)
 
-            fig.tight_layout(rect=(0, 0.28, 1, 1))
-            fig.subplots_adjust(bottom=0.15, wspace=0.32)
+            fig.tight_layout(rect=(0, 0.29, 1, 1))
+            fig.subplots_adjust(bottom=0.18, hspace=0.32, wspace=0.32)
 
             distance_suffix = f"_distance_{distance}" if distance is not None else ""
             fig.savefig(
                 os.path.join(
                     output_dir,
                     f"ablation_{placement}{distance_suffix}_{file_suffix}.pdf",
-                )
+                ),
+                bbox_inches="tight",
+                pad_inches=0.10,
             )
             plt.close(fig)
 
@@ -1813,6 +1767,63 @@ def plot_nAOD_placement_lines_combined(
         plt.close(fig)
 
 
+def _print_aod_vs_theoretical_improvement(
+    dfs_dict: dict[str, pd.DataFrame],
+) -> None:
+    """Print improvement (overhead) of each AOD value versus theoretical lower bound."""
+    print("\n  [AOD vs Theoretical Lower Bound]")
+    eps = 1e-15
+
+    for round_name, df in dfs_dict.items():
+        if df.empty:
+            continue
+
+        x_vals = sorted(
+            pd.to_numeric(df["n_qubits"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .unique()
+            .tolist()
+        )
+        if not x_vals:
+            continue
+
+        bounds = _get_theoretical_lower_bound(x_vals)
+        if round_name == "full_trotter":
+            theo_vals = bounds["full_trotter"]
+        elif round_name == "merged_rounds_except_4":
+            theo_vals = bounds["zz_layer"]
+        elif round_name == "round_4":
+            theo_vals = bounds["x_layer"]
+        else:
+            continue
+
+        aod_values = sorted(
+            pd.to_numeric(df["n_aods"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .unique()
+            .tolist()
+        )
+        for aod in aod_values:
+            sub_aod = df[df["n_aods"] == aod]
+            if sub_aod.empty:
+                continue
+
+            mean_times = (
+                pd.to_numeric(sub_aod["total_time"], errors="coerce").dropna().tolist()
+            )
+            if not mean_times:
+                continue
+
+            geomean_actual = float(np.exp(np.mean(np.log(np.maximum(mean_times, eps)))))
+            geomean_theo = float(np.exp(np.mean(np.log(np.maximum(theo_vals, eps)))))
+            ratio = geomean_actual / (geomean_theo + eps)
+            print(
+                f"    {_format_round_title(round_name)} AOD={aod} / theoretical: {ratio:.4f}x"
+            )
+
+
 def process_full_trotter_csv(csv_file: str, output_dir: str):
     """Generate full-trotter and per-round analyses for microarchitecture, ablation, and AOD studies."""
     os.makedirs(output_dir, exist_ok=True)
@@ -1889,6 +1900,15 @@ def process_full_trotter_csv(csv_file: str, output_dir: str):
                 setting_override=setting,
                 setting_label=setting_label,
             )
+
+        # Print AOD improvements vs theoretical bound for this distance
+        if distance is not None:
+            print(f"\n  AOD vs theoretical bound (distance={distance}):")
+            for round_name, df in dfs_dict_aod.items():
+                _print_aod_vs_theoretical_improvement({round_name: df})
+        else:
+            print("\n  AOD vs theoretical bound (all distances):")
+            _print_aod_vs_theoretical_improvement(dfs_dict_aod)
 
     print("Saved full-trotter plots to", output_dir)
 
@@ -2423,7 +2443,7 @@ def _plot_t_cultivation_multi_aod(
         return
 
     fig.suptitle("T-cultivation runtime vs AOD", fontsize=_FIG_FONT_SIZE, y=0.995)
-    _apply_shared_bottom_legend(fig, ncol=5, anchor_y=0.03)
+    _apply_shared_bottom_legend(fig, ncol=6, anchor_y=0.03)
     fig.tight_layout(rect=(0.04, 0.13, 0.98, 0.93), pad=0.10, w_pad=0.03, h_pad=0.03)
     fig.subplots_adjust(
         top=0.93,
@@ -2586,10 +2606,24 @@ def _print_requested_runtime_improvements(
 
     print("\nAverage runtime improvements between plotted lines:")
 
+    def _ratio_delta_percent(ratio: float) -> float:
+        return (float(ratio) - 1.0) * 100.0
+
     # 1) Distance improvements
     print("  [Distance]")
-    if not star_ref.empty and "code_distance" in star_ref.columns:
-        sg = star_ref.groupby(
+    distance_placement = "col_based"
+    star_setting_desc = "setting_4 (Sync. Execution)"
+    t_setting_desc = ", ".join(
+        f"(d={cd}, LER={ft:g}, size={fps})"
+        for cd, ft, fps in T_CULTIVATION_RUNTIME_LINE_SETTINGS
+    )
+    print(
+        f"    context: placement={distance_placement}, STAR setting={star_setting_desc}"
+    )
+    print(f"    context: T settings={t_setting_desc}")
+    star_ref_col = _filter_col_based(star_ref)
+    if not star_ref_col.empty and "code_distance" in star_ref_col.columns:
+        sg = star_ref_col.groupby(
             ["code_distance", "n_qubits", "n_aods"], as_index=False
         ).agg(runtime=("total_time", "mean"))
         d9 = sg[sg["code_distance"] == 9][["n_qubits", "n_aods", "runtime"]].rename(
@@ -2602,20 +2636,33 @@ def _print_requested_runtime_improvements(
         if m.empty:
             print("    STAR d9/d7: unavailable")
         else:
-            for aod in sorted(
-                pd.to_numeric(m["n_aods"], errors="coerce")
-                .dropna()
-                .astype(int)
-                .unique()
-            ):
-                sub = m[pd.to_numeric(m["n_aods"], errors="coerce") == int(aod)]
-                g = _geomean_ratio(sub["rt9"].to_numpy(), sub["rt7"].to_numpy())
-                print(f"    STAR d9/d7, AOD={aod}: avg_ratio={g:.4f}x")
+            g = _geomean_ratio(m["rt9"].to_numpy(), m["rt7"].to_numpy())
+            print(
+                f"    STAR d9/d7 (placement={distance_placement}, {star_setting_desc}): "
+                f"avg_ratio={g:.4f}x"
+            )
+            aod_values = sorted(
+                set(
+                    int(v)
+                    for v in pd.to_numeric(m["n_aods"], errors="coerce")
+                    .dropna()
+                    .astype(int)
+                    .unique()
+                    .tolist()
+                ).intersection({1, 2, 5})
+            )
+            for aod in aod_values:
+                m_aod = m[pd.to_numeric(m["n_aods"], errors="coerce") == int(aod)]
+                if m_aod.empty:
+                    continue
+                g_aod = _geomean_ratio(m_aod["rt9"].to_numpy(), m_aod["rt7"].to_numpy())
+                print(f"      AOD={int(aod)}: avg_ratio={g_aod:.4f}x")
     else:
         print("    STAR d9/d7: unavailable")
 
-    if not t_full.empty and "code_distance" in t_full.columns:
-        tg = t_full.groupby(
+    t_full_col = _filter_col_based(t_full)
+    if not t_full_col.empty and "code_distance" in t_full_col.columns:
+        tg = t_full_col.groupby(
             [
                 "code_distance",
                 "n_qubits",
@@ -2651,18 +2698,27 @@ def _print_requested_runtime_improvements(
             g_all = _geomean_ratio(
                 m["runtime_num"].to_numpy(), m["runtime_den"].to_numpy()
             )
-            print(f"    {label}: avg_ratio={g_all:.4f}x")
-            for aod in sorted(
-                pd.to_numeric(m["n_aods"], errors="coerce")
-                .dropna()
-                .astype(int)
-                .unique()
-            ):
-                sub = m[pd.to_numeric(m["n_aods"], errors="coerce") == int(aod)]
-                g = _geomean_ratio(
-                    sub["runtime_num"].to_numpy(), sub["runtime_den"].to_numpy()
+            print(
+                f"    {label} (placement={distance_placement}): avg_ratio={g_all:.4f}x"
+            )
+            aod_values = sorted(
+                set(
+                    int(v)
+                    for v in pd.to_numeric(m["n_aods"], errors="coerce")
+                    .dropna()
+                    .astype(int)
+                    .unique()
+                    .tolist()
+                ).intersection({1, 2, 5})
+            )
+            for aod in aod_values:
+                m_aod = m[pd.to_numeric(m["n_aods"], errors="coerce") == int(aod)]
+                if m_aod.empty:
+                    continue
+                g_aod = _geomean_ratio(
+                    m_aod["runtime_num"].to_numpy(), m_aod["runtime_den"].to_numpy()
                 )
-                print(f"      AOD={aod}: avg_ratio={g:.4f}x")
+                print(f"      AOD={int(aod)}: avg_ratio={g_aod:.4f}x")
 
         t_d13_ler_1e10 = _select_t_runtime(13, 1e-10)
         t_d13_ler_1e8 = _select_t_runtime(13, 1e-8)
@@ -2706,9 +2762,10 @@ def _print_requested_runtime_improvements(
     # 2) AOD improvements (AOD i / AOD i+1)
     print("  [AOD]")
     if not star_ref.empty:
-        sga = star_ref.groupby(
-            ["code_distance", "n_qubits", "n_aods"], as_index=False
-        ).agg(runtime=("total_time", "mean"))
+        if not star_ref_col.empty:
+            sga = star_ref_col.groupby(
+                ["code_distance", "n_qubits", "n_aods"], as_index=False
+            ).agg(runtime=("total_time", "mean"))
         for d in sorted(
             pd.to_numeric(sga["code_distance"], errors="coerce")
             .dropna()
@@ -2735,11 +2792,11 @@ def _print_requested_runtime_improvements(
                 g = _geomean_ratio(m["r1"].to_numpy(), m["r2"].to_numpy())
                 print(f"    STAR d={int(d)} AOD {a1}/{a2}: avg_ratio={g:.4f}x")
 
-    if not t_full.empty and all(
+    if not t_full_col.empty and all(
         c in t_full.columns
         for c in ("code_distance", "fidelity_target", "factory_physical_size")
     ):
-        tga = t_full.groupby(
+        tga = t_full_col.groupby(
             [
                 "code_distance",
                 "fidelity_target",
@@ -2831,71 +2888,149 @@ def _print_requested_runtime_improvements(
     if not star_full.empty:
         star_ablation = star_full.copy()
         base = star_ablation[_setting_filter(star_ablation, SETTINGS[0])].copy()
-        bg = base.groupby(["code_distance", "n_aods", "n_qubits"], as_index=False).agg(
-            rt_base=("total_time", "mean")
-        )
+        bg = base.groupby(
+            ["placement", "code_distance", "n_aods", "n_qubits"],
+            as_index=False,
+        ).agg(rt_base=("total_time", "mean"))
         for idx in range(1, min(len(SETTINGS), len(ablation_labels))):
             s = star_ablation[_setting_filter(star_ablation, SETTINGS[idx])].copy()
             if s.empty:
                 continue
-            sg = s.groupby(["code_distance", "n_aods", "n_qubits"], as_index=False).agg(
-                rt_set=("total_time", "mean")
-            )
-            m = bg.merge(sg, on=["code_distance", "n_aods", "n_qubits"], how="inner")
-            if m.empty:
-                continue
-            g = _geomean_ratio(m["rt_base"].to_numpy(), m["rt_set"].to_numpy())
-            print(f"    Vanilla/{ablation_labels[idx]}: avg_speedup={g:.4f}x")
-
-        # Additional pairwise comparisons requested by user.
-        print("  [Ablation pairwise]")
-        pairwise_setting_indices = [
-            (2, 1),  # Opt. return + part. RUS / Opt. return
-            (3, 2),  # Opt. return + skip whole RUS / Opt. return + part. RUS
-            (
-                3,
-                4,
-            ),  # Opt. return + skip whole RUS / Opt. decomp. return + skip whole RUS
-            (4, 5),  # Opt. decomp. return + skip whole RUS / Opt. return + async. RUS
-            (
-                5,
-                6,
-            ),  # Opt. return + async. RUS / Opt. return + skip whole RUS + async. RUS
-        ]
-
-        for num_idx, den_idx in pairwise_setting_indices:
-            if num_idx >= len(SETTINGS) or den_idx >= len(SETTINGS):
-                continue
-            num_df = star_ablation[
-                _setting_filter(star_ablation, SETTINGS[num_idx])
-            ].copy()
-            den_df = star_ablation[
-                _setting_filter(star_ablation, SETTINGS[den_idx])
-            ].copy()
-            if num_df.empty or den_df.empty:
-                continue
-
-            num_g = num_df.groupby(
-                ["code_distance", "n_aods", "n_qubits"], as_index=False
-            ).agg(rt_num=("total_time", "mean"))
-            den_g = den_df.groupby(
-                ["code_distance", "n_aods", "n_qubits"], as_index=False
-            ).agg(rt_den=("total_time", "mean"))
-            m_pair = num_g.merge(
-                den_g,
-                on=["code_distance", "n_aods", "n_qubits"],
+            sg = s.groupby(
+                ["placement", "code_distance", "n_aods", "n_qubits"],
+                as_index=False,
+            ).agg(rt_set=("total_time", "mean"))
+            m = bg.merge(
+                sg,
+                on=["placement", "code_distance", "n_aods", "n_qubits"],
                 how="inner",
             )
-            if m_pair.empty:
+            if m.empty:
+                continue
+            print(f"    {ablation_labels[idx]}:")
+            for placement in sorted(pd.unique(m["placement"])):
+                m_place = m[m["placement"] == placement]
+                if m_place.empty:
+                    continue
+                print(f"      placement={placement}:")
+                for distance in sorted(
+                    pd.to_numeric(m_place["code_distance"], errors="coerce")
+                    .dropna()
+                    .astype(int)
+                    .unique()
+                ):
+                    m_distance = m_place[
+                        pd.to_numeric(m_place["code_distance"], errors="coerce")
+                        == int(distance)
+                    ]
+                    aod_values = sorted(
+                        set(
+                            int(v)
+                            for v in pd.to_numeric(
+                                m_distance["n_aods"], errors="coerce"
+                            )
+                            .dropna()
+                            .astype(int)
+                            .unique()
+                            .tolist()
+                        ).intersection({1, 5})
+                    )
+                    for aod in aod_values:
+                        m_da = m_distance[
+                            pd.to_numeric(m_distance["n_aods"], errors="coerce")
+                            == int(aod)
+                        ]
+                        if m_da.empty:
+                            continue
+                        base_vals = np.clip(m_da["rt_base"].to_numpy(), eps, None)
+                        set_vals = np.clip(m_da["rt_set"].to_numpy(), eps, None)
+                        pct = float(np.mean((base_vals - set_vals) / base_vals) * 100.0)
+                        print(
+                            f"        d={int(distance)}, AOD={int(aod)}: avg_improvement={pct:+.2f}%"
+                        )
+
+
+def _print_t_cultivation_aod_vs_theoretical_improvement(
+    t_layers: dict[str, pd.DataFrame],
+) -> None:
+    """Print improvement (overhead) of each T-cultivation AOD versus theoretical lower bound."""
+    print("\n  [T-cultivation AOD vs Theoretical Lower Bound]")
+    eps = 1e-15
+
+    for round_name, layer_df in t_layers.items():
+        if layer_df.empty:
+            continue
+
+        x_vals = sorted(
+            pd.to_numeric(layer_df["n_qubits"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .unique()
+            .tolist()
+        )
+        if not x_vals:
+            continue
+
+        bounds = _get_theoretical_lower_bound_t_cultivation(
+            x_vals,
+            code_distance=None,
+            fidelity_target=None,
+        )
+        if round_name == "full_trotter":
+            theo_vals = bounds["full_trotter"]
+        elif round_name == "zz_layers":
+            theo_vals = bounds["zz_layer"]
+        elif round_name == "x_layer":
+            theo_vals = bounds["x_layer"]
+        else:
+            continue
+
+        placement_values = ["all"]
+        if "placement" in layer_df.columns:
+            placement_values = sorted(
+                str(v) for v in pd.unique(layer_df["placement"]) if pd.notna(v)
+            )
+
+        for placement in placement_values:
+            if placement == "all":
+                layer_subset = layer_df
+            else:
+                layer_subset = layer_df[layer_df["placement"] == placement]
+
+            if layer_subset.empty:
                 continue
 
-            g_pair = _geomean_ratio(
-                m_pair["rt_num"].to_numpy(), m_pair["rt_den"].to_numpy()
+            aod_values = sorted(
+                pd.to_numeric(layer_subset["n_aods"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+                .tolist()
             )
-            print(
-                f"    {ablation_labels[num_idx]}/{ablation_labels[den_idx]}: "
-                f"avg_ratio={g_pair:.4f}x"
-            )
+            print(f"    placement={placement}:")
+            for aod in aod_values:
+                sub_aod = layer_subset[layer_subset["n_aods"] == aod]
+                if sub_aod.empty:
+                    continue
+
+                mean_times = (
+                    pd.to_numeric(sub_aod["total_time"], errors="coerce")
+                    .dropna()
+                    .tolist()
+                )
+                if not mean_times:
+                    continue
+
+                geomean_actual = float(
+                    np.exp(np.mean(np.log(np.maximum(mean_times, eps))))
+                )
+                geomean_theo = float(
+                    np.exp(np.mean(np.log(np.maximum(theo_vals, eps))))
+                )
+                ratio = geomean_actual / (geomean_theo + eps)
+                print(
+                    f"      {_format_round_title(round_name)} AOD={aod} / theoretical: {ratio:.4f}x"
+                )
 
 
 def process_t_cultivation_runtime_comparison(
@@ -2922,6 +3057,7 @@ def process_t_cultivation_runtime_comparison(
     )
     _plot_t_cultivation_multi_aod(t_layers, output_dir)
     _print_requested_runtime_improvements(star_df, t_df)
+    _print_t_cultivation_aod_vs_theoretical_improvement(t_layers)
     print("Saved T-cultivation runtime comparison plots to", output_dir)
 
 

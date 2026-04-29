@@ -187,7 +187,11 @@ class LogicalErrorModel:
             a = 3.827042e-04
             b = 1.463395
             c = 0.000000
-        elif self.code_distance == 7 or self.code_distance == 9:
+        elif (
+            self.code_distance == 7
+            or self.code_distance == 9
+            or self.code_distance == 13
+        ):
             a = 3.136180e-04
             b = 1.464970
             c = 0.000000

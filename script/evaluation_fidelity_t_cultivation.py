@@ -1,7 +1,6 @@
 import csv
 import os
 import sys
-from copy import deepcopy
 from dataclasses import dataclass
 
 import numpy as np
@@ -14,8 +13,6 @@ from src.error_model import LogicalErrorModel, PhysicalErrorModel
 from src.fidelity_simulation import simluate_trotter_2d_tfim_fidelity_t_cultivation
 from src.t_cultivation.config import get_config, update_config
 from src.t_cultivation.tfim_t import generate_one_layer_2d_tfim_circuit_t_cultivation
-from src.t_cultivation.t_cultivation import t_cultivation_execution
-from src.util import analyze_execution_log
 
 import logging
 
@@ -115,6 +112,12 @@ def run_evaluation_t_cultivation(
         "h",
         "dt",
         "n_trotter_steps",
+        "total_depth",
+        "n_cnot",
+        "n_s",
+        "n_idle",
+        "fidelity_idle_model",
+        "fidelity_total_with_idle",
         "fidelity_total",
         "fidelity_of_rz_teleportaion",
         "fidelity_of_rz_s",
@@ -233,6 +236,39 @@ def run_evaluation_t_cultivation(
                                     execution_logs=rz_logs,
                                     logical_error_model=logical_error_model,
                                 )
+
+                                total_depth = None
+                                if analyze_result and profiling_results_per_case:
+                                    total_depth = float(
+                                        sum(
+                                            float(r.get("total_time", 0.0))
+                                            for r in profiling_results_per_case
+                                        )
+                                    )
+
+                                n_cnot = float(fprof.get("n_cnot", 0.0))
+                                n_h = float(fprof.get("n_h", 0.0))
+                                n_s = float(fprof.get("n_s", 0.0))
+                                p_i = float(
+                                    logical_error_model.get_logical_error_rate("I")
+                                )
+                                if total_depth is None:
+                                    n_idle = None
+                                    fidelity_idle = None
+                                    fidelity_total_with_idle = None
+                                else:
+                                    n_idle = (
+                                        float(n_qubits) * total_depth
+                                        - 2.0 * n_cnot
+                                        - n_s
+                                        - n_h
+                                    )
+                                    n_idle = max(0.0, float(n_idle))
+                                    fidelity_idle = float((1.0 - p_i) ** n_idle)
+                                    fidelity_total_with_idle = (
+                                        float(fprof["fidelity"]) * fidelity_idle
+                                    )
+
                                 fidelity_writer.writerow(
                                     {
                                         "trial": trial,
@@ -248,6 +284,12 @@ def run_evaluation_t_cultivation(
                                         "h": h,
                                         "dt": dt,
                                         "n_trotter_steps": n_trotter_steps,
+                                        "total_depth": total_depth,
+                                        "n_cnot": n_cnot,
+                                        "n_s": n_s,
+                                        "n_idle": n_idle,
+                                        "fidelity_idle_model": fidelity_idle,
+                                        "fidelity_total_with_idle": fidelity_total_with_idle,
                                         "fidelity_total": fprof["fidelity"],
                                         "fidelity_of_rz_teleportaion": fprof[
                                             "fidelity_of_rz_teleportaion"
@@ -280,9 +322,10 @@ if __name__ == "__main__":
     ]
     n_aods = [1, 2, 3, 4, 5]
     settings = [
-        TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
-        TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
-        TSetting(fidelity_target=1e-10, factory_physical_size=4, distance=13),
+        # TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
+        TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=9),
+        # TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
+        # TSetting(fidelity_target=1e-10, factory_physical_size=4, distance=13),
     ]
 
     physical_error_model: PhysicalErrorModel = PhysicalErrorModel("lookahead")

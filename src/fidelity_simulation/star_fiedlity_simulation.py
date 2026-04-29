@@ -31,6 +31,8 @@ def simluate_trotter_2d_tfim_fidelity(
     fidelity_of_rz_injection = 1
     fidelity_of_rz_teleportaion = 1
     fidelity_of_rz_s = 1
+    n_s = 0
+    n_cnot = 0
     for log in execution_logs:
         for entry in log:
             if len(entry) == 6:
@@ -52,6 +54,7 @@ def simluate_trotter_2d_tfim_fidelity(
                             logical_error_model.get_rotation_fidelity(angle=value)
                         )
                 elif operation == "S":
+                    n_s += len(values) if isinstance(values, (list, tuple)) else 1
                     # S gate has a fixed fidelity
                     # ! we don't need SE for S as S is in the middle of SE
                     fidelity_of_rz_s *= logical_error_model.get_logical_fidelity("S")
@@ -62,6 +65,7 @@ def simluate_trotter_2d_tfim_fidelity(
                         fidelity_of_rz_teleportaion *= (
                             logical_error_model.get_logical_fidelity("CNOT")
                         )
+                    n_cnot += 1
 
     # count the clifford gates in one trotter step
     n_cnot_per_step = 0
@@ -90,7 +94,8 @@ def simluate_trotter_2d_tfim_fidelity(
         "fidelity_of_rz_s": fidelity_of_rz_s,
         "fidelity_cnot": fidelity_cnot,
         "fidelity_1q": fidelity_1q,
-        "n_cnot": n_cnot_per_step * n_trotter_steps,
+        "n_cnot": n_cnot + n_cnot_per_step * n_trotter_steps,
         "n_h": n_h_per_step * n_trotter_steps,
+        "n_s": n_s,
     }
     return fidelity_profile
