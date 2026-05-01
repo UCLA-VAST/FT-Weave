@@ -383,24 +383,26 @@ def _plot_overall(
     t_cultivation_df=None,
     *,
     include_idle: bool,
+    include_raw: bool = True,
     excluded_star_distances=None,
     filename=None,
 ):
     fig, ax = plt.subplots(figsize=(10, 5.0))
 
-    raw_mean = (
-        raw_df.groupby("n_qubit", as_index=False)["fidelity"].mean().sort_values("n_qubit")
-    )
-    ax.plot(
-        raw_mean["n_qubit"],
-        raw_mean["fidelity"],
-        marker="s",
-        linewidth=3,
-        markersize=10,
-        label="Raw (Physical)",
-        color="red",
-        alpha=0.7,
-    )
+    if include_raw:
+        raw_mean = (
+            raw_df.groupby("n_qubit", as_index=False)["fidelity"].mean().sort_values("n_qubit")
+        )
+        ax.plot(
+            raw_mean["n_qubit"],
+            raw_mean["fidelity"],
+            marker="s",
+            linewidth=3,
+            markersize=10,
+            label="Raw (Physical)",
+            color="red",
+            alpha=0.7,
+        )
 
     star_data = _select_star_best_setting_col_based(star_df)
     if star_data.empty:
@@ -530,13 +532,45 @@ def main():
     print("\n3. Plot T-cultivation stacked fidelity breakdown...")
     _plot_t_cultivation_fidelity_breakdown(t_df, output_dir)
 
-    print("\n4. Plot overall fidelity (without idle)...")
-    _plot_overall(raw_df, star_df, output_dir, t_cultivation_df=t_df, include_idle=False)
+    print("\n4. Plot overall fidelity (without idle, with raw line)...")
+    _plot_overall(
+        raw_df,
+        star_df,
+        output_dir,
+        t_cultivation_df=t_df,
+        include_idle=False,
+    )
 
-    print("\n5. Plot overall fidelity (with idle)...")
-    _plot_overall(raw_df, star_df, output_dir, t_cultivation_df=t_df, include_idle=True)
+    print("\n5. Plot overall fidelity (with idle, with raw line)...")
+    _plot_overall(
+        raw_df,
+        star_df,
+        output_dir,
+        t_cultivation_df=t_df,
+        include_idle=True,
+    )
 
-    print("\n6. Plot stacked fidelity breakdowns (without idle)...")
+    print("\n6. Plot overall fidelity (without idle, no raw line)...")
+    _plot_overall(
+        raw_df,
+        star_df,
+        output_dir,
+        t_cultivation_df=t_df,
+        include_idle=False,
+        include_raw=False,
+        filename="overall_fidelity_comparison_no_raw.pdf",
+    )
+    _plot_overall(
+        raw_df,
+        star_df,
+        output_dir,
+        t_cultivation_df=t_df,
+        include_idle=True,
+        include_raw=False,
+        filename="overall_fidelity_comparison_with_idle_no_raw.pdf",
+    )
+
+    print("\n7. Plot stacked fidelity breakdowns (without idle)...")
     _plot_raw_fidelity_breakdown(
         raw_df, output_dir, include_idle_component=False
     )
@@ -547,7 +581,7 @@ def main():
         t_df, output_dir, include_idle_component=False
     )
 
-    print("\n7. Plot overall fidelity variants without STAR d=13...")
+    print("\n8. Plot overall fidelity variants without STAR d=13 (with raw line)...")
     _plot_overall(
         raw_df,
         star_df,
@@ -565,6 +599,28 @@ def main():
         include_idle=True,
         excluded_star_distances=[13],
         filename="overall_fidelity_comparison_with_idle_no_star_d13.pdf",
+    )
+
+    print("\n9. Plot overall fidelity variants without STAR d=13 (no raw line)...")
+    _plot_overall(
+        raw_df,
+        star_df,
+        output_dir,
+        t_cultivation_df=t_df,
+        include_idle=False,
+        include_raw=False,
+        excluded_star_distances=[13],
+        filename="overall_fidelity_comparison_no_star_d13_no_raw.pdf",
+    )
+    _plot_overall(
+        raw_df,
+        star_df,
+        output_dir,
+        t_cultivation_df=t_df,
+        include_idle=True,
+        include_raw=False,
+        excluded_star_distances=[13],
+        filename="overall_fidelity_comparison_with_idle_no_star_d13_no_raw.pdf",
     )
 
     print("\nDone.")

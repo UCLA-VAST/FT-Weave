@@ -2083,9 +2083,8 @@ def _dedupe_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
 # T-cultivation runtime lines vs STAR (matches fidelity evaluation triples).
 # Each tuple is (code_distance, fidelity_target, factory_physical_size).
 T_CULTIVATION_RUNTIME_LINE_SETTINGS: list[tuple[int, float, int]] = [
-    (7, 1e-8, 2),
+    (9, 1e-8, 2),
     (13, 1e-8, 4),
-    (13, 1e-10, 4),
 ]
 
 
@@ -2095,9 +2094,9 @@ def _plot_star_vs_t_cultivation_best(
     output_dir: str,
     target_aods: list[int] | None = None,
 ):
-    """Compare STAR (d=7,d=9) and T-cultivation runtime in one 2x3 figure."""
+    """Compare STAR d=9 and selected T-cultivation runtime in a presentation figure."""
     if target_aods is None:
-        target_aods = [2, 5]
+        target_aods = [2]
 
     os.makedirs(output_dir, exist_ok=True)
     pretty_name = {
@@ -2105,11 +2104,7 @@ def _plot_star_vs_t_cultivation_best(
         "zz_layers": "ZZ layers",
         "x_layer": "X layer",
     }
-    layer_order = [
-        k
-        for k in ["full_trotter", "zz_layers", "x_layer"]
-        if k in star_layers and k in t_layers
-    ]
+    layer_order = [k for k in ["full_trotter"] if k in star_layers and k in t_layers]
     if len(layer_order) == 0:
         return
 
@@ -2129,7 +2124,7 @@ def _plot_star_vs_t_cultivation_best(
                 .tolist()
             )
 
-    star_distances = [d for d in [7, 9] if d in star_dist_all]
+    star_distances = [d for d in [9] if d in star_dist_all]
     if len(star_distances) == 0:
         return
 
@@ -2323,13 +2318,11 @@ def _plot_star_vs_t_cultivation_best(
                 )
 
     fig.suptitle(
-        "STAR vs T cultivation runtime · "
-        "Columns: Full Trotter | ZZ layers | X layer · "
-        "Rows: AOD 2 (top), AOD 5 (bottom)",
+        "STAR vs T cultivation runtime (presentation subset)",
         fontsize=_FIG_FONT_SIZE,
         y=0.99,
     )
-    _apply_shared_bottom_legend(fig, ncol=3)
+    _apply_shared_bottom_legend(fig, ncol=2)
     fig.tight_layout(rect=(0.04, 0.22, 0.98, 0.90), pad=0.10, w_pad=0.03, h_pad=0.03)
     fig.subplots_adjust(
         top=0.90,
@@ -2362,14 +2355,14 @@ def _plot_t_cultivation_multi_aod(
     t_layers: dict[str, pd.DataFrame],
     output_dir: str,
 ):
-    """T-cultivation AOD comparison: one row per setting (same triples as STAR plot), three columns for layers."""
+    """T-cultivation AOD comparison for presentation subset, full trotter only."""
     os.makedirs(output_dir, exist_ok=True)
     pretty_name = {
         "full_trotter": "Full Trotter",
         "zz_layers": "ZZ layers",
         "x_layer": "X layer",
     }
-    layer_order = [k for k in ["full_trotter", "zz_layers", "x_layer"] if k in t_layers]
+    layer_order = [k for k in ["full_trotter"] if k in t_layers]
     if len(layer_order) == 0:
         return
 
@@ -3101,7 +3094,7 @@ def process_t_cultivation_runtime_comparison(
     t_layers = _build_layer_frames(t_df)
 
     _plot_star_vs_t_cultivation_best(
-        star_layers, t_layers, output_dir, target_aods=[2, 5]
+        star_layers, t_layers, output_dir, target_aods=[2]
     )
     _plot_t_cultivation_multi_aod(t_layers, output_dir)
     _print_requested_runtime_improvements(star_df, t_df)
@@ -3131,7 +3124,7 @@ if __name__ == "__main__":
     # ``compare_fidelity.load_and_process_data`` (``t_cultivation_fidelity_results.csv``,
     # or ``evaluation_results.csv`` if it contains the same fidelity columns).
     csv_file = "output/evaluation/evaluation_results.csv"
-    output_dir = "output/analysis_plots"
+    output_dir = "output/presentation_figures/analysis_plots"
     try:
         process_csv(csv_file, output_dir)
     except Exception as e:
@@ -3140,13 +3133,13 @@ if __name__ == "__main__":
     full_trotter_csv = (
         "output/evaluation/fidelity/star_full_trotter_profiling_results.csv"
     )
-    full_trotter_output_dir = "output/analysis_plots/full_trotter"
+    full_trotter_output_dir = "output/presentation_figures/full_trotter"
     process_full_trotter_csv(full_trotter_csv, full_trotter_output_dir)
 
     t_cultivation_profiling_csv = (
         "output/evaluation/fidelity/t_cultivation_fidelity_profiling_results.csv"
     )
-    runtime_compare_output_dir = "output/analysis_plots/t_cultivation_runtime"
+    runtime_compare_output_dir = "output/presentation_figures/t_cultivation_runtime"
     if os.path.exists(t_cultivation_profiling_csv):
         process_t_cultivation_runtime_comparison(
             full_trotter_csv,
