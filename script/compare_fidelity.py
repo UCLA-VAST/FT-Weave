@@ -376,19 +376,16 @@ def _plot_t_cultivation_fidelity_breakdown(
     print(f"Saved: {output_path}")
 
 
-def _plot_overall(
+def _populate_overall_ax(
+    ax,
     raw_df,
     star_df,
-    output_dir,
-    t_cultivation_df=None,
+    t_cultivation_df,
     *,
     include_idle: bool,
-    include_raw: bool = True,
-    excluded_star_distances=None,
-    filename=None,
+    include_raw: bool,
+    excluded_star_distances,
 ):
-    fig, ax = plt.subplots(figsize=(10, 5.0))
-
     if include_raw:
         raw_mean = (
             raw_df.groupby("n_qubit", as_index=False)["fidelity"].mean().sort_values("n_qubit")
@@ -480,12 +477,36 @@ def _plot_overall(
             )
 
     ax.set_xlabel("Number of Qubits", fontsize=_FIG_FONT_SIZE)
+    ax.tick_params(axis="both", labelsize=_FIG_FONT_SIZE)
+    ax.grid(True, alpha=0.3)
+
+
+def _plot_overall(
+    raw_df,
+    star_df,
+    output_dir,
+    t_cultivation_df=None,
+    *,
+    include_idle: bool,
+    include_raw: bool = True,
+    excluded_star_distances=None,
+    filename=None,
+):
+    fig, ax = plt.subplots(figsize=(10, 5.0))
+    _populate_overall_ax(
+        ax,
+        raw_df,
+        star_df,
+        t_cultivation_df,
+        include_idle=include_idle,
+        include_raw=include_raw,
+        excluded_star_distances=excluded_star_distances,
+    )
     ax.set_ylabel("Mean Fidelity", fontsize=_FIG_FONT_SIZE)
     if include_idle:
         ax.set_title("Overall Fidelity Comparison (Including Idle Error)", fontsize=_FIG_FONT_SIZE)
     else:
         ax.set_title("Overall Fidelity Comparison", fontsize=_FIG_FONT_SIZE)
-    ax.tick_params(axis="both", labelsize=_FIG_FONT_SIZE)
     ax.legend(
         fontsize=_FIG_FONT_SIZE,
         loc="center left",
@@ -493,7 +514,6 @@ def _plot_overall(
         ncol=1,
         frameon=True,
     )
-    ax.grid(True, alpha=0.3)
     fig.subplots_adjust(right=0.74)
 
     if filename is None:
@@ -502,6 +522,67 @@ def _plot_overall(
             if include_idle
             else "overall_fidelity_comparison.pdf"
         )
+    output_path = os.path.join(output_dir, filename)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {output_path}")
+
+
+def _plot_overall_no_star_d13_raw_vs_no_raw(
+    raw_df,
+    star_df,
+    output_dir,
+    t_cultivation_df=None,
+    *,
+    include_idle: bool,
+    filename="overall_fidelity_comparison_no_star_d13_raw_vs_no_raw.pdf",
+):
+    fig, (ax_left, ax_right) = plt.subplots(
+        1,
+        2,
+        sharey=True,
+        figsize=(14.5, 5.2),
+    )
+    excluded = [13]
+    _populate_overall_ax(
+        ax_left,
+        raw_df,
+        star_df,
+        t_cultivation_df,
+        include_idle=include_idle,
+        include_raw=True,
+        excluded_star_distances=excluded,
+    )
+    _populate_overall_ax(
+        ax_right,
+        raw_df,
+        star_df,
+        t_cultivation_df,
+        include_idle=include_idle,
+        include_raw=False,
+        excluded_star_distances=excluded,
+    )
+    ax_left.set_ylabel("Mean Fidelity", fontsize=_FIG_FONT_SIZE)
+    if include_idle:
+        suptitle = "Overall Fidelity (STAR d=13 excluded, including idle)"
+    else:
+        suptitle = "Overall Fidelity (STAR d=13 excluded)"
+    fig.suptitle(suptitle, fontsize=_FIG_FONT_SIZE, y=1.02)
+    ax_left.set_title("With raw (physical)", fontsize=_FIG_FONT_SIZE)
+    ax_right.set_title("Without raw", fontsize=_FIG_FONT_SIZE)
+
+    handles, labels = ax_left.get_legend_handles_labels()
+    ncol = min(4, max(1, len(labels)))
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.0),
+        ncol=ncol,
+        fontsize=_FIG_FONT_SIZE - 2,
+        frameon=True,
+    )
+    fig.subplots_adjust(bottom=0.28, wspace=0.12)
     output_path = os.path.join(output_dir, filename)
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -581,7 +662,24 @@ def main():
         t_df, output_dir, include_idle_component=False
     )
 
-    print("\n8. Plot overall fidelity variants without STAR d=13 (with raw line)...")
+    print("\n8. Plot overall fidelity without STAR d=13: raw (left) vs no raw (right), legend below...")
+    _plot_overall_no_star_d13_raw_vs_no_raw(
+        raw_df,
+        star_df,
+        output_dir,
+        t_cultivation_df=t_df,
+        include_idle=False,
+    )
+    _plot_overall_no_star_d13_raw_vs_no_raw(
+        raw_df,
+        star_df,
+        output_dir,
+        t_cultivation_df=t_df,
+        include_idle=True,
+        filename="overall_fidelity_comparison_with_idle_no_star_d13_raw_vs_no_raw.pdf",
+    )
+
+    print("\n8b. Plot overall fidelity variants without STAR d=13 (single-panel, with raw line)...")
     _plot_overall(
         raw_df,
         star_df,
