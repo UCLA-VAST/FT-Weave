@@ -188,7 +188,7 @@ def _get_theoretical_lower_bound_t_cultivation(
     n_t_per_qubit = 40
 
     # Stage-1: success-rate-dependent expected attempts.
-    if code_distance is not None and int(code_distance) == 7:
+    if code_distance is not None and int(code_distance) < 13:
         stage1_factor = 2.0 * 10.0
     else:
         stage1_factor = 10.0
@@ -236,10 +236,19 @@ def _plot_total_time(df, line_col, prefix, output_dir):
 
     plt.xlabel(SWEEP_COL)
     plt.ylabel("Execution Time")
-    plt.legend(title="microarchitecture")
+    plt.legend(
+        title="microarchitecture",
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        ncol=1,
+    )
     plt.title("Total Execution Time")
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, f"{prefix}_total_time.pdf"))
+    plt.savefig(
+        os.path.join(output_dir, f"{prefix}_total_time.pdf"),
+        bbox_inches="tight",
+        pad_inches=0.06,
+    )
     plt.close()
 
 
@@ -418,7 +427,7 @@ def _build_round_plot_dicts(df: pd.DataFrame) -> tuple[
 
 def _format_round_title(round_name: str) -> str:
     if round_name == "full_trotter":
-        return "Full Trotter"
+        return "One Trotter Step"
     if round_name == MERGED_ROUND_NAME:
         return "ZZ layers"
     if round_name == f"round_{INDIVIDUAL_ROUND}":
@@ -521,7 +530,7 @@ def _add_standard_y_ticks_with_star_reference(ax, star_values: np.ndarray) -> No
 
 
 def _apply_shared_bottom_legend(fig, ncol: int = 4, anchor_y: float = 0.01) -> None:
-    """Collapse subplot legends into one shared figure legend at the bottom."""
+    """Collapse subplot legends into one shared figure legend on the right."""
     handles: list = []
     labels: list[str] = []
     for ax in fig.axes:
@@ -539,9 +548,9 @@ def _apply_shared_bottom_legend(fig, ncol: int = 4, anchor_y: float = 0.01) -> N
         fig.legend(
             handles,
             labels,
-            loc="lower center",
-            bbox_to_anchor=(0.5, anchor_y),
-            ncol=ncol,
+            loc="center left",
+            bbox_to_anchor=(1.01, 0.5),
+            ncol=1,
             fontsize=_FIG_FONT_SIZE,
             frameon=True,
         )
@@ -598,9 +607,19 @@ def _plot_movement_bar(df, line_col, prefix, output_dir):
     return_patch = mpatches.Patch(color="grey", label="Return")
     handles.append(move_patch)
     handles.append(return_patch)
-    plt.legend(title="microarchitecture/move type", handles=handles)
+    plt.legend(
+        title="microarchitecture/move type",
+        handles=handles,
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        ncol=1,
+    )
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, f"{prefix}_movement.pdf"))
+    plt.savefig(
+        os.path.join(output_dir, f"{prefix}_movement.pdf"),
+        bbox_inches="tight",
+        pad_inches=0.06,
+    )
     plt.close()
 
 
@@ -679,7 +698,13 @@ def plot_nAOD_placement_lines(
     plt.title("Total time for placement × #aod")
     handles, labels = plt.gca().get_legend_handles_labels()
     if len(handles) > 0:
-        plt.legend(fontsize=_FIG_FONT_SIZE, ncol=2)
+        plt.legend(
+            fontsize=_FIG_FONT_SIZE,
+            ncol=1,
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            frameon=True,
+        )
     os.makedirs(output_dir, exist_ok=True)
     plt.tight_layout()
     suffix = f"_{tag}" if tag else ""
@@ -687,7 +712,9 @@ def plot_nAOD_placement_lines(
         os.path.join(
             output_dir,
             f"total_time_placement_nAOD_setting_{setting_idx}_skip_placements-{skip_placements}{suffix}.pdf",
-        )
+        ),
+        bbox_inches="tight",
+        pad_inches=0.06,
     )
     plt.close()
 
@@ -1238,11 +1265,13 @@ def plot_microarch_comp_setting_combined(
     ]
     if not round_names:
         round_names = list(agg_data.keys())
+    # Presentation figure only needs the first panel/column to match the other figures.
+    round_names = round_names[:1]
 
     all_aods = sorted(
         {int(aod) for g in agg_data.values() for aod in g["n_aods"].dropna().unique()}
     )
-    aods_to_plot = [aod for aod in [1, 5] if aod in all_aods]
+    aods_to_plot = [aod for aod in [1] if aod in all_aods]
     if not aods_to_plot:
         aods_to_plot = all_aods[:2]
     if not aods_to_plot:
@@ -1397,7 +1426,7 @@ def plot_microarch_comp_setting_combined(
         )
         if show_title:
             ax.set_title(
-                _format_round_title(round_name), fontsize=_FIG_FONT_SIZE, pad=10
+                _format_round_title(round_name), fontsize=_FIG_FONT_SIZE, pad=14
             )
 
     def _draw_movement_panel(ax, round_name, g_aod, show_title):
@@ -1431,7 +1460,7 @@ def plot_microarch_comp_setting_combined(
         )
         if show_title:
             ax.set_title(
-                _format_round_title(round_name), fontsize=_FIG_FONT_SIZE, pad=10
+                _format_round_title(round_name), fontsize=_FIG_FONT_SIZE, pad=14
             )
 
     for metric_name, draw_panel, file_suffix, legend_handles in [
@@ -1486,7 +1515,7 @@ def plot_microarch_comp_setting_combined(
         fig, axes = plt.subplots(
             len(aods_to_plot),
             len(round_names),
-            figsize=(5.8 * len(round_names), 4.4 * len(aods_to_plot)),
+            figsize=(8.8 * len(round_names), 4.8 * len(aods_to_plot)),
             squeeze=False,
         )
 
@@ -1515,26 +1544,26 @@ def plot_microarch_comp_setting_combined(
         fig.suptitle(
             f"Microarchitecture evaluation - {setting_title} - {metric_name}",
             fontsize=_FIG_FONT_SIZE,
-            y=0.995,
+            y=0.998,
         )
         fig.legend(
             handles=legend_handles,
-            loc="lower center",
-            bbox_to_anchor=(0.5, 0.0),
-            ncol=(6 if metric_name == "Movement Time" else min(4, len(legend_handles))),
+            loc="center left",
+            bbox_to_anchor=(0.84, 0.5),
+            ncol=1,
             fontsize=_FIG_FONT_SIZE,
             frameon=True,
         )
         fig.tight_layout(
-            rect=(0.04, 0.20, 0.98, 0.90), pad=0.10, w_pad=0.03, h_pad=0.03
+            rect=(0.04, 0.10, 0.82, 0.86), pad=0.10, w_pad=0.03, h_pad=0.03
         )
         fig.subplots_adjust(
-            top=0.90,
-            bottom=0.22,
+            top=0.86,
+            bottom=0.12,
             hspace=0.40,
             wspace=0.25,
             left=0.04,
-            right=0.98,
+            right=0.82,
         )
         fig.savefig(
             os.path.join(
@@ -1629,7 +1658,10 @@ def plot_nAOD_placement_lines_combined(
         else (setting_label or "auto").replace(" ", "_").replace(",", "")
     )
 
-    round_items = list(agg_data.items())
+    preferred_round_order = ["full_trotter"]
+    round_items = [(k, agg_data[k]) for k in preferred_round_order if k in agg_data]
+    if not round_items:
+        round_items = list(agg_data.items())
 
     def _draw_aod_round(ax, round_name, grouped):
         placements_to_plot = [placement] if placement else ["col_based", "checkerboard"]
@@ -1698,7 +1730,13 @@ def plot_nAOD_placement_lines_combined(
         if round_name != "full_trotter":
             ax.set_ylim(0, 400)
         ax.set_title(f"{_format_round_title(round_name)}")
-        ax.legend(fontsize=_FIG_FONT_SIZE, ncol=2)
+        ax.legend(
+            fontsize=_FIG_FONT_SIZE,
+            ncol=1,
+            loc="center left",
+            bbox_to_anchor=(1.0, 0.5),
+            frameon=True,
+        )
 
     for distance in distance_values:
         if distance is None:
@@ -1721,7 +1759,7 @@ def plot_nAOD_placement_lines_combined(
         fig, axes = plt.subplots(
             len(distance_round_items),
             1,
-            figsize=(8.6, 5.4 * len(distance_round_items)),
+            figsize=(12.0, 5.6 * len(distance_round_items)),
         )
         if len(distance_round_items) == 1:
             axes = [axes]
@@ -1730,22 +1768,23 @@ def plot_nAOD_placement_lines_combined(
             _draw_aod_round(axes[row_idx], round_name, grouped)
 
         fig.suptitle(distance_title, y=0.98, fontsize=_FIG_FONT_SIZE)
-        _apply_shared_bottom_legend(fig, ncol=6, anchor_y=-0.02)
-        fig.tight_layout(rect=(0, 0.28, 1, 1))
-        fig.subplots_adjust(bottom=0.33, wspace=0.32)
+        fig.tight_layout(rect=(0.0, 0.08, 0.74, 1.0))
+        fig.subplots_adjust(bottom=0.12, right=0.74, wspace=0.32)
         placement_tag = f"_{placement}" if placement else ""
         fig.savefig(
             os.path.join(
                 output_dir,
                 f"total_time_placement_nAOD_setting_{file_setting_tag}_skip_placements-True_combined_vertical{placement_tag}{distance_suffix}.pdf",
-            )
+            ),
+            bbox_inches="tight",
+            pad_inches=0.06,
         )
         plt.close(fig)
 
         fig, axes = plt.subplots(
             1,
             len(distance_round_items),
-            figsize=(5.4 * len(distance_round_items), 5.6),
+            figsize=(9.8 * len(distance_round_items), 5.8),
         )
         if len(distance_round_items) == 1:
             axes = [axes]
@@ -1754,15 +1793,16 @@ def plot_nAOD_placement_lines_combined(
             _draw_aod_round(axes[col_idx], round_name, grouped)
 
         fig.suptitle(distance_title, y=0.98, fontsize=_FIG_FONT_SIZE)
-        _apply_shared_bottom_legend(fig, ncol=6, anchor_y=-0.02)
-        fig.tight_layout(rect=(0, 0.28, 1, 1))
-        fig.subplots_adjust(bottom=0.33, wspace=0.32)
+        fig.tight_layout(rect=(0.0, 0.08, 0.74, 1.0))
+        fig.subplots_adjust(bottom=0.12, right=0.74, wspace=0.32)
         placement_tag = f"_{placement}" if placement else ""
         fig.savefig(
             os.path.join(
                 output_dir,
                 f"total_time_placement_nAOD_setting_{file_setting_tag}_skip_placements-True_combined_horizontal{placement_tag}{distance_suffix}.pdf",
-            )
+            ),
+            bbox_inches="tight",
+            pad_inches=0.06,
         )
         plt.close(fig)
 
@@ -1830,6 +1870,9 @@ def process_full_trotter_csv(csv_file: str, output_dir: str):
     df = pd.read_csv(csv_file, engine="python", on_bad_lines="skip")
     df = _coerce_result_cols_numeric(df)
     df = _normalize_config_types(df)
+    # Presentation subset: STAR distance 9 only.
+    if "code_distance" in df.columns:
+        df = df[pd.to_numeric(df["code_distance"], errors="coerce") == 9].copy()
 
     if "round" not in df.columns:
         raise ValueError("CSV must include 'round' column for full-trotter processing")
@@ -1838,7 +1881,7 @@ def process_full_trotter_csv(csv_file: str, output_dir: str):
         available_distances = set(
             pd.to_numeric(df["code_distance"], errors="coerce").dropna().astype(int)
         )
-        distances_to_plot = [d for d in [7, 9] if d in available_distances]
+        distances_to_plot = [d for d in [9] if d in available_distances]
         if len(distances_to_plot) == 0:
             distances_to_plot = sorted(available_distances)
     else:
@@ -1882,14 +1925,7 @@ def process_full_trotter_csv(csv_file: str, output_dir: str):
                 setting_label=setting_label,
             )
 
-        ablation_dir = os.path.join(distance_output_dir, "ablation")
-        for placement in ["checkerboard", "col_based"]:
-            plot_ablation_combined(
-                dfs_dict_ablation,
-                os.path.join(ablation_dir, placement),
-                placement,
-                round_angle_lookup=round_angle_lookup,
-            )
+        # Presentation output skips ablation figures to keep the deck concise.
 
         aod_dir = os.path.join(distance_output_dir, "aod_study")
         for setting_label, setting in settings_to_plot:
@@ -2094,13 +2130,13 @@ def _plot_star_vs_t_cultivation_best(
     output_dir: str,
     target_aods: list[int] | None = None,
 ):
-    """Compare STAR d=9 and selected T-cultivation runtime in a presentation figure."""
+    """Compare STAR (d=7, d=9) and selected T-cultivation runtime in a presentation figure."""
     if target_aods is None:
         target_aods = [2]
 
     os.makedirs(output_dir, exist_ok=True)
     pretty_name = {
-        "full_trotter": "Full Trotter",
+        "full_trotter": "One Trotter Step",
         "zz_layers": "ZZ layers",
         "x_layer": "X layer",
     }
@@ -2124,11 +2160,15 @@ def _plot_star_vs_t_cultivation_best(
                 .tolist()
             )
 
-    star_distances = [d for d in [9] if d in star_dist_all]
+    star_distances = [d for d in [7, 9] if d in star_dist_all]
     if len(star_distances) == 0:
         return
 
-    fig, axes = plt.subplots(len(target_aods), len(layer_order), figsize=(16, 8.5))
+    fig, axes = plt.subplots(
+        len(target_aods),
+        len(layer_order),
+        figsize=(10.5 * len(layer_order), 5.8 * len(target_aods)),
+    )
     if len(target_aods) == 1:
         axes = [axes]
     if len(layer_order) == 1:
@@ -2202,7 +2242,7 @@ def _plot_star_vs_t_cultivation_best(
                     linestyle="--",
                     linewidth=1.6,
                     alpha=0.9,
-                    label="Expected time (STAR)",
+                    label="Expected time: STAR",
                 )
 
             plotted_t = 0
@@ -2279,8 +2319,7 @@ def _plot_star_vs_t_cultivation_best(
                             linewidth=1.4,
                             alpha=0.9,
                             label=(
-                                "Expected time (T), "
-                                f"d={int(cd)}, LER={float(ft):g}"
+                                "Expected time: T, " f"d={int(cd)}, LER={float(ft):g}"
                             ),
                         )
 
@@ -2317,20 +2356,38 @@ def _plot_star_vs_t_cultivation_best(
                     fontsize=_FIG_FONT_SIZE,
                 )
 
-    fig.suptitle(
-        "STAR vs T cultivation runtime (presentation subset)",
-        fontsize=_FIG_FONT_SIZE,
-        y=0.99,
-    )
-    _apply_shared_bottom_legend(fig, ncol=2)
-    fig.tight_layout(rect=(0.04, 0.22, 0.98, 0.90), pad=0.10, w_pad=0.03, h_pad=0.03)
+    fig.suptitle("STAR vs T cultivation runtime", fontsize=_FIG_FONT_SIZE, y=0.99)
+    # Keep a compact right-side legend area to avoid excessive blank space.
+    handles: list = []
+    labels: list[str] = []
+    for ax in fig.axes:
+        h_local, l_local = ax.get_legend_handles_labels()
+        for h, l in zip(h_local, l_local):
+            if not l or l.startswith("_") or l in labels:
+                continue
+            handles.append(h)
+            labels.append(l)
+        ax_legend = ax.get_legend()
+        if ax_legend is not None:
+            ax_legend.remove()
+    if handles:
+        fig.legend(
+            handles,
+            labels,
+            loc="center left",
+            bbox_to_anchor=(0.84, 0.5),
+            ncol=1,
+            fontsize=_FIG_FONT_SIZE,
+            frameon=True,
+        )
+    fig.tight_layout(rect=(0.04, 0.10, 0.82, 0.90), pad=0.10, w_pad=0.03, h_pad=0.03)
     fig.subplots_adjust(
         top=0.90,
         hspace=0.42,
         wspace=0.28,
-        bottom=0.22,
+        bottom=0.12,
         left=0.04,
-        right=0.98,
+        right=0.82,
     )
     filename = os.path.join(
         output_dir,
@@ -2358,7 +2415,7 @@ def _plot_t_cultivation_multi_aod(
     """T-cultivation AOD comparison for presentation subset, full trotter only."""
     os.makedirs(output_dir, exist_ok=True)
     pretty_name = {
-        "full_trotter": "Full Trotter",
+        "full_trotter": "One Trotter Step",
         "zz_layers": "ZZ layers",
         "x_layer": "X layer",
     }
@@ -2485,13 +2542,13 @@ def _plot_t_cultivation_multi_aod(
 
     fig.suptitle("T-cultivation runtime vs AOD", fontsize=_FIG_FONT_SIZE, y=0.995)
     _apply_shared_bottom_legend(fig, ncol=6, anchor_y=0.03)
-    fig.tight_layout(rect=(0.04, 0.13, 0.98, 0.93), pad=0.10, w_pad=0.03, h_pad=0.03)
+    fig.tight_layout(rect=(0.04, 0.13, 0.76, 0.93), pad=0.10, w_pad=0.03, h_pad=0.03)
     fig.subplots_adjust(
         top=0.93,
         hspace=0.35,
         wspace=0.32,
         left=0.04,
-        right=0.98,
+        right=0.76,
         bottom=0.15,
     )
     fig.savefig(
@@ -3087,15 +3144,17 @@ def process_t_cultivation_runtime_comparison(
     t_df = _dedupe_duplicate_columns(t_df)
     star_df = _coerce_result_cols_numeric(star_df)
     star_df = _normalize_config_types(star_df)
+    # Presentation subset: STAR d=7 and d=9 for runtime vs T-cultivation.
+    if "code_distance" in star_df.columns:
+        cd = pd.to_numeric(star_df["code_distance"], errors="coerce")
+        star_df = star_df[cd.isin([7, 9])].copy()
     t_df = _coerce_result_cols_numeric(t_df)
     t_df = _normalize_config_types(t_df)
 
     star_layers = _build_layer_frames(star_df)
     t_layers = _build_layer_frames(t_df)
 
-    _plot_star_vs_t_cultivation_best(
-        star_layers, t_layers, output_dir, target_aods=[2]
-    )
+    _plot_star_vs_t_cultivation_best(star_layers, t_layers, output_dir, target_aods=[2])
     _plot_t_cultivation_multi_aod(t_layers, output_dir)
     _print_requested_runtime_improvements(star_df, t_df)
     _print_t_cultivation_aod_vs_theoretical_improvement(t_layers)
@@ -3110,12 +3169,12 @@ def process_csv(csv_file: str, output_dir: str):
     df = pd.read_csv(csv_file)
     df = _coerce_result_cols_numeric(df)
     df = _normalize_config_types(df)
-    # plot_microarch_comp_average_all(df, output_dir + "/microarch_all")
-    # plot_microarch_comp_setting(df, output_dir + "/microarch_setting", setting_idx=4)
-    plot_nAOD_placement_lines(df, output_dir, setting_idx=6, skip_placements=True)
-    plot_nAOD_placement_lines(df, output_dir, setting_idx=4, skip_placements=True)
-
-    print("Saved plots to", output_dir)
+    # Presentation subset: STAR distance 9 only (when present).
+    if "code_distance" in df.columns:
+        df = df[pd.to_numeric(df["code_distance"], errors="coerce") == 9].copy()
+    # For presentation we do not generate the legacy
+    # total_time_placement_nAOD_setting_* figures.
+    print("Skipped legacy nAOD placement figures for presentation output.")
 
 
 if __name__ == "__main__":
