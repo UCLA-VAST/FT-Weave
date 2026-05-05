@@ -120,6 +120,7 @@ def test(
     tmr_assignment_method: str = "matching",
     trivial_return: bool = False,
     parallel_execution: bool = False,
+    show_logical_qubits: bool = False,
 ):
     target_qubits_angles = {}
     if same_angle:
@@ -188,10 +189,22 @@ def test(
     base_path = f"{prefix}_n{n_qubits}f{n_factories}_{placement}_naod_{n_aods}_tmr_{tmr_assignment_method}_skipRUS_{consider_skip_rus}_trivial-return{trivial_return}_parallel-execution_{parallel_execution}.pdf"
     pdf_path = f"output/circuit_execution_vertical/{base_path}"
     plot_circuit_execution_vertical(
-        log, n_factories, figure_height=50, save_path=pdf_path
+        log,
+        n_factories,
+        n_logical_qubits=n_qubits,
+        figure_height=50,
+        save_path=pdf_path,
+        show_logical_qubits=show_logical_qubits,
     )
     pdf_path = f"output/circuit_execution/{base_path}"
-    plot_circuit_execution(log, n_factories, figure_width=50, save_path=pdf_path)
+    plot_circuit_execution(
+        log,
+        n_factories,
+        n_logical_qubits=n_qubits,
+        figure_width=50,
+        save_path=pdf_path,
+        show_logical_qubits=show_logical_qubits,
+    )
 
     if not parallel_execution and visualize_rus:
         # Generate RUS round visualizations
@@ -252,34 +265,35 @@ if __name__ == "__main__":
     #     trivial_return=False,
     # )
 
-    test(
-        n_qubits=16,
-        n_factories=16,
-        qubit_layout=(4, 4),
-        same_angle=True,
-        placement="col_based",
-        visualize_rus=True,
-        prefix="",
-        n_aods=3,
-        n_aods_se=3,
-        consider_skip_rus=False,
-        tmr_assignment_method="matching",
-        trivial_return=False,
-        parallel_execution=True,
-    )
+    # test(
+    #     n_qubits=16,
+    #     n_factories=16,
+    #     qubit_layout=(4, 4),
+    #     same_angle=True,
+    #     placement="col_based",
+    #     visualize_rus=True,
+    #     prefix="",
+    #     n_aods=3,
+    #     n_aods_se=3,
+    #     consider_skip_rus=False,
+    #     tmr_assignment_method="matching",
+    #     trivial_return=False,
+    #     parallel_execution=True,
+    # )
 
     test(
-        n_qubits=16,
-        n_factories=16,
-        qubit_layout=(4, 4),
+        n_qubits=2,
+        n_factories=2,
+        qubit_layout=(2, 2),
         same_angle=True,
         placement="col_based",
         visualize_rus=True,
         prefix="",
-        n_aods=3,
-        n_aods_se=3,
+        n_aods=1,
+        n_aods_se=1,
         consider_skip_rus=False,
         tmr_assignment_method="matching",
         trivial_return=False,
         parallel_execution=False,
+        show_logical_qubits=True,
     )

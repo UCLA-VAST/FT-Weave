@@ -188,7 +188,7 @@ def _get_theoretical_lower_bound_t_cultivation(
     n_t_per_qubit = 40
 
     # Stage-1: success-rate-dependent expected attempts.
-    if code_distance is not None and int(code_distance) == 7:
+    if code_distance is not None and int(code_distance) < 13:
         stage1_factor = 2.0 * 10.0
     else:
         stage1_factor = 10.0
@@ -2284,8 +2284,7 @@ def _plot_star_vs_t_cultivation_best(
                             linewidth=1.4,
                             alpha=0.9,
                             label=(
-                                "Expected time (T), "
-                                f"d={int(cd)}, LER={float(ft):g}"
+                                "Expected time (T), " f"d={int(cd)}, LER={float(ft):g}"
                             ),
                         )
 

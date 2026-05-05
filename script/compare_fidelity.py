@@ -40,7 +40,9 @@ def _resolve_t_cultivation_fidelity_csv_path() -> str | None:
     }
     candidates = [
         os.path.join("output", "evaluation", "evaluation_results.csv"),
-        os.path.join("output", "evaluation", "fidelity", "t_cultivation_fidelity_results.csv"),
+        os.path.join(
+            "output", "evaluation", "fidelity", "t_cultivation_fidelity_results.csv"
+        ),
     ]
     for path in candidates:
         if not os.path.isfile(path):
@@ -66,7 +68,9 @@ def _select_star_best_setting_col_based(star_df):
     out = out[out["placement"] == "col_based"].copy()
     if out.empty:
         return out
-    trivial_return, tmr_method, skip_rus, decompose_move, parallel_execution = _STAR_BEST_SETTING
+    trivial_return, tmr_method, skip_rus, decompose_move, parallel_execution = (
+        _STAR_BEST_SETTING
+    )
     mask = (
         (out["trivial_return"] == trivial_return)
         & (out["tmr_assignment_method"] == tmr_method)
@@ -162,7 +166,9 @@ def _plot_grouped_stacked_infidelity(
         ax.axis("off")
         return
 
-    settings = sorted(df[setting_cols].drop_duplicates().itertuples(index=False, name=None))
+    settings = sorted(
+        df[setting_cols].drop_duplicates().itertuples(index=False, name=None)
+    )
     if not settings:
         ax.set_title(f"{title}\n(no settings)")
         ax.axis("off")
@@ -233,7 +239,9 @@ def _plot_grouped_stacked_infidelity(
     return component_handles, component_labels
 
 
-def _plot_raw_fidelity_breakdown(raw_df, output_dir, *, include_idle_component=True, filename=None):
+def _plot_raw_fidelity_breakdown(
+    raw_df, output_dir, *, include_idle_component=True, filename=None
+):
     fig, ax = plt.subplots(figsize=(10, 5.2))
     components = [
         ("fidelity_cz", "CZ", "#4C78A8"),
@@ -388,7 +396,9 @@ def _populate_overall_ax(
 ):
     if include_raw:
         raw_mean = (
-            raw_df.groupby("n_qubit", as_index=False)["fidelity"].mean().sort_values("n_qubit")
+            raw_df.groupby("n_qubit", as_index=False)["fidelity"]
+            .mean()
+            .sort_values("n_qubit")
         )
         ax.plot(
             raw_mean["n_qubit"],
@@ -504,7 +514,10 @@ def _plot_overall(
     )
     ax.set_ylabel("Mean Fidelity", fontsize=_FIG_FONT_SIZE)
     if include_idle:
-        ax.set_title("Overall Fidelity Comparison (Including Idle Error)", fontsize=_FIG_FONT_SIZE)
+        ax.set_title(
+            "Overall Fidelity Comparison (Including Idle Error)",
+            fontsize=_FIG_FONT_SIZE,
+        )
     else:
         ax.set_title("Overall Fidelity Comparison", fontsize=_FIG_FONT_SIZE)
     ax.legend(
@@ -537,10 +550,12 @@ def _plot_overall_no_star_d13_raw_vs_no_raw(
     include_idle: bool,
     filename="overall_fidelity_comparison_no_star_d13_raw_vs_no_raw.pdf",
 ):
+    # Independent y-scales: left shows raw on the full fidelity range; right omits raw
+    # so matplotlib can autoscale and spread STAR / T-cultivation curves (detail view).
     fig, (ax_left, ax_right) = plt.subplots(
         1,
         2,
-        sharey=True,
+        sharey=False,
         figsize=(14.5, 5.2),
     )
     excluded = [13]
@@ -563,28 +578,33 @@ def _plot_overall_no_star_d13_raw_vs_no_raw(
         excluded_star_distances=excluded,
     )
     ax_left.set_ylabel("Mean Fidelity", fontsize=_FIG_FONT_SIZE)
+    ax_right.set_ylabel("Mean Fidelity", fontsize=_FIG_FONT_SIZE)
+    ax_left.margins(y=0.08)
+    ax_right.margins(y=0.08)
     if include_idle:
-        suptitle = "Overall Fidelity (STAR d=13 excluded, including idle)"
+        suptitle = "Overall Fidelity Comparison (Including Idle Error)"
     else:
-        suptitle = "Overall Fidelity (STAR d=13 excluded)"
-    fig.suptitle(suptitle, fontsize=_FIG_FONT_SIZE, y=1.02)
+        suptitle = "Overall Fidelity Comparison"
+    fig.suptitle(suptitle, fontsize=_FIG_FONT_SIZE, y=0.995)
     ax_left.set_title("With raw (physical)", fontsize=_FIG_FONT_SIZE)
-    ax_right.set_title("Without raw", fontsize=_FIG_FONT_SIZE)
+    ax_right.set_title(
+        "Without raw (y-axis rescaled for detail)",
+        fontsize=_FIG_FONT_SIZE,
+    )
 
     handles, labels = ax_left.get_legend_handles_labels()
-    ncol = min(4, max(1, len(labels)))
     fig.legend(
         handles,
         labels,
-        loc="lower center",
-        bbox_to_anchor=(0.5, 0.0),
-        ncol=ncol,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.16),
+        ncol=3,
         fontsize=_FIG_FONT_SIZE - 2,
         frameon=True,
     )
-    fig.subplots_adjust(bottom=0.28, wspace=0.12)
+    fig.subplots_adjust(bottom=0.3, wspace=0.18, top=0.90)
     output_path = os.path.join(output_dir, filename)
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.savefig(output_path, dpi=300, bbox_inches="tight", pad_inches=0.08)
     plt.close(fig)
     print(f"Saved: {output_path}")
 
@@ -652,17 +672,15 @@ def main():
     )
 
     print("\n7. Plot stacked fidelity breakdowns (without idle)...")
-    _plot_raw_fidelity_breakdown(
-        raw_df, output_dir, include_idle_component=False
-    )
-    _plot_star_fidelity_breakdown(
-        star_df, output_dir, include_idle_component=False
-    )
+    _plot_raw_fidelity_breakdown(raw_df, output_dir, include_idle_component=False)
+    _plot_star_fidelity_breakdown(star_df, output_dir, include_idle_component=False)
     _plot_t_cultivation_fidelity_breakdown(
         t_df, output_dir, include_idle_component=False
     )
 
-    print("\n8. Plot overall fidelity without STAR d=13: raw (left) vs no raw (right), legend below...")
+    print(
+        "\n8. Plot overall fidelity without STAR d=13: raw (left) vs no raw (right), legend below..."
+    )
     _plot_overall_no_star_d13_raw_vs_no_raw(
         raw_df,
         star_df,
@@ -679,7 +697,9 @@ def main():
         filename="overall_fidelity_comparison_with_idle_no_star_d13_raw_vs_no_raw.pdf",
     )
 
-    print("\n8b. Plot overall fidelity variants without STAR d=13 (single-panel, with raw line)...")
+    print(
+        "\n8b. Plot overall fidelity variants without STAR d=13 (single-panel, with raw line)..."
+    )
     _plot_overall(
         raw_df,
         star_df,

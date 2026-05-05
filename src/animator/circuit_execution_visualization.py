@@ -132,8 +132,10 @@ def _extract_qubits_from_value(value) -> list[int]:
         return []
     if isinstance(value, int):
         return [value]
-    if isinstance(value, tuple) and len(value) == 2 and all(
-        isinstance(v, int) for v in value
+    if (
+        isinstance(value, tuple)
+        and len(value) == 2
+        and all(isinstance(v, int) for v in value)
     ):
         return [value[0], value[1]]
     if isinstance(value, list):
@@ -277,13 +279,19 @@ def plot_circuit_execution(
                 factory_value = _resolve_factory_value(value, idx)
                 factory_move_vecs = _resolve_factory_value(move_vecs, idx)
                 factory_aod = _resolve_factory_value(aod_assignment, idx)
+                y_coord = factory_id
+                if show_logical_qubits:
+                    row_name = f"f{factory_id}"
+                    if row_name not in y_pos:
+                        continue
+                    y_coord = y_pos[row_name]
 
                 box_color = color
                 if operation in ["move", "return_move"]:
                     box_color = _movement_color_for_aod(operation, factory_aod)
 
                 rect = mpatches.Rectangle(
-                    (start_time, factory_id - _BOX_Y_OFFSET),
+                    (start_time, y_coord - _BOX_Y_OFFSET),
                     duration,
                     _BOX_HEIGHT,
                     facecolor=box_color,
@@ -299,7 +307,7 @@ def plot_circuit_execution(
 
                     ax.text(
                         start_time + duration / 2,
-                        factory_id,
+                        y_coord,
                         text,
                         ha="center",
                         va="center",
@@ -310,7 +318,7 @@ def plot_circuit_execution(
                         clip_on=True,
                     )
 
-            if show_logical_qubits:
+            if show_logical_qubits and operation == "CNOT":
                 qubit_targets = _extract_qubits_from_value(value)
                 for qubit_id in qubit_targets:
                     row_name = f"q{qubit_id}"
@@ -340,30 +348,24 @@ def plot_circuit_execution(
         fontweight="bold",
     )
     if show_logical_qubits:
-        ax.set_ylabel(
-            "Qubits and Magic State Factories",
-            fontsize=_AXIS_LABEL_FONT_SIZE,
-            fontweight="bold",
-        )
+        ax.set_ylabel("")
         ax.set_yticks(range(len(row_names)))
         ax.set_yticklabels(row_names)
         ax.set_title(
-            "Circuit Execution Timeline: Qubits and Magic State Factories",
+            "STAR Execution Timeline",
             fontsize=_TITLE_FONT_SIZE,
             fontweight="bold",
         )
     else:
-        ax.set_ylabel(
-            "Magic State Factory ID",
-            fontsize=_AXIS_LABEL_FONT_SIZE,
-            fontweight="bold",
-        )
+        ax.set_ylabel("")
         ax.set_yticks(range(n_factories))
         ax.set_title(
-            "Circuit Execution Timeline: Magic State Factories",
+            "STAR Execution Timeline",
             fontsize=_TITLE_FONT_SIZE,
             fontweight="bold",
         )
+    ax.tick_params(axis="x", labelsize=_FIG_FONT_SIZE)
+    ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
     ax.grid(axis="x", alpha=0.3, linestyle="--")
 
     # Legend
@@ -463,7 +465,9 @@ def plot_circuit_execution_vertical(
             f"f{i}" for i in range(n_factories)
         ]
         y_pos = {name: idx for idx, name in enumerate(row_names)}
-        fig, ax = plt.subplots(figsize=(max(6, len(row_names) * 0.8), circuit_length / 5))
+        fig, ax = plt.subplots(
+            figsize=(max(6, len(row_names) * 0.8), circuit_length / 5)
+        )
     else:
         fig, ax = plt.subplots(figsize=(max(6, n_factories * 0.8), circuit_length / 5))
 
@@ -520,6 +524,12 @@ def plot_circuit_execution_vertical(
                 factory_value = _resolve_factory_value(value, idx)
                 factory_move_vecs = _resolve_factory_value(move_vecs, idx)
                 factory_aod = _resolve_factory_value(aod_assignment, idx)
+                x_coord = factory_id
+                if show_logical_qubits:
+                    row_name = f"f{factory_id}"
+                    if row_name not in y_pos:
+                        continue
+                    x_coord = y_pos[row_name]
 
                 box_color = color
                 if operation in ["move", "return_move"]:
@@ -528,7 +538,7 @@ def plot_circuit_execution_vertical(
                 # Swap coordinates: factory_id on x-axis, time on y-axis
                 # Rectangle: (x, y), width (horizontal = factory dimension), height (vertical = time dimension)
                 rect = mpatches.Rectangle(
-                    (factory_id - _BOX_Y_OFFSET, start_time),
+                    (x_coord - _BOX_Y_OFFSET, start_time),
                     _BOX_HEIGHT,
                     duration,
                     facecolor=box_color,
@@ -543,7 +553,7 @@ def plot_circuit_execution_vertical(
                     text = _star_box_label(operation, factory_value, factory_move_vecs)
 
                     ax.text(
-                        factory_id,
+                        x_coord,
                         start_time + duration / 2,
                         text,
                         ha="center",
@@ -555,7 +565,7 @@ def plot_circuit_execution_vertical(
                         clip_on=True,
                     )
 
-            if show_logical_qubits:
+            if show_logical_qubits and operation == "CNOT":
                 qubit_targets = _extract_qubits_from_value(value)
                 for qubit_id in qubit_targets:
                     row_name = f"q{qubit_id}"
@@ -580,11 +590,7 @@ def plot_circuit_execution_vertical(
         ax.set_xlim(-0.5, len(row_names) - 0.5)
     else:
         ax.set_xlim(-0.5, n_factories - 0.5)
-    ax.set_ylabel(
-        "Time (circuit moments)",
-        fontsize=_AXIS_LABEL_FONT_SIZE,
-        fontweight="bold",
-    )
+    ax.set_ylabel("")
     if show_logical_qubits:
         ax.set_xlabel(
             "Qubits and Magic State Factories",
@@ -594,7 +600,7 @@ def plot_circuit_execution_vertical(
         ax.set_xticks(range(len(row_names)))
         ax.set_xticklabels(row_names)
         ax.set_title(
-            "Circuit Execution Timeline: Qubits and Magic State Factories (Vertical Time)",
+            "STAR Execution Timeline (Vertical Time)",
             fontsize=_TITLE_FONT_SIZE,
             fontweight="bold",
         )
@@ -606,10 +612,12 @@ def plot_circuit_execution_vertical(
         )
         ax.set_xticks(range(n_factories))
         ax.set_title(
-            "Circuit Execution Timeline: Magic State Factories (Vertical Time)",
+            "STAR Execution Timeline (Vertical Time)",
             fontsize=_TITLE_FONT_SIZE,
             fontweight="bold",
         )
+    ax.tick_params(axis="x", labelsize=_FIG_FONT_SIZE)
+    ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
 
     # Legend

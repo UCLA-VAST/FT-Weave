@@ -107,7 +107,11 @@ def make_plots(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--angle", type=float, default=0.0029, help="RZ angle in radians"
+        # "--angle", type=float, default=0.0029, help="RZ angle in radians"
+        "--angle",
+        type=float,
+        default=0.001,
+        help="RZ angle in radians",
     )
     parser.add_argument("--epsilon", type=float, default=1e-4, help="GridSynth epsilon")
     parser.add_argument(
