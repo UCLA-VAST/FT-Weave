@@ -1,12 +1,10 @@
-from src.star.config import (
-    CNOT_TIME,
-    SE_TIME,
-)
-from src.t_cultivation.config import (
-    SE_STAGE_1,
-    SE_STAGE_2,
-)
 from src.ds import move_duration
+from src.star.config import CNOT_TIME
+from src.execution_log.event_helpers import (
+    build_event,
+    normalize_factories,
+    operation_end_time,
+)
 
 
 def write_execution_log(
@@ -20,45 +18,22 @@ def write_execution_log(
     movement_time: float = 0,
     move_vecs: list[list[str]] | None = None,
 ):
-    if operation == "SE":
-        end_time = start_time + SE_TIME
-    elif operation == "CNOT":
-        end_time = start_time + CNOT_TIME
-    elif operation == "Rz":
-        end_time = start_time + 1
-    elif operation == "S" or operation == "H":
-        end_time = start_time + SE_TIME
-    elif operation in ["move", "return_move"]:
-        end_time = start_time + movement_time
-    elif operation == "SE_stage_1":
-        end_time = start_time + SE_STAGE_1
-    elif operation == "SE_stage_2":
-        end_time = start_time + SE_STAGE_2
-    else:
-        end_time = start_time
-    if move_vecs:
-        execution_log.append(
-            (
-                start_time,
-                end_time,
-                factories,
-                operation,
-                aod_assignment,
-                targets,
-                move_vecs,
-            )
+    end_time = operation_end_time(
+        operation=operation,
+        start_time=start_time,
+        movement_time=movement_time,
+    )
+    execution_log.append(
+        build_event(
+            start_time=start_time,
+            end_time=end_time,
+            factories=factories,
+            operation=operation,
+            aod_assignment=aod_assignment,
+            targets=targets,
+            move_vecs=move_vecs,
         )
-    else:
-        execution_log.append(
-            (
-                start_time,
-                end_time,
-                factories,
-                operation,
-                aod_assignment,
-                targets,
-            )
-        )
+    )
 
 
 def write_rus_result_log(
@@ -184,9 +159,9 @@ def insert_s_gate(
 
 
 def clean_up_execution_log(
-    execution_log: list[tuple],
+    execution_log: list[dict],
     circuit_moment: float,
-) -> list[tuple]:
+) -> list[dict]:
     """
     Clean up execution log by removing completed qubits and inserting S gates if needed.
 
@@ -198,7 +173,8 @@ def clean_up_execution_log(
     """  # This function is now integrated into update_qubit_state_per_teleportation
     new_log = []
     for entry in execution_log:
-        start, end = entry[:2]
+        start = entry["start_time"]
+        end = entry["end_time"]
         if end <= circuit_moment:
             # This teleportation has completed; we will handle state updates separately
             new_log.append(entry)
@@ -206,7 +182,7 @@ def clean_up_execution_log(
 
 
 def validate_execution_log(
-    execution_log: list[tuple],
+    execution_log: list[dict],
     magic_state_locations: list[tuple[int, int]],
     n_aods: int,
 ):
@@ -231,18 +207,14 @@ def validate_execution_log(
     aod_time_intervals = [0 for _ in range(n_aods)]
 
     for entry in execution_log:
-        # print(entry)
-        start_time = entry[0]
-        end_time = entry[1]
-        factories = entry[2]
-        operation = entry[3]
-        aod_assignment = entry[4]
-        targets = entry[5]
+        start_time = entry["start_time"]
+        end_time = entry["end_time"]
+        factories = entry["factories"]
+        operation = entry["operation"]
+        aod_assignment = entry["aod_assignment"]
+        targets = entry["targets"]
 
-        if isinstance(factories, int):
-            factories = [factories]
-        elif factories is None:
-            factories = []
+        factories = normalize_factories(factories)
 
         # Skip barrier and special operations
         if operation in ["Barrier", "RUS_success", "RUS_fail"]:
