@@ -171,7 +171,7 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                                     )
                                     (
                                         qc_one_layer,
-                                        rz_logs,
+                                        full_logs,
                                         profiling_results_per_case,
                                     ) = generate_one_layer_2d_tfim_circuit_star(
                                         n_qubits=n_cols * n_rows,
@@ -213,8 +213,7 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                                         n_factories=n_cols * n_rows,
                                         qubit_layout=(n_rows, n_cols),
                                         n_trotter_steps=1,  # for simplicity, we only evaluate 1 trotter step for star compilation
-                                        qc_one_layer=qc_one_layer,
-                                        execution_logs=rz_logs,
+                                        execution_logs=full_logs,
                                         logical_error_model=logical_error_model,
                                     )
                                     total_depth = None

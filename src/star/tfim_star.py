@@ -2,8 +2,10 @@ from src.star.analog_rotation_execution import factory_angle_execution
 from src.star.analog_rotation_execution_parallel import factory_angle_execution_parallel
 from src.ds import FactoryPool, get_microarchitecture
 from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
+from src.tfim_layer_log import build_clifford_layer_log
 from src.util import analyze_execution_log
 import pickle
+from typing import cast
 
 
 def generate_one_layer_2d_tfim_circuit_star(
@@ -18,7 +20,7 @@ def generate_one_layer_2d_tfim_circuit_star(
     parallel_execution: bool,
     analyze_result: bool,
     result_path: str | None = None,
-) -> tuple[list[dict], list[list[tuple]], list[dict]]:
+) -> tuple[list[dict], list[list[tuple] | list[dict]], list[dict]]:
     qc_one_layer = generate_one_layer_2d_tfim_circuit_cz(
         n_qubits=n_qubits,
         qubit_layout=qubit_layout,
@@ -35,7 +37,7 @@ def generate_one_layer_2d_tfim_circuit_star(
     #         )
     # input()
     # add logic_qubit_locations, and magic_state_locations here
-    rz_logs: list[list[tuple]] = []
+    layer_logs: list[list[dict] | list[tuple]] = []
     logic_qubit_locations, magic_state_locations = get_microarchitecture(
         n_qubits,
         n_factories=n_qubits,
@@ -63,14 +65,32 @@ def generate_one_layer_2d_tfim_circuit_star(
                 code_distance=code_distance,
                 **config,
             )
-            rz_logs.append(rz_log)
+            layer_logs.append(rz_log)
+            instruction["star_layer_log"] = rz_log
+            instruction["star_layer_log_type"] = "rz"
         else:
             assert instruction["gate"] in ["CNOT", "H"]
+            clifford_log = build_clifford_layer_log(
+                instruction=instruction,
+                logic_qubit_locations=logic_qubit_locations,
+            )
+            layer_logs.append(clifford_log)
+            instruction["star_layer_log"] = clifford_log
+            instruction["star_layer_log_type"] = "clifford"
 
     profiling_results = []
     if analyze_result:
-        for i, log in enumerate(rz_logs):
-            profiling_result = analyze_execution_log(log, n_factories=n_qubits)
+        rz_round = 0
+        for log in layer_logs:
+            if not (
+                isinstance(log, list)
+                and len(log) > 0
+                and isinstance(log[0], tuple)
+            ):
+                continue
+            profiling_result = analyze_execution_log(
+                cast(list[tuple], log), n_factories=n_qubits
+            )
             # if "return_move" not in profiling_result["ops"]:
             #     for l in log:
             #         print(l)
@@ -81,7 +101,7 @@ def generate_one_layer_2d_tfim_circuit_star(
                 "n_qubits": n_qubits,
                 "qubit_cols": qubit_layout[0],
                 "qubit_rows": qubit_layout[1],
-                "round": i,
+                "round": rz_round,
                 "code_distance": code_distance,
                 "placement": placement,
                 "n_aods": config["n_aods"],
@@ -105,14 +125,15 @@ def generate_one_layer_2d_tfim_circuit_star(
                 "tmr_total": profiling_result["failures"]["tmr_total"],
             }
             profiling_results.append(csv_result)
+            rz_round += 1
     if result_path is not None:
         with open(result_path, "wb") as f:
 
             pickle.dump(
                 {
                     "qc_one_layer": qc_one_layer,
-                    "rz_logs": rz_logs,
+                    "layer_logs": layer_logs,
                 },
                 f,
             )
-    return qc_one_layer, rz_logs, profiling_results
+    return qc_one_layer, layer_logs, profiling_results

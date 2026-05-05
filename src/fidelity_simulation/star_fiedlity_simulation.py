@@ -1,5 +1,4 @@
 from src.error_model import LogicalErrorModel
-import math
 
 
 # simulate trotter circuit for n*n grid of qubits and t trotter steps
@@ -8,8 +7,7 @@ def simluate_trotter_2d_tfim_fidelity(
     n_factories: int,
     qubit_layout: tuple,
     n_trotter_steps: int,
-    qc_one_layer: list[dict],
-    execution_logs: list[list[tuple]],
+    execution_logs: list[list[tuple] | list[dict]],
     logical_error_model: LogicalErrorModel,
 ) -> dict:
     """
@@ -23,19 +21,28 @@ def simluate_trotter_2d_tfim_fidelity(
     """
     row, col = qubit_layout
     n_rz_layer = 9 * n_trotter_steps
-    assert (
-        len(execution_logs) == n_rz_layer
-    ), f"Expected {n_rz_layer} layers of RZ gates, but got {len(execution_logs)}"
-
     factory_state_fidelity = [0.0 for _ in range(n_factories)]
     fidelity_of_rz_injection = 1
     fidelity_of_rz_teleportaion = 1
     fidelity_of_rz_s = 1
-    n_s = 0
-    n_cnot = 0
+    n_s = 0  # S in injection flow
+    n_cnot = 0  # Clifford CNOTs
+    n_cnot_teleportation = 0  # Injection CNOTs
+    n_h = 0
+    n_rz_seen = 0
     for log in execution_logs:
         for entry in log:
-            if len(entry) == 6:
+            if isinstance(entry, dict):
+                operation = entry.get("operation")
+                if operation == "H":
+                    targets = entry.get("qubits", [])
+                    n_h += len(targets) if isinstance(targets, list) else 0
+                elif operation == "CNOT":
+                    pairs = entry.get("qubit_pairs", [])
+                    n_cnot += len(pairs) if isinstance(pairs, list) else 0
+                continue
+
+            if isinstance(entry, tuple) and len(entry) >= 6:
                 _, _, factories, operation, _, values = entry
                 assert operation in [
                     "SE",
@@ -48,6 +55,7 @@ def simluate_trotter_2d_tfim_fidelity(
                     "RUS_fail",
                 ], f"Unexpected operation {operation} in execution log"
                 if operation == "Rz":
+                    n_rz_seen += 1
                     # value is the angle of Rz gate, we assume the error is proportional to the angle
                     for factory_id, value in zip(factories, values):
                         factory_state_fidelity[factory_id] = (
@@ -65,23 +73,13 @@ def simluate_trotter_2d_tfim_fidelity(
                         fidelity_of_rz_teleportaion *= (
                             logical_error_model.get_logical_fidelity("CNOT")
                         )
-                    n_cnot += 1
-
-    # count the clifford gates in one trotter step
-    n_cnot_per_step = 0
-    n_h_per_step = 0
-    for instruction in qc_one_layer:
-        if instruction["gate"] == "CNOT":
-            n_cnot_per_step += len(instruction["targets"])
-        elif instruction["gate"] == "H":
-            n_h_per_step += len(instruction["targets"])
-
-    fidelity_cnot = logical_error_model.get_logical_fidelity("CNOT") ** (
-        n_cnot_per_step * n_trotter_steps
-    )
-    fidelity_1q = logical_error_model.get_logical_fidelity("H") ** (
-        n_h_per_step * n_trotter_steps
-    )
+                    n_cnot_teleportation += 1
+    assert (
+        n_rz_seen == n_rz_layer
+    ), f"Expected {n_rz_layer} RZ rounds, but got {n_rz_seen}"
+    fidelity_of_rz_teleportaion *= logical_error_model.get_logical_fidelity("CNOT") ** n_cnot_teleportation
+    fidelity_cnot = logical_error_model.get_logical_fidelity("CNOT") ** n_cnot
+    fidelity_1q = logical_error_model.get_logical_fidelity("H") ** n_h
     fidelity_of_rz_layer = (
         fidelity_of_rz_injection * fidelity_of_rz_teleportaion * fidelity_of_rz_s
     )
@@ -94,8 +92,9 @@ def simluate_trotter_2d_tfim_fidelity(
         "fidelity_of_rz_s": fidelity_of_rz_s,
         "fidelity_cnot": fidelity_cnot,
         "fidelity_1q": fidelity_1q,
-        "n_cnot": n_cnot + n_cnot_per_step * n_trotter_steps,
-        "n_h": n_h_per_step * n_trotter_steps,
+        "n_cnot": n_cnot,
+        "n_cnot_teleportation": n_cnot_teleportation,
+        "n_h": n_h,
         "n_s": n_s,
     }
     return fidelity_profile
