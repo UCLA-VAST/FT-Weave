@@ -124,7 +124,7 @@ def print_tmr_assignment_results(result: dict):
 
 
 def analyze_execution_log(
-    execution_log: list[tuple],
+    execution_log: list[dict],
     n_factories: int,
 ) -> dict[str, Any]:
     """
@@ -175,17 +175,15 @@ def analyze_execution_log(
     initial_angle = None
     largest_angle = None
     for e in execution_log:
-        # Accept either 5-, 6-, or 7-element tuples (with optional aod_assignment)
-        if len(e) == 6:
-            start, end, factory_id, operation, aod_assignment, value = e
-            move_vecs = None
-        elif len(e) == 7:
-            start, end, factory_id, operation, aod_assignment, value, move_vecs = e
-        else:
-            start, end, factory_id, operation = e[:4]
-            if operation == "Barrier":
-                continue
-            raise ValueError(f"Unexpected log entry format: {e}")
+        start = e["start_time"]
+        end = e["end_time"]
+        factory_id = e["factories"]
+        operation = e["operation"]
+        aod_assignment = e["aod_assignment"]
+        value = e["targets"]
+        move_vecs = e["move_vecs"]
+        if operation == "Barrier":
+            continue
 
         overall_end = max(overall_end, end)
 

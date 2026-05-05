@@ -70,38 +70,12 @@ def get_aod_border_color(aod_idx: int) -> str:
     return aod_colors[aod_idx % len(aod_colors)]
 
 
-def _parse_execution_entry(entry: tuple) -> tuple:
-    if len(entry) == 5:
-        start_time, end_time, factory_id, operation, aod_assignment = entry
-        assert (
-            operation == "Barrier"
-        ), "Expected 5-element entry to be a Barrier operation"
-        value = None
-        move_vecs = None
-    elif len(entry) == 6:
-        start_time, end_time, factory_id, operation, aod_assignment, value = entry
-        move_vecs = None
-    elif len(entry) == 7:
-        (
-            start_time,
-            end_time,
-            factory_id,
-            operation,
-            aod_assignment,
-            value,
-            move_vecs,
-        ) = entry
-    else:
-        raise ValueError(f"Unexpected log entry format: {entry}")
-
+def _normalize_factories(factory_id) -> list[int]:
     if isinstance(factory_id, int):
-        factories = [factory_id]
-    elif factory_id is None:
-        factories = []
-    else:
-        factories = list(factory_id)
-
-    return start_time, end_time, factories, operation, aod_assignment, value, move_vecs
+        return [factory_id]
+    if factory_id is None:
+        return []
+    return list(factory_id)
 
 
 def _resolve_factory_value(values, idx: int):
@@ -211,7 +185,7 @@ def plot_circuit_execution(
         if n_logical_qubits is None:
             max_qubit = -1
             for entry in execution_log:
-                _, _, _, _, _, value, _ = _parse_execution_entry(entry)
+                value = entry.get("targets")
                 qubits = _extract_qubits_from_value(value)
                 if qubits:
                     max_qubit = max(max_qubit, max(qubits))
@@ -227,15 +201,13 @@ def plot_circuit_execution(
     # Plot each operation as a rectangle
     max_time = 0
     for entry in execution_log:
-        (
-            start_time,
-            end_time,
-            factories,
-            operation,
-            aod_assignment,
-            value,
-            move_vecs,
-        ) = _parse_execution_entry(entry)
+        start_time = entry.get("start_time", 0)
+        end_time = entry.get("end_time", start_time)
+        factories = _normalize_factories(entry.get("factories"))
+        operation = entry.get("operation")
+        aod_assignment = entry.get("aod_assignment")
+        value = entry.get("targets")
+        move_vecs = entry.get("move_vecs")
         max_time = max(max_time, end_time)
         duration = end_time - start_time
         if duration == 0:
@@ -456,7 +428,7 @@ def plot_circuit_execution_vertical(
         if n_logical_qubits is None:
             max_qubit = -1
             for entry in execution_log:
-                _, _, _, _, _, value, _ = _parse_execution_entry(entry)
+                value = entry.get("targets")
                 qubits = _extract_qubits_from_value(value)
                 if qubits:
                     max_qubit = max(max_qubit, max(qubits))
@@ -473,15 +445,13 @@ def plot_circuit_execution_vertical(
 
     # Plot each operation as a rectangle
     for entry in execution_log:
-        (
-            start_time,
-            end_time,
-            factories,
-            operation,
-            aod_assignment,
-            value,
-            move_vecs,
-        ) = _parse_execution_entry(entry)
+        start_time = entry.get("start_time", 0)
+        end_time = entry.get("end_time", start_time)
+        factories = _normalize_factories(entry.get("factories"))
+        operation = entry.get("operation")
+        aod_assignment = entry.get("aod_assignment")
+        value = entry.get("targets")
+        move_vecs = entry.get("move_vecs")
 
         duration = end_time - start_time
         if duration == 0:
@@ -585,7 +555,9 @@ def plot_circuit_execution_vertical(
 
     # Configure axes
     # Invert y-axis so time goes from top to bottom
-    ax.set_ylim(max(e[1] for e in execution_log) * 1.01, 0)
+    ax.set_ylim(
+        max(e.get("end_time", e.get("start_time", 0)) for e in execution_log) * 1.01, 0
+    )
     if show_logical_qubits:
         ax.set_xlim(-0.5, len(row_names) - 0.5)
     else:
@@ -730,18 +702,17 @@ def _plot_t_cultivation_execution_on_ax(
 ) -> None:
     rows = [f"q{i}" for i in range(n_qubits)] + [f"f{i}" for i in range(n_factories)]
     y_pos = {name: idx for idx, name in enumerate(rows)}
-    max_time = max(entry[1] for entry in execution_log)
+    max_time = max(
+        entry.get("end_time", entry.get("start_time", 0)) for entry in execution_log
+    )
 
     for entry in execution_log:
-        (
-            start_time,
-            end_time,
-            factories,
-            operation,
-            aod_assignment,
-            value,
-            _move_vecs,
-        ) = _parse_execution_entry(entry)
+        start_time = entry.get("start_time", 0)
+        end_time = entry.get("end_time", start_time)
+        factories = _normalize_factories(entry.get("factories"))
+        operation = entry.get("operation")
+        aod_assignment = entry.get("aod_assignment")
+        value = entry.get("targets")
 
         operation = _canonical_tcult_operation(operation)
 
@@ -835,7 +806,10 @@ def plot_t_cultivation_execution_subfigures(
     row_height_ratios = [max(0.8, lanes / 3.0) for lanes in lane_counts]
     global_xmax = (
         max(
-            max(entry[1] for entry in execution_log)
+            max(
+                entry.get("end_time", entry.get("start_time", 0))
+                for entry in execution_log
+            )
             for _, execution_log, _, _ in row_plots
         )
         * 1.03

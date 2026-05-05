@@ -7,7 +7,7 @@ def simluate_trotter_2d_tfim_fidelity(
     n_factories: int,
     qubit_layout: tuple,
     n_trotter_steps: int,
-    execution_logs: list[list[tuple] | list[dict]],
+    execution_logs: list[list[dict]],
     logical_error_model: LogicalErrorModel,
 ) -> dict:
     """
@@ -32,48 +32,51 @@ def simluate_trotter_2d_tfim_fidelity(
     n_rz_seen = 0
     for log in execution_logs:
         for entry in log:
-            if isinstance(entry, dict):
-                operation = entry.get("operation")
-                if operation == "H":
-                    targets = entry.get("qubits", [])
-                    n_h += len(targets) if isinstance(targets, list) else 0
-                elif operation == "CNOT":
-                    pairs = entry.get("qubit_pairs", [])
-                    n_cnot += len(pairs) if isinstance(pairs, list) else 0
+            operation = entry["operation"]
+            factories = entry["factories"]
+            values = entry["targets"]
+
+            if operation == "H":
+                targets = values if isinstance(values, list) else []
+                n_h += len(targets)
                 continue
 
-            if isinstance(entry, tuple) and len(entry) >= 6:
-                _, _, factories, operation, _, values = entry
-                assert operation in [
-                    "SE",
-                    "CNOT",
-                    "Rz",
-                    "S",
-                    "Barrier",
-                    "TMR_fail",
-                    "RUS_success",
-                    "RUS_fail",
-                ], f"Unexpected operation {operation} in execution log"
-                if operation == "Rz":
-                    n_rz_seen += 1
-                    # value is the angle of Rz gate, we assume the error is proportional to the angle
-                    for factory_id, value in zip(factories, values):
-                        factory_state_fidelity[factory_id] = (
-                            logical_error_model.get_rotation_fidelity(angle=value)
-                        )
-                elif operation == "S":
-                    n_s += len(values) if isinstance(values, (list, tuple)) else 1
-                    # S gate has a fixed fidelity
-                    # ! we don't need SE for S as S is in the middle of SE
-                    fidelity_of_rz_s *= logical_error_model.get_logical_fidelity("S")
-                elif operation == "CNOT":
-                    # CNOT gate has a fixed fidelity
-                    for factory_id, value in zip(factories, values):
-                        fidelity_of_rz_injection *= factory_state_fidelity[factory_id]
-                        fidelity_of_rz_teleportaion *= (
-                            logical_error_model.get_logical_fidelity("CNOT")
-                        )
-                    n_cnot_teleportation += 1
+            if operation == "CNOT" and "qubit_pairs" in entry:
+                pairs = entry.get("qubit_pairs", [])
+                n_cnot += len(pairs) if isinstance(pairs, list) else 0
+                continue
+
+            if operation == "Barrier":
+                continue
+            assert operation in [
+                "SE",
+                "CNOT",
+                "Rz",
+                "S",
+                "TMR_fail",
+                "RUS_success",
+                "RUS_fail",
+            ], f"Unexpected operation {operation} in execution log"
+            if operation == "Rz":
+                n_rz_seen += 1
+                fac_list = factories if isinstance(factories, list) else []
+                val_list = values if isinstance(values, list) else []
+                for factory_id, value in zip(fac_list, val_list):
+                    factory_state_fidelity[factory_id] = (
+                        logical_error_model.get_rotation_fidelity(angle=value)
+                    )
+            elif operation == "S":
+                n_s += len(values) if isinstance(values, (list, tuple)) else 1
+                fidelity_of_rz_s *= logical_error_model.get_logical_fidelity("S")
+            elif operation == "CNOT":
+                fac_list = factories if isinstance(factories, list) else []
+                val_list = values if isinstance(values, list) else []
+                for factory_id, _value in zip(fac_list, val_list):
+                    fidelity_of_rz_injection *= factory_state_fidelity[factory_id]
+                    fidelity_of_rz_teleportaion *= (
+                        logical_error_model.get_logical_fidelity("CNOT")
+                    )
+                n_cnot_teleportation += 1
     assert (
         n_rz_seen == n_rz_layer
     ), f"Expected {n_rz_layer} RZ rounds, but got {n_rz_seen}"

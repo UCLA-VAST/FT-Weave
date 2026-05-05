@@ -76,40 +76,7 @@ def _parse_location_xy(raw_loc) -> Optional[Tuple[int, int]]:
     return None
 
 
-def _parse_execution_entry(entry: tuple):
-    """Parse execution log entry across legacy and current tuple formats."""
-    if len(entry) == 5:
-        start_time, end_time, factory_id, operation, aod_assignment = entry
-        value = None
-        move_vecs = None
-    elif len(entry) == 6:
-        start_time, end_time, factory_id, operation, aod_assignment, value = entry
-        move_vecs = None
-    elif len(entry) >= 7:
-        (
-            start_time,
-            end_time,
-            factory_id,
-            operation,
-            aod_assignment,
-            value,
-            move_vecs,
-        ) = entry[:7]
-    else:
-        raise ValueError(f"Unexpected log entry format: {entry}")
-
-    return (
-        start_time,
-        end_time,
-        _normalize_entry_factories(factory_id),
-        operation,
-        aod_assignment,
-        value,
-        move_vecs,
-    )
-
-
-def extract_rus_rounds(execution_log: List[Tuple]) -> List[List[Tuple]]:
+def extract_rus_rounds(execution_log: List[dict]) -> List[List[dict]]:
     """
     Extract RUS rounds from execution log.
 
@@ -134,7 +101,8 @@ def extract_rus_rounds(execution_log: List[Tuple]) -> List[List[Tuple]]:
     # Find all barrier positions
     barrier_indices = []
     for i, entry in enumerate(execution_log):
-        if len(entry) >= 4 and entry[3] == "Barrier":
+        operation = entry.get("operation")
+        if operation == "Barrier":
             barrier_indices.append(i)
 
     if not barrier_indices:
@@ -162,7 +130,7 @@ def extract_rus_rounds(execution_log: List[Tuple]) -> List[List[Tuple]]:
         round_entries = [
             execution_log[j]
             for j in range(start_idx, end_idx)
-            if not (len(execution_log[j]) >= 4 and execution_log[j][3] == "Barrier")
+            if execution_log[j].get("operation") != "Barrier"
         ]
 
         if round_entries:
@@ -196,12 +164,10 @@ def extract_assignments_from_round(
     location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
 
     for entry in rus_round:
-        try:
-            _, _, factory_ids, operation, _aod_assignment, value, move_vecs = (
-                _parse_execution_entry(entry)
-            )
-        except ValueError:
-            continue
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        operation = entry.get("operation")
+        value = entry.get("targets")
+        move_vecs = entry.get("move_vecs")
 
         # Look for move operations or injection operations (CNOT/SE + RUS_success/RUS_fail)
         for idx, factory_id in enumerate(factory_ids):
@@ -233,7 +199,7 @@ def extract_assignments_from_round(
     return (assignments, return_assignments)
 
 
-def extract_rus_results(rus_round: List[Tuple]) -> Dict[int, bool]:
+def extract_rus_results(rus_round: List[dict]) -> Dict[int, bool]:
     """
     Extract RUS results (success/fail) for each factory in a round.
 
@@ -246,12 +212,8 @@ def extract_rus_results(rus_round: List[Tuple]) -> Dict[int, bool]:
     results = {}
 
     for entry in rus_round:
-        try:
-            _, _, factory_ids, operation, _aod_assignment, _value, _move_vecs = (
-                _parse_execution_entry(entry)
-            )
-        except ValueError:
-            continue
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        operation = entry.get("operation")
 
         if operation == "RUS_success":
             for factory_id in factory_ids:
@@ -263,17 +225,14 @@ def extract_rus_results(rus_round: List[Tuple]) -> Dict[int, bool]:
     return results
 
 
-def extract_rus_failed_qubits(rus_round: List[Tuple]) -> set[int]:
+def extract_rus_failed_qubits(rus_round: List[dict]) -> set[int]:
     """Extract qubit IDs that encountered RUS_fail in this round."""
     failed_qubits = set()
 
     for entry in rus_round:
-        try:
-            _, _, factory_ids, operation, _aod_assignment, value, _move_vecs = (
-                _parse_execution_entry(entry)
-            )
-        except ValueError:
-            continue
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        operation = entry.get("operation")
+        value = entry.get("targets")
 
         if operation != "RUS_fail":
             continue
@@ -289,7 +248,7 @@ def extract_rus_failed_qubits(rus_round: List[Tuple]) -> set[int]:
     return failed_qubits
 
 
-def extract_tmr_failures(rus_round: List[Tuple]) -> set:
+def extract_tmr_failures(rus_round: List[dict]) -> set:
     """
     Extract TMR failure information for factories in a round.
 
@@ -302,12 +261,8 @@ def extract_tmr_failures(rus_round: List[Tuple]) -> set:
     tmr_failures = set()
 
     for entry in rus_round:
-        try:
-            _, _, factory_ids, operation, _aod_assignment, _value, _move_vecs = (
-                _parse_execution_entry(entry)
-            )
-        except ValueError:
-            continue
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        operation = entry.get("operation")
 
         if operation == "TMR_fail":
             for factory_id in factory_ids:
@@ -317,7 +272,7 @@ def extract_tmr_failures(rus_round: List[Tuple]) -> set:
 
 
 def extract_angles_from_round(
-    rus_round: List[Tuple],
+    rus_round: List[dict],
 ) -> Tuple[Dict[int, float], Dict[int, float]]:
     """
     Extract angle information from a RUS round.
@@ -334,12 +289,9 @@ def extract_angles_from_round(
     factory_angles = {}
 
     for entry in rus_round:
-        try:
-            _, _, factory_ids, operation, _aod_assignment, value, _move_vecs = (
-                _parse_execution_entry(entry)
-            )
-        except ValueError:
-            continue
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        operation = entry.get("operation")
+        value = entry.get("targets")
 
         if operation == "Rz":
             # Rz operation shows angle preparation
@@ -428,7 +380,7 @@ def _arrow_style_from_intensity(intensity: float) -> tuple[float, float]:
 
 def plot_rus_round(
     round_idx: int,
-    rus_round: List[Tuple],
+    rus_round: List[dict],
     logic_qubit_locations: List[Tuple[int, int]],
     magic_state_locations: List[Tuple[int, int]],
     qubit_trackers: Optional[Dict] = None,
@@ -449,8 +401,10 @@ def plot_rus_round(
     if not rus_round:
         return (None, magic_state_locations)
 
-    circuit_times = [entry[0] for entry in rus_round if len(entry) >= 2]
-    circuit_times.extend([entry[1] for entry in rus_round if len(entry) >= 2])
+    circuit_times = [entry.get("start_time", 0) for entry in rus_round]
+    circuit_times.extend(
+        [entry.get("end_time", entry.get("start_time", 0)) for entry in rus_round]
+    )
 
     if circuit_times:
         duration = max(circuit_times) - min(circuit_times)
@@ -458,19 +412,18 @@ def plot_rus_round(
         duration = 0
 
     # Calculate duration and rus_time
-    start_time = rus_round[0][0]
-    end_time = rus_round[0][1]
+    start_time = rus_round[0].get("start_time", 0)
+    end_time = rus_round[0].get("end_time", start_time)
     rus_time = 0
     qubit_cnot_count = {}  # Track CNOT count per qubit
     for entry in rus_round:
-        start_time = min(start_time, entry[0])
-        end_time = max(end_time, entry[1])
-        try:
-            _, _, factory_ids, operation, _aod_assignment, value, _move_vecs = (
-                _parse_execution_entry(entry)
-            )
-        except ValueError:
-            continue
+        entry_start = entry.get("start_time", 0)
+        entry_end = entry.get("end_time", entry_start)
+        start_time = min(start_time, entry_start)
+        end_time = max(end_time, entry_end)
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        operation = entry.get("operation")
+        value = entry.get("targets")
 
         if operation == "CNOT":
             for idx, _factory_id in enumerate(factory_ids):
@@ -640,18 +593,12 @@ def plot_rus_round(
     location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
 
     for entry in rus_round:
-        try:
-            (
-                start_time,
-                end_time,
-                factory_ids,
-                operation,
-                aod_assignment,
-                _value,
-                move_vecs,
-            ) = _parse_execution_entry(entry)
-        except ValueError:
-            continue
+        start_time = entry.get("start_time", 0)
+        end_time = entry.get("end_time", start_time)
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        operation = entry.get("operation")
+        aod_assignment = entry.get("aod_assignment")
+        move_vecs = entry.get("move_vecs")
 
         if operation in ["move", "return_move"]:
             for idx, factory_id in enumerate(factory_ids):
@@ -834,7 +781,7 @@ def plot_rus_round(
 
 
 def plot_all_rus_rounds(
-    execution_log: List[Tuple],
+    execution_log: List[dict],
     logic_qubit_locations: List[Tuple[int, int]],
     magic_state_locations: List[Tuple[int, int]],
     base_path: str = "output",

@@ -264,13 +264,15 @@ def factory_angle_execution(
 
         # Add time for injection attempts (CNOT + SE per injection)
         execution_log.append(
-            (
-                circuit_moment,
-                circuit_moment,
-                -1,
-                "Barrier",
-                None,
-            )
+            {
+                "start_time": circuit_moment,
+                "end_time": circuit_moment,
+                "factories": -1,
+                "operation": "Barrier",
+                "aod_assignment": None,
+                "targets": None,
+                "move_vecs": None,
+            }
         )
         # input()
     if save_log and log_path is not None:

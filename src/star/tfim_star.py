@@ -5,7 +5,6 @@ from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
 from src.tfim_layer_log import build_clifford_layer_log
 from src.util import analyze_execution_log
 import pickle
-from typing import cast
 
 
 def generate_one_layer_2d_tfim_circuit_star(
@@ -81,16 +80,10 @@ def generate_one_layer_2d_tfim_circuit_star(
     profiling_results = []
     if analyze_result:
         rz_round = 0
-        for log in layer_logs:
-            if not (
-                isinstance(log, list)
-                and len(log) > 0
-                and isinstance(log[0], tuple)
-            ):
+        for instruction, log in zip(qc_one_layer, layer_logs):
+            if instruction["gate"] != "Rz":
                 continue
-            profiling_result = analyze_execution_log(
-                cast(list[tuple], log), n_factories=n_qubits
-            )
+            profiling_result = analyze_execution_log(log, n_factories=n_qubits)
             # if "return_move" not in profiling_result["ops"]:
             #     for l in log:
             #         print(l)
