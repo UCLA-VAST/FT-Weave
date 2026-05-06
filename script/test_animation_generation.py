@@ -1,7 +1,7 @@
-import json
 import os
 import sys
 from copy import deepcopy
+from typing import Any
 
 import numpy as np
 
@@ -12,6 +12,84 @@ from src.animator.animator_matplotlib import Animator
 from src.ds import Architecture, get_microarchitecture
 from src.star.tfim_star import generate_one_layer_2d_tfim_circuit_star
 from src.writer.execution_log_to_zair import execution_log_to_animator_code
+
+
+def build_compact_architecture(
+    logic_qubit_locations: list[tuple[int, int]],
+    magic_state_locations: list[tuple[int, int]],
+    n_aods: int,
+) -> Architecture:
+    """Build a compact two-trap-per-site architecture from used microarchitecture sites.
+
+    Trap model:
+    - Left trap  : SLM 0
+    - Right trap : SLM 1 (x offset +2 um from left at the same site)
+    - Site pitch : dx=12 um, dy=10 um
+    """
+    used_points = logic_qubit_locations + magic_state_locations
+    max_x = max(x for x, _ in used_points)
+    max_y = max(y for _, y in used_points)
+
+    site_dx = 12
+    site_dy = 10
+    right_slm_offset_x = 2
+
+    n_rows = max_y + 1
+    n_cols = max_x + 1
+
+    slm0_x_min = 0
+    slm0_x_max = (n_cols - 1) * site_dx
+    slm1_x_min = right_slm_offset_x
+    slm1_x_max = right_slm_offset_x + (n_cols - 1) * site_dx
+    y_min = 0
+    y_max = (n_rows - 1) * site_dy
+
+    padding_x = site_dx
+    padding_y = site_dy
+    arch_min_x = min(slm0_x_min, slm1_x_min) - padding_x
+    arch_max_x = max(slm0_x_max, slm1_x_max) + padding_x
+    arch_min_y = y_min - padding_y
+    arch_max_y = y_max + padding_y
+
+    architecture_spec = {
+        "name": "compact_microarchitecture",
+        "operation_duration": {
+            "rydberg": 0.36,
+            "1qGate": 52,
+            "atom_transfer": 15,
+        },
+        "storage_zones": [],
+        "entanglement_zones": [
+            {
+                "zone_id": 0,
+                "slms": [
+                    {
+                        "id": 0,
+                        "site_seperation": [site_dx, site_dy],
+                        "r": n_rows,
+                        "c": n_cols,
+                        "location": [0, 0],
+                    },
+                    {
+                        "id": 1,
+                        "site_seperation": [site_dx, site_dy],
+                        "r": n_rows,
+                        "c": n_cols,
+                        "location": [right_slm_offset_x, 0],
+                    },
+                ],
+                "offset": [0, 0],
+                "dimension": [arch_max_x - arch_min_x, arch_max_y - arch_min_y],
+            }
+        ],
+        "aods": [
+            {"id": i, "site_seperation": 2, "r": n_rows, "c": n_cols}
+            for i in range(n_aods)
+        ],
+        "arch_range": [[arch_min_x, arch_min_y], [arch_max_x, arch_max_y]],
+        "rydberg_range": [[[arch_min_x, arch_min_y], [arch_max_x, arch_max_y]]],
+    }
+    return Architecture(architecture_spec)
 
 
 def merge_layer_logs_with_global_timeline(
@@ -26,7 +104,8 @@ def merge_layer_logs_with_global_timeline(
             continue
         layer_start = min(float(entry.get("start_time", 0.0)) for entry in layer)
         layer_end = max(
-            float(entry.get("end_time", entry.get("start_time", 0.0))) for entry in layer
+            float(entry.get("end_time", entry.get("start_time", 0.0)))
+            for entry in layer
         )
         shift = current_time - layer_start
         for entry in layer:
@@ -52,11 +131,13 @@ def main() -> None:
     J = 1.0
     h = 0.7
     dt = 0.1
-    max_layers = 12
     inter_layer_gap = 0.0
-    arch_spec_path = "hardware_spec/logical_architecture.json"
     output_path = "output/animation/tfim_log_adapter_test.mp4"
     ffmpeg_path = "ffmpeg"
+    figure_scaling = 16
+    figure_font = 12
+    # Smaller => more frames per unit time (smoother paths). None = Animator default.
+    animator_mus_per_frm: float | None = 5.0
 
     n_qubits = n_cols * n_rows
     qubit_layout = (n_cols, n_rows)
@@ -70,7 +151,7 @@ def main() -> None:
         "rng": np.random.default_rng(seed),
     }
 
-    _, layer_logs, _ = generate_one_layer_2d_tfim_circuit_star(
+    _, raw_layer_logs, _ = generate_one_layer_2d_tfim_circuit_star(
         n_qubits=n_qubits,
         qubit_layout=qubit_layout,
         placement=placement,
@@ -83,21 +164,26 @@ def main() -> None:
         analyze_result=False,
     )
 
-    layer_logs = layer_logs[:max_layers]
+    layer_logs: list[list[dict[str, Any]]] = []
+    for layer in raw_layer_logs:
+        if isinstance(layer, list) and all(isinstance(entry, dict) for entry in layer):
+            layer_logs.append([dict(entry) for entry in layer])
     merged_log = merge_layer_logs_with_global_timeline(
         layer_logs=layer_logs,
         inter_layer_gap=inter_layer_gap,
     )
 
-    logic_qubit_locations, _ = get_microarchitecture(
+    logic_qubit_locations, magic_state_locations = get_microarchitecture(
         n_qubits=n_qubits,
         n_factories=n_qubits,
         qubit_layout=qubit_layout,
         placement=placement,
     )
-
-    with open(arch_spec_path, "r") as f:
-        architecture = Architecture(json.load(f))
+    architecture = build_compact_architecture(
+        logic_qubit_locations=logic_qubit_locations,
+        magic_state_locations=magic_state_locations,
+        n_aods=n_aods,
+    )
 
     code = execution_log_to_animator_code(
         merged_log,
@@ -112,6 +198,9 @@ def main() -> None:
         architecture=architecture,
         output=output_path,
         ffmpeg=ffmpeg_path,
+        scaling_factor=figure_scaling,
+        font=figure_font,
+        mus_per_frm=animator_mus_per_frm,
     )
     print(f"Animation saved to: {output_path}")
 
