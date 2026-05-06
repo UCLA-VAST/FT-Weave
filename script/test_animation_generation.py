@@ -136,8 +136,10 @@ def main() -> None:
     ffmpeg_path = "ffmpeg"
     figure_scaling = 16
     figure_font = 12
-    # Smaller => more frames per unit time (smoother paths). None = Animator default.
-    animator_mus_per_frm: float | None = 5.0
+    # Encode FPS: higher than 15 shortens wall-clock playback (same frame count).
+    animator_fps = 30.0
+    # Larger => fewer frames for the same simulated runtime. None = class default (~10).
+    animator_mus_per_frm: float | None = 12.0
 
     n_qubits = n_cols * n_rows
     qubit_layout = (n_cols, n_rows)
@@ -201,6 +203,7 @@ def main() -> None:
         scaling_factor=figure_scaling,
         font=figure_font,
         mus_per_frm=animator_mus_per_frm,
+        fps=animator_fps,
     )
     print(f"Animation saved to: {output_path}")
 
