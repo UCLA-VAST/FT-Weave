@@ -15,6 +15,12 @@ import matplotlib.patches as mpatches
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 from typing import Dict, List, Tuple, Optional
 import os
+from src.animator.log_view_helpers import (
+    normalize_factories,
+    resolve_indexed,
+    entry_start,
+    entry_end,
+)
 
 # Color mapping for AOD devices (for border colors)
 aod_colors = [
@@ -35,19 +41,12 @@ def get_aod_border_color(aod_idx: int) -> str:
 
 def _normalize_entry_factories(factory_id):
     """Convert factory_id to list for consistency."""
-    if isinstance(factory_id, int):
-        return [factory_id]
-    elif factory_id is None:
-        return []
-    else:
-        return list(factory_id)
+    return normalize_factories(factory_id)
 
 
 def _resolve_entry_value(values, idx: int):
     """Resolve per-factory value from entry."""
-    if isinstance(values, list) and idx < len(values):
-        return values[idx]
-    return values
+    return resolve_indexed(values, idx)
 
 
 def _parse_location_xy(raw_loc) -> Optional[Tuple[int, int]]:
@@ -145,8 +144,10 @@ def extract_assignments_from_round(
     Extract factory-to-qubit assignments from a RUS round.
 
     Uses 'move' operations to identify which factory is assigned to which qubit.
-    The move_vecs in move operations contain destination coordinates, which are
-    mapped back to qubit IDs using logic_qubit_locations.
+        Each move_vec is ``[source_grid, dest_grid]`` (strings or nested coords). For
+        factory ``move`` events, the factory moves onto the qubit grid: qubit site is
+        the **destination** (index 1). For ``return_move``, index 0 is the qubit site
+        the factory leaves and index 1 is factory home.
 
     Args:
         rus_round: List of execution log entries for one RUS round
@@ -401,10 +402,8 @@ def plot_rus_round(
     if not rus_round:
         return (None, magic_state_locations)
 
-    circuit_times = [entry.get("start_time", 0) for entry in rus_round]
-    circuit_times.extend(
-        [entry.get("end_time", entry.get("start_time", 0)) for entry in rus_round]
-    )
+    circuit_times = [entry_start(entry) for entry in rus_round]
+    circuit_times.extend([entry_end(entry) for entry in rus_round])
 
     if circuit_times:
         duration = max(circuit_times) - min(circuit_times)
@@ -412,15 +411,15 @@ def plot_rus_round(
         duration = 0
 
     # Calculate duration and rus_time
-    start_time = rus_round[0].get("start_time", 0)
-    end_time = rus_round[0].get("end_time", start_time)
+    start_time = entry_start(rus_round[0])
+    end_time = entry_end(rus_round[0])
     rus_time = 0
     qubit_cnot_count = {}  # Track CNOT count per qubit
     for entry in rus_round:
-        entry_start = entry.get("start_time", 0)
-        entry_end = entry.get("end_time", entry_start)
-        start_time = min(start_time, entry_start)
-        end_time = max(end_time, entry_end)
+        evt_start = entry_start(entry)
+        evt_end = entry_end(entry)
+        start_time = min(start_time, evt_start)
+        end_time = max(end_time, evt_end)
         factory_ids = _normalize_entry_factories(entry.get("factories"))
         operation = entry.get("operation")
         value = entry.get("targets")
@@ -593,8 +592,8 @@ def plot_rus_round(
     location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
 
     for entry in rus_round:
-        start_time = entry.get("start_time", 0)
-        end_time = entry.get("end_time", start_time)
+        start_time = entry_start(entry)
+        end_time = entry_end(entry)
         factory_ids = _normalize_entry_factories(entry.get("factories"))
         operation = entry.get("operation")
         aod_assignment = entry.get("aod_assignment")
@@ -608,7 +607,11 @@ def plot_rus_round(
                 if not (factory_move_vecs and len(factory_move_vecs) >= 2):
                     continue
 
-                qubit_loc = _parse_location_xy(factory_move_vecs[1])
+                qubit_loc = _parse_location_xy(
+                    factory_move_vecs[1]
+                    if operation == "move"
+                    else factory_move_vecs[0]
+                )
                 if qubit_loc in location_to_qubit:
                     qubit_id = location_to_qubit[qubit_loc]
                     if operation == "move":

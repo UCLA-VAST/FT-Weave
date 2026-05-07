@@ -124,6 +124,8 @@ def execute_movement(
         factories = []
         for _, x_q, y_q, factory_id, x_f, y_f in routing_batches[idx]:
             factories.append(factory_id)
+            # Chronological grid endpoints: factory site then qubit site (factory moves onto
+            # the qubit grid). Return batches use the same field names (see rus_post_teleportation).
             move_vecs.append([f"({x_f},{y_f})", f"({x_q},{y_q})"])
 
         write_execution_log(

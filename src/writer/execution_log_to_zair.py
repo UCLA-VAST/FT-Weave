@@ -5,16 +5,17 @@ import re
 from typing import Any
 
 from src.ds import Architecture
+from src.execution_log.event_helpers import normalize_factories
 from src.writer.zair_writer import ZAIRWriter
 
 _PAIR_RE = re.compile(r"^\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)\s*$")
 
 # Keep in sync with Animator.FPS / Animator.MUS_PER_FRM in animator_matplotlib.py
-_ANIMATOR_FPS = 15
+_ANIMATOR_FPS = 10
 _ANIMATOR_MUS_PER_FRM = 150.0 / _ANIMATOR_FPS
 # Defaults tuned to match matplotlib Animator sampling (~MUS_PER_FRM per frame).
 _MIN_ANIMATOR_FRAMES_COMPACT = 2  # 1qGate, rydberg: brief but still visible
-_MIN_ANIMATOR_FRAMES_REARRANGE = 15  # whole rearrangeJob; move substeps get most via weighting
+_MIN_ANIMATOR_FRAMES_REARRANGE = 8  # whole rearrangeJob; substeps weighted toward move*
 _DEFAULT_REARRANGE_MOVE_SUBSTEP_WEIGHT = 4.0
 
 
@@ -23,6 +24,19 @@ def default_init_locs_for_logic_grid(
     slm_id: int = 0,
 ) -> list[list[int]]:
     return [[i, slm_id, y, x] for i, (x, y) in enumerate(logic_qubit_locations)]
+
+
+def default_init_locs_with_factories(
+    logic_qubit_locations: list[tuple[int, int]],
+    magic_state_locations: list[tuple[int, int]],
+    slm_id: int = 0,
+) -> list[list[int]]:
+    """Init ZAIR sites: logical qubits ``0..L-1`` then factories ``L..L+F-1`` (left trap)."""
+    init = default_init_locs_for_logic_grid(logic_qubit_locations, slm_id=slm_id)
+    base = len(init)
+    for j, (x, y) in enumerate(magic_state_locations):
+        init.append([base + j, slm_id, y, x])
+    return init
 
 
 def _safe_interval(
@@ -47,11 +61,17 @@ def _parse_parenthesized_pair(s: str) -> tuple[int, int]:
 
 
 def _parse_move_endpoints(pair: Any) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Grid (x, y) endpoints in chronological order: ``start`` then ``end``.
+
+    STAR/RUS string pairs from ``execute_movement`` are ``[factory_site, qubit_site]``
+    on forward ``move`` and ``[qubit_site, factory_home]`` on ``return_move``. Tuple
+    pairs follow Clifford CNOT logs (mobile then pivot, or reversed for return).
+    """
     if isinstance(pair, (list, tuple)) and len(pair) == 2:
         a, b = pair[0], pair[1]
         if isinstance(a, str) and isinstance(b, str):
-            end = _parse_parenthesized_pair(a)
-            start = _parse_parenthesized_pair(b)
+            start = _parse_parenthesized_pair(a)
+            end = _parse_parenthesized_pair(b)
             return start, end
         if (
             isinstance(a, (list, tuple))
@@ -74,13 +94,46 @@ def _nearest_qubit_index(gx: int, gy: int, logic_locs: list[tuple[int, int]]) ->
     return best_i
 
 
-def _move_vec_is_string_pair(pair: Any) -> bool:
-    return (
-        isinstance(pair, (list, tuple))
-        and len(pair) == 2
-        and isinstance(pair[0], str)
-        and isinstance(pair[1], str)
-    )
+def _factory_particle_id(
+    factory_field: Any, pair_index: int, n_logic: int
+) -> int | None:
+    """Map log ``factories`` entry to init particle id ``L + factory_id`` when unambiguous."""
+    ids = normalize_factories(factory_field)
+    if not ids:
+        return None
+    fid: int | None
+    if pair_index < len(ids):
+        fid = int(ids[pair_index])
+    elif len(ids) == 1 and pair_index == 0:
+        fid = int(ids[0])
+    else:
+        return None
+    if fid < 0:
+        return None
+    return n_logic + fid
+
+
+def _nearest_particle_index(
+    gx: int,
+    gy: int,
+    logic_locs: list[tuple[int, int]],
+    factory_locs: list[tuple[int, int]],
+) -> int:
+    """Nearest site among logical qubits (indices ``0..L-1``) then factories ``L..``."""
+    n_log = len(logic_locs)
+    best_i = 0
+    best_d = float("inf")
+    for i, (lx, ly) in enumerate(logic_locs):
+        d = (gx - lx) ** 2 + (gy - ly) ** 2
+        if d < best_d:
+            best_d = d
+            best_i = i
+    for j, (lx, ly) in enumerate(factory_locs):
+        d = (gx - lx) ** 2 + (gy - ly) ** 2
+        if d < best_d:
+            best_d = d
+            best_i = n_log + j
+    return best_i
 
 
 def _cnot_pairs_from_targets(targets: Any) -> list[tuple[int, int]] | None:
@@ -141,11 +194,18 @@ def execution_log_to_zair_instructions(
     architecture: Architecture,
     logic_qubit_locations: list[tuple[int, int]],
     init_locs: list[list[int]] | None = None,
+    magic_state_locations: list[tuple[int, int]] | None = None,
     time_scale: float = 1.0,
     skip_barriers: bool = True,
 ) -> list[dict[str, Any]]:
+    factory_xy = list(magic_state_locations) if magic_state_locations else []
     if init_locs is None:
-        init_locs = default_init_locs_for_logic_grid(logic_qubit_locations)
+        if factory_xy:
+            init_locs = default_init_locs_with_factories(
+                logic_qubit_locations, factory_xy
+            )
+        else:
+            init_locs = default_init_locs_for_logic_grid(logic_qubit_locations)
 
     writer = ZAIRWriter(architecture=architecture)
     prompts_init = {"type": "init", "id": 0, "init_locs": init_locs}
@@ -182,23 +242,24 @@ def execution_log_to_zair_instructions(
             begin_locs: list[list[int]] = []
             end_locs: list[list[int]] = []
             cnot_pairs = _cnot_pairs_from_targets(entry.get("targets"))
-            for pair in move_vecs:
+            n_logic = len(logic_qubit_locations)
+            for mi, pair in enumerate(move_vecs):
                 (sx, sy), (ex, ey) = _parse_move_endpoints(pair)
-                str_pair = _move_vec_is_string_pair(pair)
                 qid = _mobile_qubit_for_move_vec(
                     op, (sx, sy), (ex, ey), cnot_pairs, logic_qubit_locations
                 )
                 if qid is None:
+                    qid = _factory_particle_id(entry.get("factories"), mi, n_logic)
+                if qid is None:
+                    # Clifford / fallback: nearest site (mobile qubit or factory) at path endpoints.
                     if op == "return_move":
-                        # Tuple logs: atom starts at pivot/interaction site; string STAR logs:
-                        # start is mobile home, end is factory — mobile index from home.
-                        qid = (
-                            _nearest_qubit_index(sx, sy, logic_qubit_locations)
-                            if str_pair
-                            else _nearest_qubit_index(ex, ey, logic_qubit_locations)
+                        qid = _nearest_particle_index(
+                            ex, ey, logic_qubit_locations, factory_xy
                         )
                     else:
-                        qid = _nearest_qubit_index(sx, sy, logic_qubit_locations)
+                        qid = _nearest_particle_index(
+                            sx, sy, logic_qubit_locations, factory_xy
+                        )
 
                 # Execution logs omit trap side:
                 # - default/init is left trap (SLM 0)
@@ -208,14 +269,9 @@ def execution_log_to_zair_instructions(
                     new_loc = [1, ey, ex]
                     default_old = [0, sy, sx]
                 else:
-                    if str_pair:
-                        # e.g. execute_movement: [factory, qubit_home] -> parsed start=home, end=factory
-                        new_loc = [0, sy, sx]
-                        default_old = [1, ey, ex]
-                    else:
-                        # e.g. Clifford layer: ((pivot), (mobile_home))
-                        new_loc = [0, ey, ex]
-                        default_old = [1, sy, sx]
+                    # return: start (e.g. pivot/factory on right) -> end (mobile home on left)
+                    new_loc = [0, ey, ex]
+                    default_old = [1, sy, sx]
 
                 old_loc = current_locs.get(qid)
                 if old_loc is None:
@@ -369,6 +425,7 @@ def execution_log_to_animator_code(
     architecture: Architecture,
     logic_qubit_locations: list[tuple[int, int]],
     init_locs: list[list[int]] | None = None,
+    magic_state_locations: list[tuple[int, int]] | None = None,
     time_scale: float = 1.0,
     name: str = "execution_log",
     skip_barriers: bool = True,
@@ -377,11 +434,13 @@ def execution_log_to_animator_code(
     min_animator_rearrange_duration: float | None = None,
     rearrange_move_substep_weight: float = _DEFAULT_REARRANGE_MOVE_SUBSTEP_WEIGHT,
 ) -> dict[str, Any]:
+    """Build animator ``code`` dict from an execution log."""
     instructions = execution_log_to_zair_instructions(
         execution_log,
         architecture=architecture,
         logic_qubit_locations=logic_qubit_locations,
         init_locs=init_locs,
+        magic_state_locations=magic_state_locations,
         time_scale=time_scale,
         skip_barriers=skip_barriers,
     )
@@ -396,16 +455,19 @@ def execution_log_to_animator_code(
     else:
         end_times = [float(inst.get("end_time", 0.0)) for inst in instructions[1:]]
         runtime = max(end_times) if end_times else 0.0
+
     return {
         "name": name,
         "architecture_spec_path": None,
         "instructions": instructions,
         "runtime": runtime,
+        "n_logic_qubits": len(logic_qubit_locations),
     }
 
 
 __all__ = [
     "default_init_locs_for_logic_grid",
+    "default_init_locs_with_factories",
     "execution_log_to_animator_code",
     "execution_log_to_zair_instructions",
     "pack_timeline_for_matplotlib_animator",

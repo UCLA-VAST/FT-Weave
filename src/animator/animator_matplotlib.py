@@ -14,7 +14,7 @@ class Animator:
     INIT_FRM = int(FPS / 5)  # initial empty frames, 1/5 second now
     PT_MICRON = 8  # scaling factor: points per micron
     MUS_PER_FRM = 150 / FPS  # microseconds per frame
-    MUS_PER_FRM_SLOW = 7 / FPS  # in slow motion, i.e., Rydberg
+    MUS_PER_FRM_SLOW = 150 / FPS  # in slow motion, i.e., Rydberg
     CANVAS_PADDING: int = 10
     RYDBERG_PADDING: int = 3  # around each entanglement zone
 
@@ -22,6 +22,7 @@ class Animator:
     RYDBERG_COLOR = "b"
     SLM_COLOR = "g"
     QUBIT_COLOR = "k"
+    FACTORY_QUBIT_COLOR = "#d35400"  # distinct from data qubits / SLM
     AOD_COLORS = ["r", "c", "m", "y"]  # max 4 aods so far
     AOD_TRANS = 0.7
 
@@ -33,6 +34,8 @@ class Animator:
         scaling_factor: int = PT_MICRON,
         font: int = 10,
         ffmpeg: str = "ffmpeg",
+        mus_per_frm: float | None = None,
+        fps: float | None = None,
     ):
         """
         Args:
@@ -41,6 +44,12 @@ class Animator:
             scaling_factor (int, optional): the unit scaling factor between the
              animation and um. Defaults to PT_MICRON.
             font (int, optional): font size in the animation. Defaults to 10.
+            mus_per_frm (float, optional): simulation time advanced per frame in
+                normal (non-Rydberg) segments. Smaller values sample the timeline
+                more densely so motion paths resolve; defaults to ``MUS_PER_FRM``.
+            fps (float, optional): encode / playback frames per second. Higher than
+                ``FPS`` shortens wall-clock duration for the same frame count (faster
+                playback). Defaults to ``FPS`` (15).
         """
 
         matplotlib.use("Agg")
@@ -49,6 +58,12 @@ class Animator:
 
         self.code = code
         self.architecture = architecture
+        self._output_fps = float(self.FPS if fps is None else fps)
+        self._init_frm = max(1, int(self._output_fps / 5))
+        base_mus = self.MUS_PER_FRM
+        self._mus_per_frm = base_mus if mus_per_frm is None else float(mus_per_frm)
+        scale = self._mus_per_frm / base_mus
+        self._mus_per_frm_slow = self.MUS_PER_FRM_SLOW * scale
         self.fig, self.ax = self.setup_canvas(scaling_factor)
         self.title = self.ax.set_title("")
         self.inst_str = ""
@@ -58,10 +73,13 @@ class Animator:
             self.fig,
             self.update,  # type: ignore
             init_func=self.update_init,  # type: ignore
-            frames=self.INIT_FRM + num_frame,
+            frames=self._init_frm + num_frame,
             # blit=True
         )
-        anim.save(output, writer=FFMpegWriter(self.FPS))
+        anim.save(
+            output,
+            writer=FFMpegWriter(fps=int(round(self._output_fps))),
+        )
 
     def create_schedule(self) -> int:
         """
@@ -95,7 +113,7 @@ class Animator:
                     (
                         last_end_frame
                         + round(
-                            (inst["begin_time"] - last_end_time) / self.MUS_PER_FRM
+                            (inst["begin_time"] - last_end_time) / self._mus_per_frm
                         ),
                         0,
                         inst["begin_time"],
@@ -109,7 +127,7 @@ class Animator:
                         last_end_frame
                         + round(
                             (inst["end_time"] - inst["begin_time"])
-                            / self.MUS_PER_FRM_SLOW
+                            / self._mus_per_frm_slow
                         ),
                         1,
                         inst["end_time"],
@@ -123,7 +141,7 @@ class Animator:
             self.piecewise_schedule.append(
                 (
                     last_end_frame
-                    + round((self.code["runtime"] - last_end_time) / self.MUS_PER_FRM),
+                    + round((self.code["runtime"] - last_end_time) / self._mus_per_frm),
                     0,
                     self.code["runtime"],
                 )
@@ -218,13 +236,21 @@ class Animator:
         # initialize qubits
         self.qubit_xs = []
         self.qubit_ys = []
-        for q in self.code["instructions"][0]["init_locs"]:
+        init_locs = self.code["instructions"][0]["init_locs"]
+        n_logic = self.code.get("n_logic_qubits")
+        if n_logic is None:
+            n_logic = len(init_locs)
+        qubit_colors = [
+            self.QUBIT_COLOR if i < n_logic else self.FACTORY_QUBIT_COLOR
+            for i in range(len(init_locs))
+        ]
+        for q in init_locs:
             x, y = self.architecture.exact_SLM_location(q[1], q[2], q[3])
             self.qubit_xs.append(x)
             self.qubit_ys.append(y)
-        # draw qubits
+        # draw qubits (logical) and factory sites
         self.qubit_scat = self.ax.scatter(
-            self.qubit_xs, self.qubit_ys, marker=".", c=self.QUBIT_COLOR
+            self.qubit_xs, self.qubit_ys, marker=".", c=qubit_colors
         )
 
         # initialize aod cols
@@ -287,8 +313,30 @@ class Animator:
 
         return
 
+    def _clear_path_lines(self) -> None:
+        for lc in self.path_line_collection:
+            lc.set_segments([])
+        for tmp in self.path_line_loc:
+            tmp.clear()
+        for tmp in self.path_line_color:
+            tmp.clear()
+
+    def _reset_frame_overlays(self) -> None:
+        """Reset transient overlays before rendering a frame."""
+        for rect in self.entanglement_rect:
+            rect.set_width(0)
+            rect.set_height(0)
+        for gate in self.qubit_1qGate:
+            gate.remove()
+        self.qubit_1qGate = []
+        for aod_id, aod in self.architecture.dict_AOD.items():
+            for r in range(aod.n_r):
+                self.aod_row_plots[aod_id][r].set_color((0, 0, 0, 0))
+            for c in range(aod.n_c):
+                self.aod_col_plots[aod_id][c].set_color((0, 0, 0, 0))
+
     def update(self, f: int):  # f is the frame
-        true_frame = f - self.INIT_FRM  # consider the initial frozen frames
+        true_frame = f - self._init_frm  # consider the initial frozen frames
 
         # get which piecewise schedule f is in
         interval_ends = [interval[0] for interval in self.piecewise_schedule]
@@ -300,26 +348,13 @@ class Animator:
         # product of remaining frames=tmp[0]-true_frame, and the sampling rate
         # which depends on whether this period is regular or slow motion.
         true_time = tmp[2] - (tmp[0] - true_frame) * (
-            self.MUS_PER_FRM_SLOW if tmp[1] else self.MUS_PER_FRM
+            self._mus_per_frm_slow if tmp[1] else self._mus_per_frm
         )
 
         self.inst_str = ""
-        # reset Rydberg zones to trivial
-        for rect in self.entanglement_rect:
-            rect.set_width(0)
-            rect.set_height(0)
-        # reset 1qGate to trivial
-        for gate in self.qubit_1qGate:
-            gate.remove()
-        self.qubit_1qGate = []
-        # reset AOD color to trivial
-        for aod_id, aod in self.architecture.dict_AOD.items():
-            for r in range(aod.n_r):
-                self.aod_row_plots[aod_id][r].set_color((0, 0, 0, 0))
-            for c in range(aod.n_c):
-                self.aod_col_plots[aod_id][c].set_color((0, 0, 0, 0))
+        self._reset_frame_overlays()
 
-        if f >= self.INIT_FRM:
+        if f >= self._init_frm:
             for inst in self.code["instructions"][1:]:
                 if true_time >= inst["begin_time"] and true_time < inst["end_time"]:
                     if inst["type"] == "rydberg":
@@ -330,8 +365,44 @@ class Animator:
                         self.update_1qGate(inst)
                     else:
                         raise ValueError(f"unknown inst type {inst['type']}")
+            self._snap_to_settled_rearrange_layout(true_time)
         self.title.set_text(self.inst_str)
         return
+
+    def _sync_qubits_to_flat_locs(self, flat_locs: list) -> None:
+        """Place each qubit at its SLM site (used after rearrange completes)."""
+        if not flat_locs:
+            return
+        for loc in flat_locs:
+            qid = int(loc[0])
+            slm, r, c = int(loc[1]), int(loc[2]), int(loc[3])
+            x, y = self.architecture.exact_SLM_location(slm, r, c)
+            if 0 <= qid < len(self.qubit_xs):
+                self.qubit_xs[qid] = x
+                self.qubit_ys[qid] = y
+        self.qubit_scat.set_offsets(list(zip(self.qubit_xs, self.qubit_ys)))
+
+    def _snap_to_settled_rearrange_layout(self, true_time: float) -> None:
+        """When not inside an active rearrange, snap dots to the last finished job's end_locs.
+
+        Coarse frame sampling can skip the last ``move`` samples so qubits never reach
+        the target; this commits the layout between jobs and during gates.
+        """
+        for inst in self.code["instructions"][1:]:
+            if inst.get("type") == "rearrangeJob":
+                b = float(inst["begin_time"])
+                e = float(inst["end_time"])
+                if b <= true_time < e:
+                    return
+        last_locs: list | None = None
+        for inst in self.code["instructions"][1:]:
+            if (
+                inst.get("type") == "rearrangeJob"
+                and float(inst["end_time"]) <= true_time
+            ):
+                last_locs = inst.get("end_locs")
+        if last_locs:
+            self._sync_qubits_to_flat_locs(last_locs)
 
     def update_rydberg(self, inst: dict):
         self.inst_str += (
@@ -343,13 +414,7 @@ class Animator:
         self.entanglement_rect[inst["zone_id"]].set_height(
             self.entanglement_rect_range[inst["zone_id"]][2]
         )
-        # reset path line to be empty
-        for lc in self.path_line_collection:
-            lc.set_segments([])
-        for tmp in self.path_line_loc:
-            tmp.clear()
-        for tmp in self.path_line_color:
-            tmp.clear()
+        self._clear_path_lines()
 
     def update_arrangement(self, time: float, inst: dict):
         self.inst_str += f' | {inst["id"]} {inst["type"]}'
@@ -364,7 +429,7 @@ class Animator:
                     )
                 elif detail_inst["type"] == "deactivate":
                     return self.update_deactivate(
-                        ratio, time, detail_inst, inst["aod_id"]
+                        ratio, time, detail_inst, inst["aod_id"], inst
                     )
                 elif detail_inst["type"].startswith("move"):
                     return self.update_move(
@@ -393,8 +458,17 @@ class Animator:
                 (1, 0, 0, ratio * self.AOD_TRANS)
             )
 
-    def update_deactivate(self, ratio: float, time: float, inst: dict, aod_id: int):
+    def update_deactivate(
+        self,
+        ratio: float,
+        time: float,
+        inst: dict,
+        aod_id: int,
+        rearrange_job: dict | None = None,
+    ):
         self.inst_str += f' | {inst["id"]} {inst["type"]} \n elapsed time: {time:.2f}'
+        if rearrange_job is not None:
+            self._sync_qubits_to_flat_locs(rearrange_job.get("end_locs", []))
         for col_id in inst["col_id"]:
             self.aod_col_plots[aod_id][col_id].set_color(
                 # (self.AOD_COLORS[aod_id], (1-ratio)*self.AOD_TRANS) # !
@@ -451,8 +525,7 @@ class Animator:
                 # print(q_id)
                 # print(self.path_line_loc[q_id])
                 for i in reversed(range(len(self.path_line_loc[q_id]))):
-                    # self.path_line_color[q_id].append((105,105,105, 1))
-                    self.path_line_color[q_id].append((128, 128, 128, pow(0.90, i)))
+                    self.path_line_color[q_id].append((0.5, 0.5, 0.5, pow(0.90, i)))
                 # print(self.path_line_color[q_id])
                 # input()
 
@@ -481,16 +554,26 @@ class Animator:
             f' | {inst["id"]} {inst["type"]} \n elapsed time: {inst["end_time"]:.2f}'
         )
 
-        for g in inst["gates"]:
-            q = g["q"]
+        target_qs: list[int] = []
+        if "gates" in inst:
+            target_qs = [int(g["q"]) for g in inst["gates"]]
+        else:
+            for block in inst.get("inst", []):
+                for loc in block.get("locs", []):
+                    if not loc:
+                        continue
+                    target_qs.append(int(loc[0]))
+        uniq_qs: list[int] = []
+        seen_q: set[int] = set()
+        for q in target_qs:
+            if q in seen_q:
+                continue
+            seen_q.add(q)
+            uniq_qs.append(q)
+
+        for q in uniq_qs:
             x = self.qubit_xs[q]
             y = self.qubit_ys[q]
             self.qubit_1qGate.append(self.ax.scatter(x, y, s=300, color=(0, 1, 0, 0.5)))
 
-        # reset path line to be empty
-        for lc in self.path_line_collection:
-            lc.set_segments([])
-        for tmp in self.path_line_loc:
-            tmp.clear()
-        for tmp in self.path_line_color:
-            tmp.clear()
+        self._clear_path_lines()
