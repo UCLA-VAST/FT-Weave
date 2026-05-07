@@ -238,9 +238,7 @@ def execution_log_to_zair_instructions(
             move_vecs = entry.get("move_vecs")
             if not isinstance(move_vecs, list) or not move_vecs:
                 continue
-            aod_qubits: list[int] = []
-            begin_locs: list[list[int]] = []
-            end_locs: list[list[int]] = []
+            flat_rows: list[tuple[int, int, list[int], list[int]]] = []
             cnot_pairs = _cnot_pairs_from_targets(entry.get("targets"))
             n_logic = len(logic_qubit_locations)
             for mi, pair in enumerate(move_vecs):
@@ -279,17 +277,33 @@ def execution_log_to_zair_instructions(
                 else:
                     old_loc = list(old_loc)
 
-                aod_qubits.append(qid)
-                begin_locs.append([qid, old_loc[0], old_loc[1], old_loc[2]])
-                end_locs.append([qid, new_loc[0], new_loc[1], new_loc[2]])
+                begin_loc = [qid, old_loc[0], old_loc[1], old_loc[2]]
+                end_loc = [qid, new_loc[0], new_loc[1], new_loc[2]]
+                flat_rows.append((old_loc[1], qid, begin_loc, end_loc))
                 current_locs[qid] = new_loc
+
+            # Row-major grouping so one activate can pick up all participating rows/cols.
+            row_order: list[int] = []
+            row_groups: dict[int, dict[str, list]] = {}
+            for row_y, qid, b_loc, e_loc in flat_rows:
+                if row_y not in row_groups:
+                    row_order.append(row_y)
+                    row_groups[row_y] = {"aod_qubits": [], "begin_locs": [], "end_locs": []}
+                grp = row_groups[row_y]
+                grp["aod_qubits"].append(qid)
+                grp["begin_locs"].append(b_loc)
+                grp["end_locs"].append(e_loc)
+
+            aod_qubits = [row_groups[y]["aod_qubits"] for y in row_order]
+            begin_locs = [row_groups[y]["begin_locs"] for y in row_order]
+            end_locs = [row_groups[y]["end_locs"] for y in row_order]
             prompt = {
                 "type": "rearrangeJob",
                 "id": next_id,
                 "aod_id": aod_id,
-                "aod_qubits": [aod_qubits],
-                "begin_locs": [begin_locs],
-                "end_locs": [end_locs],
+                "aod_qubits": aod_qubits,
+                "begin_locs": begin_locs,
+                "end_locs": end_locs,
                 "dependency": {"qubit": [next_id - 1]},
             }
             inst = writer.write_instruction(prompt)
