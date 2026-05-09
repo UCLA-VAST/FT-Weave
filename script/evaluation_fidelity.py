@@ -5,6 +5,10 @@ from src.fidelity_simulation import (
 from src.error_model import PhysicalErrorModel, LogicalErrorModel
 from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
 import os
+from src.star.config import (
+    get_config as get_star_config,
+    update_config as update_star_config,
+)
 from src.star.tfim_star import generate_one_layer_2d_tfim_circuit_star
 import numpy as np
 import csv
@@ -97,7 +101,13 @@ def run_evaluation_raw(params: dict, physical_error_model: PhysicalErrorModel):
 
 
 def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool):
-    """Run comprehensive evaluation with different parameter combinations."""
+    """Run comprehensive evaluation with different parameter combinations.
+
+    ``params`` may contain ``logical_se_interval`` to drive the logical-qubit
+    SE scheduler. With it set, the per-layer execution log carries ``SE_q``
+    events and the simulator returns a non-trivial ``fidelity_idle`` factor
+    folded into ``fidelity``.
+    """
 
     # Support evaluating one or multiple code distances in a single run.
     if not isinstance(logical_error_models, (list, tuple)):
@@ -113,6 +123,7 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
     print(f"  n_aods: {params.get('n_aods')}")
     print(f"  settings_count: {len(params.get('settings', []))}")
     print(f"  trials_per_config: {params.get('trials_per_config')}")
+    print(f"  logical_se_interval: {params.get('logical_se_interval')}")
     print(
         "  code_distances:",
         [model.code_distance for model in logical_error_models],
@@ -140,6 +151,15 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
     profiling_file = (
         open(profiling_results_path, "a", newline="") if analyze_result else None
     )
+
+    # Configure the logical-qubit SE scheduler globally for the duration of
+    # this run; restore it afterwards so we don't leak settings into other
+    # callers. ``get_star_config()`` returns derived read-only keys (e.g.
+    # ``TMR_PREPARATION_TIME``) that ``update_star_config`` rejects, so we
+    # only round-trip ``LOGICAL_SE_INTERVAL``.
+    logical_se_interval = params.get("logical_se_interval")
+    original_logical_se_interval = get_star_config().get("LOGICAL_SE_INTERVAL")
+    update_star_config(LOGICAL_SE_INTERVAL=logical_se_interval)
 
     try:
         for logical_error_model in logical_error_models:
@@ -224,28 +244,12 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                                                 for r in profiling_results_per_case
                                             )
                                         )
-                                    n_cnot = float(result.get("n_cnot", 0.0))
-                                    n_h = float(result.get("n_h", 0.0))
-                                    n_s = float(result.get("n_s", 0.0))
-                                    p_i = float(
-                                        logical_error_model.get_logical_error_rate("I")
-                                    )
-                                    if total_depth is None:
-                                        n_idle = None
-                                        fidelity_idle = None
-                                        fidelity_with_idle = None
-                                    else:
-                                        n_idle = (
-                                            (n_cols * n_rows) * total_depth
-                                            - 2.0 * n_cnot
-                                            - n_h
-                                            - n_s
-                                        )
-                                        n_idle = max(0.0, float(n_idle))
-                                        fidelity_idle = float((1.0 - p_i) ** n_idle)
-                                        fidelity_with_idle = (
-                                            float(result["fidelity"]) * fidelity_idle
-                                        )
+                                    # ``result["fidelity"]`` already folds in
+                                    # ``fidelity_idle`` (computed from the
+                                    # SE_q events emitted by the logical-SE
+                                    # scheduler). All counts and component
+                                    # fidelities live in ``result``; we just
+                                    # add per-trial bookkeeping here.
                                     row = {
                                         "trial": trial,
                                         "code_distance": logical_error_model.code_distance,
@@ -258,10 +262,8 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                                         "trivial_return": trivial_ret,
                                         "decompose_move": decompose_move,
                                         "parallel_execution": parallel_execution,
+                                        "logical_se_interval": logical_se_interval,
                                         "total_depth": total_depth,
-                                        "n_idle": n_idle,
-                                        "fidelity_idle_model": fidelity_idle,
-                                        "fidelity_with_idle": fidelity_with_idle,
                                         **result,
                                     }
                                     if result_writer is None:
@@ -273,6 +275,7 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                                             result_writer.writeheader()
                                     result_writer.writerow(row)
     finally:
+        update_star_config(LOGICAL_SE_INTERVAL=original_logical_se_interval)
         result_file.close()
         if profiling_file is not None:
             profiling_file.close()
@@ -315,6 +318,9 @@ if __name__ == "__main__":
         "n_aods": [2, 3, 4],
         "settings": [SETTINGS[4]],
         "trials_per_config": 5,
+        # Logical-qubit SE cadence (in cycles). ``None`` disables the
+        # scheduler and ``fidelity_idle`` becomes 1.0.
+        "logical_se_interval": 10,
     }
     # run_evaluation_raw(params=params, physical_error_model=physical_error_model)
 
@@ -338,6 +344,7 @@ if __name__ == "__main__":
         "n_aods": [1, 5],
         "settings": [SETTINGS[4]],
         "trials_per_config": 5,
+        "logical_se_interval": 10,
     }
 
     run_evaluation_star(
@@ -354,6 +361,7 @@ if __name__ == "__main__":
         "n_aods": [1, 5],
         "settings": SETTINGS,
         "trials_per_config": 5,
+        "logical_se_interval": 10,
     }
 
     run_evaluation_star(
