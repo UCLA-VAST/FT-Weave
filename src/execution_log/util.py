@@ -97,7 +97,12 @@ def execute_rus_teleportation(
     )
     end_time = circuit_moment + CNOT_TIME
     if logical_se_scheduler is not None:
+        # The CNOT itself contains an SE round on its target qubits, so refresh
+        # their idle clocks first; then piggy-back any *other* still-idle
+        # logical qubits onto the same CNOT moment because every logical CNOT
+        # is performed alongside a stabilizer-measurement round.
         logical_se_scheduler.reset(qubits, end_time)
+        logical_se_scheduler.piggyback(circuit_moment, aod_id, execution_log)
     return end_time
 
 

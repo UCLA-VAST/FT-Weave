@@ -419,8 +419,14 @@ def t_cultivation_execution(
                 )
                 finish_time += 2 * move_dur
                 if logical_se_scheduler is not None:
+                    # CNOT/CZ already performs an SE round on its participants;
+                    # reset their clocks first, then piggy-back any other
+                    # still-idle logical qubits onto the same CNOT moment.
                     logical_se_scheduler.reset(
                         c_qubits + t_qubits, finish_time
+                    )
+                    logical_se_scheduler.piggyback(
+                        gate_start_time + move_dur, aod_id, execution_log
                     )
             else:
                 write_execution_log(
