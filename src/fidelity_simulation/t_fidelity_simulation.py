@@ -20,8 +20,12 @@ keep separate when accounting for fidelity:
    its target logical qubit. These entries have a non-empty ``factories``
    list and ``targets`` is a parallel list of bare qubit ids. They contribute
    to ``n_cnot_teleportation`` / ``fidelity_of_rz_teleportaion`` and each
-   such CNOT also consumes one logical T magic state, which contributes to
-   ``fidelity_of_t_gate``.
+   such CNOT also consumes one logical T magic state. Cultivated T states
+   are not perfect: each consumed state costs one factor of the logical T
+   fidelity ``F_T = 1 - p_T``, where ``p_T`` is set via
+   ``LogicalErrorModel.integrate_t_cultivation_fidelity_target(p)``. This
+   feeds ``fidelity_of_t_gate = F_T ** n_t``, which is folded into
+   ``fidelity_of_rz_layer`` and the total ``fidelity``.
 
 The discriminator is ``factories``: empty -> circuit CNOT, non-empty ->
 teleportation CNOT.
@@ -210,6 +214,13 @@ def simluate_trotter_2d_tfim_fidelity(
     # Idle-error contribution: each qubit-SE round costs one factor of the
     # idle (identity) logical fidelity.
     fidelity_idle = logical_error_model.get_logical_fidelity("I") ** n_se_q
+    # T-state contribution: every teleportation/injection CNOT consumes one
+    # cultivated T state. The cultivated T state is not perfect; its logical
+    # fidelity comes from ``logical_error_model.get_logical_fidelity('T')``
+    # (set via ``integrate_t_cultivation_fidelity_target`` from the run's
+    # T-cultivation fidelity target). Each consumed state contributes one
+    # factor of ``F_T = 1 - p_T``.
+    fidelity_of_t_gate = logical_error_model.get_logical_fidelity("T") ** n_t
     # Gridsynth approximation contribution: per-Rz state infidelity ~ eps**2.
     if synthesis_epsilon is None:
         fidelity_synthesis = 1.0
@@ -227,6 +238,7 @@ def simluate_trotter_2d_tfim_fidelity(
         fidelity_of_rz_teleportaion
         * fidelity_of_rz_s
         * fidelity_of_rz_h
+        * fidelity_of_t_gate
     )
     fidelity = (
         fidelity_of_rz_layer
@@ -241,6 +253,7 @@ def simluate_trotter_2d_tfim_fidelity(
         "fidelity_of_rz_teleportaion": fidelity_of_rz_teleportaion,
         "fidelity_of_rz_s": fidelity_of_rz_s,
         "fidelity_of_rz_h": fidelity_of_rz_h,
+        "fidelity_of_t_gate": fidelity_of_t_gate,
         "fidelity_cnot": fidelity_cnot,
         "fidelity_h": fidelity_h,
         "fidelity_idle": fidelity_idle,

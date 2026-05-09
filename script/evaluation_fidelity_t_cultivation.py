@@ -132,11 +132,14 @@ def run_evaluation_t_cultivation(
         "n_se_q",
         "n_rz_decomposition",
         # Fidelity components. ``fidelity_total`` already folds in
-        # ``fidelity_idle`` (from SE_q) and ``fidelity_synthesis`` (gridsynth).
+        # ``fidelity_idle`` (from SE_q), ``fidelity_synthesis`` (gridsynth),
+        # and ``fidelity_of_t_gate`` (cultivated T-state imperfection per
+        # teleportation CNOT).
         "fidelity_total",
         "fidelity_of_rz_teleportaion",
         "fidelity_of_rz_s",
         "fidelity_of_rz_h",
+        "fidelity_of_t_gate",
         "fidelity_cnot",
         "fidelity_h",
         "fidelity_idle",
@@ -276,10 +279,11 @@ def run_evaluation_t_cultivation(
                                     )
 
                                 # The simulator now natively accounts for
-                                # idle (SE_q-based) and gridsynth synthesis
-                                # error, so ``fprof['fidelity']`` is the
-                                # canonical end-to-end logical fidelity. No
-                                # depth-based heuristic is needed any more.
+                                # idle (SE_q-based), gridsynth synthesis
+                                # error, and cultivated-T-state imperfection
+                                # (one F_T factor per teleportation CNOT),
+                                # so ``fprof['fidelity']`` is the canonical
+                                # end-to-end logical fidelity.
                                 fidelity_writer.writerow(
                                     {
                                         "trial": trial,
@@ -314,6 +318,9 @@ def run_evaluation_t_cultivation(
                                         ],
                                         "fidelity_of_rz_s": fprof["fidelity_of_rz_s"],
                                         "fidelity_of_rz_h": fprof["fidelity_of_rz_h"],
+                                        "fidelity_of_t_gate": fprof[
+                                            "fidelity_of_t_gate"
+                                        ],
                                         "fidelity_cnot": fprof["fidelity_cnot"],
                                         "fidelity_h": fprof["fidelity_h"],
                                         "fidelity_idle": fprof["fidelity_idle"],

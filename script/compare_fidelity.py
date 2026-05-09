@@ -333,6 +333,9 @@ def _plot_t_cultivation_fidelity_breakdown(t_df, output_dir, *, filename=None):
         ("fidelity_of_rz_teleportaion", "Teleportation-CNOT", "#F58518"),
         ("fidelity_of_rz_s", "Rz decomposition-S", "#54A24B"),
         ("fidelity_of_rz_h", "Rz decomposition-H", "#BCBD22"),
+        # Cultivated T-state imperfection: one F_T factor per teleportation
+        # CNOT (= per consumed magic state).
+        ("fidelity_of_t_gate", "T state", "#E45756"),
         # Gridsynth approximation: per-Rz state infidelity ~ epsilon ** 2.
         ("fidelity_synthesis", "Rz approximation", "#9467BD"),
         # ``fidelity_idle`` from the simulator (SE_q-based).
