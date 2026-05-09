@@ -300,7 +300,9 @@ def _plot_star_fidelity_breakdown(
         ("fidelity_of_rz_s", "Rz Correction", "#59A14F"),
     ]
     if include_idle_component:
-        components.append(("fidelity_idle_model", "Idle", "#4DBBD5"))
+        # Simulator-native idle: ``fidelity_idle`` = (1 - p_I) ** n_se_q,
+        # produced by the SE_q-based logical-SE scheduler.
+        components.append(("fidelity_idle", "Idle", "#4DBBD5"))
     handles, labels = _plot_grouped_stacked_infidelity(
         ax,
         data,
@@ -348,10 +350,12 @@ def _plot_t_cultivation_fidelity_breakdown(
         ("fidelity_of_rz_teleportaion", "Teleportation-CNOT", "#F58518"),
         ("fidelity_of_rz_s", "Rz decomposition-S", "#54A24B"),
         ("fidelity_of_rz_h", "Rz decomposition-H", "#BCBD22"),
-        ("fidelity_of_t_gate", "T", "#9467BD"),
+        # Gridsynth approximation: per-Rz state infidelity ~ epsilon ** 2.
+        ("fidelity_synthesis", "Rz approximation", "#9467BD"),
     ]
     if include_idle_component:
-        components.append(("fidelity_idle_model", "Idle", "#4DBBD5"))
+        # ``fidelity_idle`` from the simulator (SE_q-based).
+        components.append(("fidelity_idle", "Idle", "#4DBBD5"))
     handles, labels = _plot_grouped_stacked_infidelity(
         ax,
         data,
@@ -416,10 +420,20 @@ def _populate_overall_ax(
         star_data = _normalize_star_df(star_df)
     star_data = _exclude_star_distances(star_data, excluded_star_distances)
     star_data["n_qubit"] = star_data["qubit_layout"].apply(get_n_qubit)
-    y_star = "fidelity_with_idle" if include_idle else "fidelity"
-    if y_star not in star_data.columns:
-        y_star = "fidelity"
-    star_data[y_star] = pd.to_numeric(star_data[y_star], errors="coerce")
+    # ``fidelity`` from the updated simulator already folds in the
+    # SE_q-derived ``fidelity_idle``. To plot fidelity *without* idle, divide
+    # the total fidelity by ``fidelity_idle`` (when the column is present).
+    star_data["fidelity"] = pd.to_numeric(star_data["fidelity"], errors="coerce")
+    if "fidelity_idle" in star_data.columns:
+        star_data["fidelity_idle"] = pd.to_numeric(
+            star_data["fidelity_idle"], errors="coerce"
+        )
+        star_data["fidelity_no_idle"] = star_data["fidelity"] / star_data[
+            "fidelity_idle"
+        ].replace(0, np.nan)
+    else:
+        star_data["fidelity_no_idle"] = star_data["fidelity"]
+    y_star = "fidelity" if include_idle else "fidelity_no_idle"
     star_data = star_data.dropna(subset=["n_qubit", y_star])
 
     for d in sorted(star_data["code_distance"].dropna().astype(int).unique()):
@@ -451,10 +465,21 @@ def _populate_overall_ax(
     if t_cultivation_df is not None and not t_cultivation_df.empty:
         t_df = t_cultivation_df.copy()
         t_df["n_qubit"] = t_df["qubit_layout"].apply(get_n_qubit)
-        y_t = "fidelity_total_with_idle" if include_idle else "fidelity_total"
-        if y_t not in t_df.columns:
-            y_t = "fidelity_total"
-        t_df[y_t] = pd.to_numeric(t_df[y_t], errors="coerce")
+        # ``fidelity_total`` from the updated T-cultivation simulator already
+        # includes both ``fidelity_idle`` and ``fidelity_synthesis``. To plot
+        # without idle we strip the idle factor (gridsynth synthesis stays
+        # part of the algorithmic fidelity).
+        t_df["fidelity_total"] = pd.to_numeric(t_df["fidelity_total"], errors="coerce")
+        if "fidelity_idle" in t_df.columns:
+            t_df["fidelity_idle"] = pd.to_numeric(
+                t_df["fidelity_idle"], errors="coerce"
+            )
+            t_df["fidelity_total_no_idle"] = t_df["fidelity_total"] / t_df[
+                "fidelity_idle"
+            ].replace(0, np.nan)
+        else:
+            t_df["fidelity_total_no_idle"] = t_df["fidelity_total"]
+        y_t = "fidelity_total" if include_idle else "fidelity_total_no_idle"
         t_df = t_df.dropna(subset=["n_qubit", y_t])
 
         for (code_distance, factory_size, fidelity_target), sdf in t_df.groupby(

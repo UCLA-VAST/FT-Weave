@@ -1,12 +1,12 @@
 import csv
 import os
-import sys
 from dataclasses import dataclass
 
 import numpy as np
 
-# Ensure repository root is on sys.path so `src` is importable when running this script.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from script.script_utils import add_repo_root_to_syspath, ensure_csv_writer
+
+add_repo_root_to_syspath(__file__)
 
 from src.ds import get_microarchitecture
 from src.error_model import LogicalErrorModel, PhysicalErrorModel
@@ -33,22 +33,20 @@ class TSetting:
     distance: int
 
 
-def apply_setting(setting: TSetting) -> None:
-    """Apply one T-cultivation setting to global config."""
+def apply_setting(setting: TSetting, logical_se_interval: int | None = None) -> None:
+    """Apply one T-cultivation setting to global config.
+
+    ``logical_se_interval`` enables the logical-qubit syndrome-extraction
+    scheduler so the per-layer execution log contains ``SE_q`` events; the
+    fidelity simulator then folds them into ``fidelity_idle``. When ``None``
+    the scheduler stays off and ``fidelity_idle`` is 1.0.
+    """
     update_config(
         STAGE_2_FIDELITY_TARGET=setting.fidelity_target,
         FACTORY_PHYSICAL_SIZE=setting.factory_physical_size,
         STAGE_1_RESOURCE_UNITS=1,
+        LOGICAL_SE_INTERVAL=logical_se_interval,
     )
-
-
-def _ensure_writer(csv_path: str, fieldnames: list[str]):
-    header_needed = (not os.path.exists(csv_path)) or (os.path.getsize(csv_path) == 0)
-    csv_file = open(csv_path, "a", newline="")
-    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-    if header_needed:
-        writer.writeheader()
-    return csv_file, writer
 
 
 def run_evaluation_t_cultivation(
@@ -62,7 +60,8 @@ def run_evaluation_t_cultivation(
 
     Structure mirrors ``run_evaluation_star`` in ``evaluation_fidelity.py``: one TFIM
     layer is produced; each ``Rz`` instruction is scheduled in its own round (same as
-    STAR’s per-Rz logs).     Per-Rz ``rz_logs`` are passed to :func:`simluate_trotter_2d_tfim_fidelity_t_cultivation`
+    STAR’s per-Rz logs). Full per-layer logs are passed to
+    :func:`simluate_trotter_2d_tfim_fidelity_t_cultivation`
     (same nested structure as STAR).
 
     Notes:
@@ -112,22 +111,30 @@ def run_evaluation_t_cultivation(
         "h",
         "dt",
         "n_trotter_steps",
+        "epsilon",
         "total_depth",
+        # Counts produced by the updated T-cultivation simulator.
         "n_cnot",
+        "n_cnot_teleportation",
+        "n_h",
         "n_s",
-        "n_idle",
-        "fidelity_idle_model",
-        "fidelity_total_with_idle",
+        "n_t",
+        "n_se_q",
+        "n_rz_decomposition",
+        # Fidelity components. ``fidelity_total`` already folds in
+        # ``fidelity_idle`` (from SE_q) and ``fidelity_synthesis`` (gridsynth).
         "fidelity_total",
         "fidelity_of_rz_teleportaion",
         "fidelity_of_rz_s",
         "fidelity_of_rz_h",
-        "fidelity_of_t_gate",
         "fidelity_cnot",
         "fidelity_h",
+        "fidelity_idle",
+        "fidelity_synthesis",
+        "synthesis_epsilon",
     ]
 
-    fidelity_file, fidelity_writer = _ensure_writer(
+    fidelity_file, fidelity_writer = ensure_csv_writer(
         fidelity_results_path, fidelity_fields
     )
 
@@ -142,7 +149,10 @@ def run_evaluation_t_cultivation(
     original_cfg = get_config().copy()
     try:
         for setting in params["settings"]:
-            apply_setting(setting)
+            apply_setting(
+                setting,
+                logical_se_interval=params.get("logical_se_interval"),
+            )
             for n_cols, n_rows in params["qubit_layout"]:
                 n_qubits = n_cols * n_rows
                 n_factories = n_qubits  # follow star convention
@@ -160,11 +170,19 @@ def run_evaluation_t_cultivation(
                             for trial in range(params["trials_per_config"]):
                                 trial_seed = 42 + trial
                                 rng = np.random.default_rng(trial_seed)
+                                # ``epsilon`` is the gridsynth approximation
+                                # accuracy (per-Rz target operator distance).
+                                # The same value is fed to the simulator as
+                                # ``synthesis_epsilon`` so the per-Rz state
+                                # infidelity ``epsilon ** 2`` is folded into
+                                # ``fidelity_total``.
+                                epsilon = float(params.get("epsilon", 1e-4))
                                 config = {
                                     "n_aods": n_aods,
                                     "rng": rng,
                                     "to_decompose": False,
                                     "print_profile": False,
+                                    "epsilon": epsilon,
                                 }
                                 if verbose:
                                     n_trials = params["trials_per_config"]
@@ -192,7 +210,7 @@ def run_evaluation_t_cultivation(
 
                                 (
                                     qc_one_layer,
-                                    rz_logs,
+                                    full_logs,
                                     profiling_results_per_case,
                                 ) = generate_one_layer_2d_tfim_circuit_t_cultivation(
                                     n_qubits=n_qubits,
@@ -233,8 +251,9 @@ def run_evaluation_t_cultivation(
                                     qubit_layout=(n_rows, n_cols),
                                     n_trotter_steps=n_trotter_fidelity,
                                     qc_one_layer=qc_one_layer,
-                                    execution_logs=rz_logs,
+                                    execution_logs=full_logs,
                                     logical_error_model=logical_error_model,
+                                    synthesis_epsilon=epsilon,
                                 )
 
                                 total_depth = None
@@ -246,29 +265,11 @@ def run_evaluation_t_cultivation(
                                         )
                                     )
 
-                                n_cnot = float(fprof.get("n_cnot", 0.0))
-                                n_h = float(fprof.get("n_h", 0.0))
-                                n_s = float(fprof.get("n_s", 0.0))
-                                p_i = float(
-                                    logical_error_model.get_logical_error_rate("I")
-                                )
-                                if total_depth is None:
-                                    n_idle = None
-                                    fidelity_idle = None
-                                    fidelity_total_with_idle = None
-                                else:
-                                    n_idle = (
-                                        float(n_qubits) * total_depth
-                                        - 2.0 * n_cnot
-                                        - n_s
-                                        - n_h
-                                    )
-                                    n_idle = max(0.0, float(n_idle))
-                                    fidelity_idle = float((1.0 - p_i) ** n_idle)
-                                    fidelity_total_with_idle = (
-                                        float(fprof["fidelity"]) * fidelity_idle
-                                    )
-
+                                # The simulator now natively accounts for
+                                # idle (SE_q-based) and gridsynth synthesis
+                                # error, so ``fprof['fidelity']`` is the
+                                # canonical end-to-end logical fidelity. No
+                                # depth-based heuristic is needed any more.
                                 fidelity_writer.writerow(
                                     {
                                         "trial": trial,
@@ -284,23 +285,34 @@ def run_evaluation_t_cultivation(
                                         "h": h,
                                         "dt": dt,
                                         "n_trotter_steps": n_trotter_steps,
+                                        "epsilon": epsilon,
                                         "total_depth": total_depth,
-                                        "n_cnot": n_cnot,
-                                        "n_s": n_s,
-                                        "n_idle": n_idle,
-                                        "fidelity_idle_model": fidelity_idle,
-                                        "fidelity_total_with_idle": fidelity_total_with_idle,
+                                        "n_cnot": fprof["n_cnot"],
+                                        "n_cnot_teleportation": fprof[
+                                            "n_cnot_teleportation"
+                                        ],
+                                        "n_h": fprof["n_h"],
+                                        "n_s": fprof["n_s"],
+                                        "n_t": fprof["n_t"],
+                                        "n_se_q": fprof["n_se_q"],
+                                        "n_rz_decomposition": fprof[
+                                            "n_rz_decomposition"
+                                        ],
                                         "fidelity_total": fprof["fidelity"],
                                         "fidelity_of_rz_teleportaion": fprof[
                                             "fidelity_of_rz_teleportaion"
                                         ],
                                         "fidelity_of_rz_s": fprof["fidelity_of_rz_s"],
                                         "fidelity_of_rz_h": fprof["fidelity_of_rz_h"],
-                                        "fidelity_of_t_gate": fprof[
-                                            "fidelity_of_t_gate"
-                                        ],
                                         "fidelity_cnot": fprof["fidelity_cnot"],
                                         "fidelity_h": fprof["fidelity_h"],
+                                        "fidelity_idle": fprof["fidelity_idle"],
+                                        "fidelity_synthesis": fprof[
+                                            "fidelity_synthesis"
+                                        ],
+                                        "synthesis_epsilon": fprof[
+                                            "synthesis_epsilon"
+                                        ],
                                     }
                                 )
 
@@ -349,6 +361,13 @@ if __name__ == "__main__":
         "n_aods": n_aods,
         "settings": settings,
         "trials_per_config": 5,
+        # Gridsynth approximation accuracy (per-Rz target operator distance).
+        # Per-Rz state infidelity is ``epsilon ** 2``.
+        "epsilon": 1e-4,
+        # Logical-qubit SE cadence (in cycles). ``None`` disables the
+        # scheduler; with a value set, ``SE_q`` events are emitted and the
+        # simulator's ``fidelity_idle`` term contributes to the total.
+        "logical_se_interval": 6,
     }
 
     run_evaluation_t_cultivation(
