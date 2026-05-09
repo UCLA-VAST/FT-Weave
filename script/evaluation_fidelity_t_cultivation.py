@@ -1,8 +1,18 @@
 import csv
 import os
+import sys
 from dataclasses import dataclass
 
 import numpy as np
+
+# Make sure the repo root is on ``sys.path`` *before* importing
+# ``script.script_utils``. When this module is launched directly via
+# ``uv run script/evaluation_fidelity_t_cultivation.py``, Python sets
+# ``sys.path[0]`` to ``script/`` rather than the repo root, so the dotted
+# ``script.<...>`` import would otherwise fail with ``ModuleNotFoundError``.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from script.script_utils import add_repo_root_to_syspath, ensure_csv_writer
 
@@ -310,9 +320,7 @@ def run_evaluation_t_cultivation(
                                         "fidelity_synthesis": fprof[
                                             "fidelity_synthesis"
                                         ],
-                                        "synthesis_epsilon": fprof[
-                                            "synthesis_epsilon"
-                                        ],
+                                        "synthesis_epsilon": fprof["synthesis_epsilon"],
                                     }
                                 )
 
@@ -334,10 +342,10 @@ if __name__ == "__main__":
     ]
     n_aods = [1, 2, 3, 4, 5]
     settings = [
-        # TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
+        TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
         TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=9),
-        # TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
-        # TSetting(fidelity_target=1e-10, factory_physical_size=4, distance=13),
+        TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
+        TSetting(fidelity_target=1e-10, factory_physical_size=4, distance=13),
     ]
 
     physical_error_model: PhysicalErrorModel = PhysicalErrorModel("lookahead")
@@ -367,7 +375,7 @@ if __name__ == "__main__":
         # Logical-qubit SE cadence (in cycles). ``None`` disables the
         # scheduler; with a value set, ``SE_q`` events are emitted and the
         # simulator's ``fidelity_idle`` term contributes to the total.
-        "logical_se_interval": 6,
+        "logical_se_interval": 10,
     }
 
     run_evaluation_t_cultivation(
