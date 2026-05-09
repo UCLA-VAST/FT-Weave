@@ -18,6 +18,7 @@ from src.execution_log import (
     execute_rus_teleportation,
     write_rus_result_log,
     clean_up_execution_log,
+    LogicalSEScheduler,
 )
 from src.t_cultivation.rus import rus_teleportation
 from src.t_cultivation.simulation import (
@@ -51,6 +52,7 @@ def t_cultivation_execution(
     num_subfactories: Optional[int] = None,
     synchronize_factory_execution: Optional[bool] = None,
     print_profile: bool = False,
+    logical_se_interval: Optional[int] = None,
 ) -> list[tuple]:
     """
     Execute a quantum circuit using T cultivation.
@@ -155,11 +157,25 @@ def t_cultivation_execution(
         )
     events: list[tuple[float, int, dict[str, Any]]] = []
     event_counter = count()
-    execution_log: list[tuple] = []
+    execution_log: list[dict] = []
     current_time = 0.0
     completed_nodes: set[int] = set()
     t_tdg_implemented_count = 0
     aod_earliest_available_time = [0.0] * n_aods
+
+    # Logical-qubit SE scheduler (cadence x with [x-2, x+2] piggy-back window).
+    se_interval = (
+        logical_se_interval
+        if logical_se_interval is not None
+        else tcfg.LOGICAL_SE_INTERVAL
+    )
+    logical_se_scheduler: LogicalSEScheduler | None = None
+    if se_interval is not None:
+        logical_se_scheduler = LogicalSEScheduler(
+            qubit_ids=range(len(logic_qubit_locations)),
+            interval=se_interval,
+            start_time=current_time,
+        )
 
     def pick_gate_aod(earliest_start: float) -> tuple[int, float]:
         """Pick AOD for Clifford gates.
@@ -310,6 +326,11 @@ def t_cultivation_execution(
             aod_assignment=aod_id,
             targets=None,
         )
+        if logical_se_scheduler is not None:
+            for k in range(int(tcfg.SE_STAGE_1)):
+                logical_se_scheduler.piggyback(
+                    start_time + k, aod_id, execution_log
+                )
         heapq.heappush(
             events,
             (
@@ -397,6 +418,10 @@ def t_cultivation_execution(
                     movement_time=move_dur,
                 )
                 finish_time += 2 * move_dur
+                if logical_se_scheduler is not None:
+                    logical_se_scheduler.reset(
+                        c_qubits + t_qubits, finish_time
+                    )
             else:
                 write_execution_log(
                     execution_log,
@@ -406,6 +431,14 @@ def t_cultivation_execution(
                     aod_assignment=aod_id,
                     targets=targets,
                 )
+                if logical_se_scheduler is not None:
+                    flat_targets: list[int] = []
+                    for tgt in targets:
+                        if isinstance(tgt, (list, tuple)):
+                            flat_targets.extend(tgt)
+                        elif tgt is not None:
+                            flat_targets.append(tgt)
+                    logical_se_scheduler.reset(flat_targets, finish_time)
             aod_earliest_available_time[aod_id] = finish_time
             heapq.heappush(
                 events,
@@ -500,6 +533,11 @@ def t_cultivation_execution(
                     aod_assignment=aod_s2,
                     targets=None,
                 )
+                if logical_se_scheduler is not None:
+                    for k in range(int(tcfg.SE_STAGE_2)):
+                        logical_se_scheduler.piggyback(
+                            stage_2_start_time + k, aod_s2, execution_log
+                        )
                 heapq.heappush(
                     events,
                     (
@@ -621,7 +659,11 @@ def t_cultivation_execution(
                 # find earliest available AOD for teleportation (including AOD 0)
                 aod_idx, rus_start_time = pick_any_aod(local_time)
                 local_time = execute_rus_teleportation(
-                    qubit_factory_pairs, rus_start_time, execution_log, aod_idx
+                    qubit_factory_pairs,
+                    rus_start_time,
+                    execution_log,
+                    aod_idx,
+                    logical_se_scheduler=logical_se_scheduler,
                 )
                 aod_earliest_available_time[aod_idx] = local_time
                 logger.debug(
@@ -700,6 +742,10 @@ def t_cultivation_execution(
                         aod_assignment=event["aod_id"],
                         targets=[qubit],
                     )
+                    if logical_se_scheduler is not None:
+                        logical_se_scheduler.reset(
+                            [qubit], local_time + tcfg.SE_TIME
+                        )
                     insert_s = True
                 ready_t.remove(qubit_idx_to_node[qubit])
                 node = qubit_idx_to_node[qubit]
@@ -741,6 +787,9 @@ def t_cultivation_execution(
             mark_node_completed(node)
             schedule_ready_clifford_operations(current_time)
             maybe_enqueue_rus_start(current_time)
+
+        if logical_se_scheduler is not None:
+            logical_se_scheduler.force_due(current_time, None, execution_log)
 
     execution_log = clean_up_execution_log(execution_log, current_time)
     for log in execution_log:

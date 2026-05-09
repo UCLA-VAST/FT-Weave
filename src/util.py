@@ -1,5 +1,6 @@
 from typing import Any
 from collections import defaultdict
+from src.execution_log.event_helpers import normalize_factories, resolve_indexed
 
 
 def validate_assignment(result: dict) -> bool:
@@ -187,12 +188,7 @@ def analyze_execution_log(
 
         overall_end = max(overall_end, end)
 
-        if isinstance(factory_id, int):
-            factories = [factory_id]
-        elif factory_id is None:
-            factories = []
-        else:
-            factories = list(factory_id)
+        factories = normalize_factories(factory_id)
 
         # Record op stats
         if operation == "Rz":
@@ -224,15 +220,8 @@ def analyze_execution_log(
 
         # Per-factory timeline
         for idx, fid in enumerate(factories):
-            if isinstance(value, list) and idx < len(value):
-                factory_value = value[idx]
-            else:
-                factory_value = value
-
-            if isinstance(move_vecs, list) and idx < len(move_vecs):
-                factory_move_vecs = move_vecs[idx]
-            else:
-                factory_move_vecs = move_vecs
+            factory_value = resolve_indexed(value, idx)
+            factory_move_vecs = resolve_indexed(move_vecs, idx)
 
             timeline = per_factory.setdefault(
                 fid, {"timeline": [], "busy_time": 0, "ops": {}}
@@ -376,6 +365,7 @@ def print_execution_profile(profile: dict[str, Any], top_n_pairs: int = 0) -> No
     # Define operation order for output
     op_order = [
         "SE",
+        "SE_q",
         "SE_stage_1",
         "SE_stage_2",
         "H",
@@ -391,7 +381,7 @@ def print_execution_profile(profile: dict[str, Any], top_n_pairs: int = 0) -> No
     ]
 
     # Operations with timing details
-    timing_ops = {"SE", "SE_stage_1", "SE_stage_2", "H", "S", "Rz", "CNOT"}
+    timing_ops = {"SE", "SE_q", "SE_stage_1", "SE_stage_2", "H", "S", "Rz", "CNOT"}
     move_ops = {"move", "return_move"}
     # Operations with count only
     count_only_ops = {"RUS_success", "RUS_fail", "TMR_fail"}

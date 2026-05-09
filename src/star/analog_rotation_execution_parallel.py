@@ -30,10 +30,12 @@ from ..execution_log import (
     write_rus_result_log,
     clean_up_execution_log,
     validate_execution_log,
+    LogicalSEScheduler,
 )
 
 from .rus.rus_teleportaion import rus_teleportation
 from .rus.rus_post_teleportation import rus_post_teleportation
+from . import config as star_cfg
 
 
 # ============================================================================
@@ -55,6 +57,7 @@ def factory_angle_execution_parallel(
     rng: np.random.Generator | None = None,
     save_log: bool = False,
     log_path: str | None = None,
+    logical_se_interval: int | None = None,
 ):
     """
     Execute angle preparation with parallel TMR and RUS operations using time-stepped simulation.
@@ -106,6 +109,19 @@ def factory_angle_execution_parallel(
     aod_earliest_available_time = [0.0] * n_aods
     circuit_moment = 0.0
 
+    se_interval = (
+        logical_se_interval
+        if logical_se_interval is not None
+        else star_cfg.LOGICAL_SE_INTERVAL
+    )
+    logical_se_scheduler: LogicalSEScheduler | None = None
+    if se_interval is not None:
+        logical_se_scheduler = LogicalSEScheduler(
+            qubit_ids=range(len(logic_qubit_locations)),
+            interval=se_interval,
+            start_time=circuit_moment,
+        )
+
     def aod_se_avaliable():
         max_time = float("inf")
         aod_id = -1
@@ -135,6 +151,97 @@ def factory_angle_execution_parallel(
         logger.debug(
             f"Added {task_type} event at t={time}, total events in queue: {len(events)}"
         )
+
+    def handle_rus_start(local_moment: float, event: dict) -> float:
+        """Handle scheduling and dispatch for RUS start events."""
+        logger.debug(f"Event: RUS_start at t={local_moment}")
+        qubit_factory_pairs, routing_batches = rus_teleportation(
+            qubit_trackers,
+            factory_pool,
+            logic_qubit_locations,
+            consider_skip_rus=consider_skip_rus,
+            n_aods=n_aods,
+            total_qubits=len(target_qubits_angles),
+        )
+        logger.debug(
+            f"RUS teleportation scheduled for {qubit_factory_pairs} qubits at t={local_moment}"
+        )
+        if not (qubit_factory_pairs and routing_batches):
+            aod_in_use[event["aod_id"]] = False
+            add_event(local_moment, next(counter), "TMR_start")
+            return local_moment
+
+        local_moment = execute_movement(
+            routing_batches,
+            execution_log,
+            local_moment,
+            aod_earliest_available_time,
+        )
+        aod_idx = aod_earliest_available_time.index(min(aod_earliest_available_time))
+        local_moment = execute_rus_teleportation(
+            qubit_factory_pairs,
+            local_moment,
+            execution_log,
+            aod_idx,
+            logical_se_scheduler=logical_se_scheduler,
+        )
+        aod_earliest_available_time[aod_idx] = local_moment
+        logger.debug(
+            f"RUS teleportation executed, update AOD available time: {aod_earliest_available_time}"
+        )
+        add_event(
+            local_moment,
+            next(counter) - 20,
+            "RUS_teleportation",
+            qubit_factory_pairs=qubit_factory_pairs,
+            routing_batches=routing_batches,
+            aod_id=event["aod_id"],
+        )
+        return local_moment
+
+    def handle_rus_teleportation(local_moment: float, event: dict) -> float:
+        """Handle RUS result simulation and post-teleportation routing."""
+        logger.debug(f"Event: RUS_teleportation at t={local_moment}")
+        qubit_factory_pairs = event["qubit_factory_pairs"]
+        rus_simulation = simulate_RUS_injection(
+            event["qubit_factory_pairs"], factory_pool, rng
+        )
+        write_rus_result_log(
+            event["qubit_factory_pairs"],
+            rus_simulation,
+            local_moment,
+            execution_log,
+        )
+        local_moment = update_qubit_state_per_teleportation(
+            qubit_factory_pairs,
+            rus_simulation,
+            qubit_trackers,
+            execution_log,
+            local_moment,
+            aod_id=event["aod_id"],
+            logical_se_scheduler=logical_se_scheduler,
+        )
+        return_routing_batches = rus_post_teleportation(
+            event["routing_batches"],
+            factory_pool,
+            trivial_return=trivial_return,
+            decompose_move=False,
+        )
+        local_moment = execute_movement(
+            return_routing_batches,
+            execution_log,
+            local_moment,
+            aod_earliest_available_time,
+            move_type="return_move",
+        )
+        add_event(
+            local_moment,
+            next(counter) - 60,
+            "RUS_finish",
+            aod_id=event["aod_id"],
+            factory_list=[f for q, f in event["qubit_factory_pairs"]],
+        )
+        return local_moment
 
     add_event(0, next(counter), "TMR_start")
 
@@ -202,6 +309,7 @@ def factory_angle_execution_parallel(
                     events=events,
                     event_counter=counter,
                     aod_id=aod_id,
+                    logical_se_scheduler=logical_se_scheduler,
                 )
                 aod_in_use[aod_id] = True
 
@@ -224,6 +332,7 @@ def factory_angle_execution_parallel(
                 events=events,
                 event_count=next(counter),
                 aod_id=event["aod_id"],
+                logical_se_scheduler=logical_se_scheduler,
             )
             # aod_earliest_available_time[event["aod_id"]] = local_moment
             logger.debug(
@@ -255,102 +364,9 @@ def factory_angle_execution_parallel(
             )
 
         elif event["type"] == "RUS_start":
-            logger.debug(f"Event: RUS_start at t={local_moment}")
-            # Execute RUS teleportation
-            qubit_factory_pairs, routing_batches = rus_teleportation(
-                qubit_trackers,
-                factory_pool,
-                logic_qubit_locations,
-                consider_skip_rus=consider_skip_rus,
-                n_aods=n_aods,
-                total_qubits=len(target_qubits_angles),
-            )
-            logger.debug(
-                f"RUS teleportation scheduled for {qubit_factory_pairs} qubits at t={local_moment}"
-            )
-            if qubit_factory_pairs and routing_batches:
-                # Execute movement to factories
-                local_moment = execute_movement(
-                    routing_batches,
-                    execution_log,
-                    local_moment,
-                    aod_earliest_available_time,
-                )
-                # find earliest available AOD for teleportation
-                aod_idx = aod_earliest_available_time.index(
-                    min(aod_earliest_available_time)
-                )
-                local_moment = execute_rus_teleportation(
-                    qubit_factory_pairs, local_moment, execution_log, aod_idx
-                )
-                aod_earliest_available_time[aod_idx] = local_moment
-                logger.debug(
-                    f"RUS teleportation executed, update AOD available time: {aod_earliest_available_time}"
-                )
-                # Schedule teleport event
-                add_event(
-                    local_moment,
-                    next(counter) - 20,
-                    "RUS_teleportation",
-                    qubit_factory_pairs=qubit_factory_pairs,
-                    routing_batches=routing_batches,
-                    aod_id=event["aod_id"],
-                )
-            else:
-                aod_in_use[event["aod_id"]] = False
-                add_event(local_moment, next(counter), "TMR_start")
+            local_moment = handle_rus_start(local_moment, event)
         elif event["type"] == "RUS_teleportation":
-            logger.debug(f"Event: RUS_teleportation at t={local_moment}")
-            qubit_factory_pairs = event["qubit_factory_pairs"]
-
-            logger.debug(f"RUS teleportation executed, circuit_moment={local_moment}")
-
-            # Simulate RUS teleportation results
-            rus_simulation = simulate_RUS_injection(
-                event["qubit_factory_pairs"], factory_pool, rng
-            )
-
-            execution_log = write_rus_result_log(
-                event["qubit_factory_pairs"],
-                rus_simulation,
-                local_moment,
-                execution_log,
-            )
-
-            # Update qubit states based on teleportation results
-            local_moment = update_qubit_state_per_teleportation(
-                qubit_factory_pairs,
-                rus_simulation,
-                qubit_trackers,
-                execution_log,
-                local_moment,
-                aod_id=event["aod_id"],
-            )
-
-            # Schedule return movement
-            return_routing_batches = rus_post_teleportation(
-                event["routing_batches"],
-                factory_pool,
-                trivial_return=trivial_return,
-                decompose_move=False,
-            )
-
-            local_moment = execute_movement(
-                return_routing_batches,
-                execution_log,
-                local_moment,
-                aod_earliest_available_time,
-                move_type="return_move",
-            )
-
-            # Schedule finish event
-            add_event(
-                local_moment,
-                next(counter) - 60,
-                "RUS_finish",
-                aod_id=event["aod_id"],
-                factory_list=[f for q, f in event["qubit_factory_pairs"]],
-            )
+            local_moment = handle_rus_teleportation(local_moment, event)
 
         elif event["type"] == "RUS_finish":
             logger.debug(
@@ -362,6 +378,10 @@ def factory_angle_execution_parallel(
                 factory_pool,
                 qubit_trackers,
             )
+            if logical_se_scheduler is not None:
+                logical_se_scheduler.force_due(
+                    local_moment, event["aod_id"], execution_log
+                )
 
             add_event(local_moment, next(counter), "RUS_start", aod_id=event["aod_id"])
             add_event(local_moment, next(counter), "TMR_start")
@@ -376,7 +396,15 @@ def factory_angle_execution_parallel(
     logger.debug(
         f"Execution finished in {circuit_moment} time units, {len(execution_log)} events logged"
     )
-    execution_log = sorted(execution_log, key=lambda x: x[:4])
+    execution_log = sorted(
+        execution_log,
+        key=lambda x: (
+            x.get("start_time", 0),
+            x.get("end_time", 0),
+            str(x.get("factories")),
+            str(x.get("operation")),
+        ),
+    )
 
     validate_execution_log(execution_log, magic_state_locations, n_aods)
     if save_log and log_path is not None:

@@ -15,28 +15,13 @@ from typing import Any
 from src.error_model import LogicalErrorModel
 
 
-def _unpack_execution_entry(entry: tuple) -> tuple[Any, str, Any, Any]:
-    """Normalize 5-, 6-, or 7-tuple execution log rows."""
-    n = len(entry)
-    if n == 7:
-        _start, _end, factories, operation, aod, targets, _move_vecs = entry
-    elif n == 6:
-        _start, _end, factories, operation, aod, targets = entry
-    elif n == 5:
-        _start, _end, factories, operation = entry[:4]
-        aod, targets = None, None
-    else:
-        raise ValueError(f"Unexpected execution log entry length: {n}")
-    return factories, operation, aod, targets
-
-
 def simluate_trotter_2d_tfim_fidelity(
     n_qubits: int,
     n_factories: int,
     qubit_layout: tuple,
     n_trotter_steps: int,
     qc_one_layer: list[dict],
-    execution_logs: list[list[tuple]],
+    execution_logs: list[list[dict]],
     logical_error_model: LogicalErrorModel,
 ) -> dict:
     """
@@ -80,7 +65,9 @@ def simluate_trotter_2d_tfim_fidelity(
     n_s = 0
     for log in execution_logs:
         for entry in log:
-            factories, operation, _aod, targets = _unpack_execution_entry(entry)
+            factories = entry.get("factories")
+            operation = entry.get("operation")
+            targets = entry.get("targets")
 
             if operation in ("move", "return_move", "Barrier"):
                 continue
@@ -118,6 +105,11 @@ def simluate_trotter_2d_tfim_fidelity(
                 fidelity_of_rz_h *= logical_error_model.get_logical_fidelity("H")
             elif operation in ("RUS_success", "RUS_fail"):
                 # Outcomes are recorded separately; injection noise is tied to CNOT above.
+                continue
+            elif operation in ("SE", "SE_q"):
+                # Factory or logical-qubit syndrome-extraction events. Fidelity
+                # contribution is deferred (decided later); ignore for now so
+                # logs containing them do not break the simulator.
                 continue
             else:
                 raise ValueError(f"Unexpected operation in execution log: {operation}")

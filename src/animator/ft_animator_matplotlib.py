@@ -19,6 +19,7 @@ class FTAnimator(Animator):
     FT_ZONE_COLORS = {
         "CNOT": (0.0, 0.0, 1.0, 0.30),
         "SE": (1.0, 0.55, 0.0, 0.35),
+        "SE_q": (1.0, 0.75, 0.40, 0.30),
         "SE_stage_1": (0.55, 0.25, 0.85, 0.35),
         "SE_stage_2": (0.10, 0.70, 0.20, 0.35),
     }
@@ -151,7 +152,7 @@ class FTAnimator(Animator):
                     self.update_arrangement(true_time, inst["rearrange_job"])
                 elif itype in ("H", "S", "Rz"):
                     self.update_1qGate(inst["gate_inst"])
-                elif itype in ("CNOT", "SE", "SE_stage_1", "SE_stage_2"):
+                elif itype in ("CNOT", "SE", "SE_q", "SE_stage_1", "SE_stage_2"):
                     color = self.FT_ZONE_COLORS.get(
                         itype, self.FT_ZONE_COLORS["CNOT"]
                     )

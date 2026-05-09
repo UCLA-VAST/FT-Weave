@@ -8,6 +8,7 @@ from itertools import count
 from .util import (
     write_execution_log,
 )
+from .logical_se import LogicalSEScheduler
 
 
 def execute_tmr_preparation_pre_rz(
@@ -17,6 +18,7 @@ def execute_tmr_preparation_pre_rz(
     events: list | None = None,
     event_counter: count | None = None,
     aod_id: int = 0,
+    logical_se_scheduler: LogicalSEScheduler | None = None,
 ) -> tuple[float, list]:
     """
     PHASE 2: Execute TMR preparation (2 SE + Rz + 3 SE).
@@ -25,6 +27,8 @@ def execute_tmr_preparation_pre_rz(
         factories: List of Factory objects undergoing TMR preparation
         circuit_moment: Current circuit execution time
         execution_log: List of execution events
+        logical_se_scheduler: optional scheduler that piggy-backs logical-qubit
+            SE rounds onto each per-cycle factory SE write.
 
     Returns:
         Updated circuit_moment and execution_log
@@ -45,6 +49,10 @@ def execute_tmr_preparation_pre_rz(
             aod_id,
             targets,
         )
+        if logical_se_scheduler is not None:
+            logical_se_scheduler.piggyback(
+                circuit_moment + p, aod_id, execution_log
+            )
 
     circuit_moment += TMR_P
 
@@ -67,6 +75,7 @@ def execute_tmr_preparation_rz(
     events: list | None = None,
     event_count: int | None = None,
     aod_id: int = 0,
+    logical_se_scheduler: LogicalSEScheduler | None = None,
 ) -> tuple[float, list]:
     """
     PHASE 2: Execute TMR preparation (2 SE + Rz + 3 SE).
@@ -75,6 +84,8 @@ def execute_tmr_preparation_rz(
         factories: List of Factory objects undergoing TMR preparation
         circuit_moment: Current circuit execution time
         execution_log: List of execution events
+        logical_se_scheduler: optional scheduler that piggy-backs logical-qubit
+            SE rounds onto each post-Rz factory SE write.
 
     Returns:
         Updated circuit_moment and execution_log
@@ -100,6 +111,10 @@ def execute_tmr_preparation_rz(
             aod_id,
             targets,
         )
+        if logical_se_scheduler is not None:
+            logical_se_scheduler.piggyback(
+                circuit_moment + q + 1, aod_id, execution_log
+            )
 
     circuit_moment += TMR_Q + 1
 

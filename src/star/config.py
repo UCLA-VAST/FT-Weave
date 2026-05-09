@@ -23,6 +23,7 @@ THRESHOLD_HIGH_TMR = 5
 THRESHOLD_HIGH_RUS = 5
 ANGLE_S = np.pi / 2
 ANGLE_T = np.pi / 4
+LOGICAL_SE_INTERVAL: int | None = None
 
 
 def update_config(**kwargs):
@@ -44,7 +45,7 @@ def update_config(**kwargs):
     """
     global TMR_P, TMR_Q, TMR_PREPARATION_TIME, CNOT_TIME, SE_TIME
     global TELEPORTATION_SUCCESS_RATE, LOOKAHEAD_THRESHOLD, LOOKAHEAD_LEVEL
-    global PRECISION, LARGE_ANGLE_LIMIT
+    global PRECISION, LARGE_ANGLE_LIMIT, LOGICAL_SE_INTERVAL
 
     valid_keys = {
         "TMR_P",
@@ -55,6 +56,7 @@ def update_config(**kwargs):
         "LOOKAHEAD_THRESHOLD",
         "LOOKAHEAD_LEVEL",
         "PRECISION",
+        "LOGICAL_SE_INTERVAL",
     }
 
     # Validate keys
@@ -79,6 +81,8 @@ def update_config(**kwargs):
         LOOKAHEAD_LEVEL = kwargs["LOOKAHEAD_LEVEL"]
     if "PRECISION" in kwargs:
         PRECISION = kwargs["PRECISION"]
+    if "LOGICAL_SE_INTERVAL" in kwargs:
+        LOGICAL_SE_INTERVAL = kwargs["LOGICAL_SE_INTERVAL"]
 
     # Recalculate dependent constants
     TMR_PREPARATION_TIME = TMR_P + TMR_Q + 1
@@ -103,6 +107,7 @@ def get_config():
         "LOOKAHEAD_LEVEL": LOOKAHEAD_LEVEL,
         "PRECISION": PRECISION,
         "LARGE_ANGLE_LIMIT": LARGE_ANGLE_LIMIT,
+        "LOGICAL_SE_INTERVAL": LOGICAL_SE_INTERVAL,
     }
 
 
@@ -117,4 +122,5 @@ def reset_config():
         LOOKAHEAD_THRESHOLD=2,
         LOOKAHEAD_LEVEL=2,
         PRECISION=8,
+        LOGICAL_SE_INTERVAL=None,
     )

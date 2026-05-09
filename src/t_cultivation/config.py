@@ -52,6 +52,10 @@ STAGE_1_RESOURCE_UNITS = 1
 # cost = move_duration + weight * (batch_max_lp - lp[node]). Higher lp => lower extra cost.
 RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT = 1.0
 
+# Cadence (in cycles) for syndrome extraction on idle logical qubits, with a soft
+# x-2 .. x+2 window so we can piggy-back onto factory SE moments. None = disabled.
+LOGICAL_SE_INTERVAL: int | None = None
+
 
 def compute_num_subfactories(physical_size: int, stage1_resource_units: int) -> int:
     """Return k = max(1, physical_size // stage1_resource_units) with a safe denominator."""
@@ -80,6 +84,7 @@ def update_config(**kwargs):
     global STAGE_2_FIDELITY_TARGET
     global FACTORY_PHYSICAL_SIZE, STAGE_1_RESOURCE_UNITS, SYNCHRONIZE_FACTORY_EXECUTION
     global RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT
+    global LOGICAL_SE_INTERVAL
 
     valid_keys = {
         "SE_STAGE_1",
@@ -95,6 +100,7 @@ def update_config(**kwargs):
         "STAGE_1_RESOURCE_UNITS",
         "SYNCHRONIZE_FACTORY_EXECUTION",
         "RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT",
+        "LOGICAL_SE_INTERVAL",
     }
 
     # Validate keys
@@ -134,6 +140,8 @@ def update_config(**kwargs):
         RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT = kwargs[
             "RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT"
         ]
+    if "LOGICAL_SE_INTERVAL" in kwargs:
+        LOGICAL_SE_INTERVAL = kwargs["LOGICAL_SE_INTERVAL"]
 
 
 def get_config():
@@ -157,6 +165,7 @@ def get_config():
         "STAGE_1_RESOURCE_UNITS": STAGE_1_RESOURCE_UNITS,
         "SYNCHRONIZE_FACTORY_EXECUTION": SYNCHRONIZE_FACTORY_EXECUTION,
         "RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT": RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT,
+        "LOGICAL_SE_INTERVAL": LOGICAL_SE_INTERVAL,
     }
 
 
@@ -175,4 +184,5 @@ def reset_config():
         STAGE_1_RESOURCE_UNITS=1,
         SYNCHRONIZE_FACTORY_EXECUTION=True,
         RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT=1.0,
+        LOGICAL_SE_INTERVAL=None,
     )

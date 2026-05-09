@@ -41,8 +41,8 @@ def simluate_trotter_2d_tfim_fidelity(
                 n_h += len(targets)
                 continue
 
-            if operation == "CNOT" and "qubit_pairs" in entry:
-                pairs = entry.get("qubit_pairs", [])
+            if operation == "CNOT" and isinstance(values, list):
+                pairs = values
                 n_cnot += len(pairs) if isinstance(pairs, list) else 0
                 continue
 
@@ -50,6 +50,7 @@ def simluate_trotter_2d_tfim_fidelity(
                 continue
             assert operation in [
                 "SE",
+                "SE_q",
                 "CNOT",
                 "Rz",
                 "S",

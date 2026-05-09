@@ -1,6 +1,12 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import os
+from src.animator.log_view_helpers import (
+    normalize_factories,
+    resolve_indexed,
+    entry_start,
+    entry_end,
+)
 
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
@@ -27,6 +33,7 @@ _AOD_RETURN_MOVE_GREEN_SHADES = [
 color_map = {
     "TUM": "#9ed76c",
     "SE": "#4681a9",
+    "SE_q": "#4681a9",
     "S": "#a98546",
     "CNOT": "#e74c3c",
     "Rz": "#e7ab3c",
@@ -70,18 +77,8 @@ def get_aod_border_color(aod_idx: int) -> str:
     return aod_colors[aod_idx % len(aod_colors)]
 
 
-def _normalize_factories(factory_id) -> list[int]:
-    if isinstance(factory_id, int):
-        return [factory_id]
-    if factory_id is None:
-        return []
-    return list(factory_id)
-
-
 def _resolve_factory_value(values, idx: int):
-    if isinstance(values, list) and idx < len(values):
-        return values[idx]
-    return values
+    return resolve_indexed(values, idx)
 
 
 def _extract_qubits_from_targets(targets) -> list[int]:
@@ -130,6 +127,8 @@ def _star_box_label(operation: str, value=None, move_vecs=None) -> str:
     if operation == "S":
         return f"S\nθ:{value}"
     if operation == "SE":
+        return "SE"
+    if operation == "SE_q":
         return "SE"
     if operation == "CNOT":
         if value is not None:
@@ -201,9 +200,9 @@ def plot_circuit_execution(
     # Plot each operation as a rectangle
     max_time = 0
     for entry in execution_log:
-        start_time = entry.get("start_time", 0)
-        end_time = entry.get("end_time", start_time)
-        factories = _normalize_factories(entry.get("factories"))
+        start_time = entry_start(entry)
+        end_time = entry_end(entry)
+        factories = normalize_factories(entry.get("factories"))
         operation = entry.get("operation")
         aod_assignment = entry.get("aod_assignment")
         value = entry.get("targets")
@@ -307,6 +306,38 @@ def plot_circuit_execution(
                         alpha=alpha,
                     )
                     ax.add_patch(rect)
+
+            # Logical-qubit SE entries (no factories): render directly on q-rows.
+            if show_logical_qubits and operation == "SE_q":
+                qubit_targets = _extract_qubits_from_value(value)
+                for qubit_id in qubit_targets:
+                    row_name = f"q{qubit_id}"
+                    if row_name not in y_pos:
+                        continue
+                    rect = mpatches.Rectangle(
+                        (start_time, y_pos[row_name] - _BOX_Y_OFFSET),
+                        duration,
+                        _BOX_HEIGHT,
+                        facecolor=color,
+                        edgecolor=border_color,
+                        linewidth=border_width,
+                        zorder=zorder,
+                        alpha=alpha,
+                    )
+                    ax.add_patch(rect)
+                    if show_box_text:
+                        ax.text(
+                            start_time + duration / 2,
+                            y_pos[row_name],
+                            "SE",
+                            ha="center",
+                            va="center",
+                            fontsize=10,
+                            fontweight="bold",
+                            color="black",
+                            linespacing=0.9,
+                            clip_on=True,
+                        )
 
     # Configure axes
     ax.set_xlim(0, max_time * 1.01)
@@ -441,13 +472,13 @@ def plot_circuit_execution_vertical(
             figsize=(max(6, len(row_names) * 0.8), circuit_length / 5)
         )
     else:
-        fig, ax = plt.subplots(figsize=(max(6, n_factories * 0.8), circuit_length / 5))
+        fig, ax = plt.subplots(figsize=(max(8, n_factories * 0.8), circuit_length / 5))
 
     # Plot each operation as a rectangle
     for entry in execution_log:
-        start_time = entry.get("start_time", 0)
-        end_time = entry.get("end_time", start_time)
-        factories = _normalize_factories(entry.get("factories"))
+        start_time = entry_start(entry)
+        end_time = entry_end(entry)
+        factories = normalize_factories(entry.get("factories"))
         operation = entry.get("operation")
         aod_assignment = entry.get("aod_assignment")
         value = entry.get("targets")
@@ -553,10 +584,43 @@ def plot_circuit_execution_vertical(
                     )
                     ax.add_patch(rect)
 
+            # Logical-qubit SE entries (no factories): render directly on q-rows.
+            if show_logical_qubits and operation == "SE_q":
+                qubit_targets = _extract_qubits_from_value(value)
+                for qubit_id in qubit_targets:
+                    row_name = f"q{qubit_id}"
+                    if row_name not in y_pos:
+                        continue
+                    rect = mpatches.Rectangle(
+                        (y_pos[row_name] - _BOX_Y_OFFSET, start_time),
+                        _BOX_HEIGHT,
+                        duration,
+                        facecolor=color,
+                        edgecolor=border_color,
+                        alpha=alpha,
+                        linewidth=border_width,
+                        zorder=zorder,
+                    )
+                    ax.add_patch(rect)
+                    if show_box_text:
+                        ax.text(
+                            y_pos[row_name],
+                            start_time + duration / 2,
+                            "SE",
+                            ha="center",
+                            va="center",
+                            fontsize=8,
+                            fontweight="bold",
+                            color="black",
+                            linespacing=0.9,
+                            clip_on=True,
+                        )
+
     # Configure axes
     # Invert y-axis so time goes from top to bottom
     ax.set_ylim(
-        max(e.get("end_time", e.get("start_time", 0)) for e in execution_log) * 1.01, 0
+        max(entry_end(e) for e in execution_log) * 1.01,
+        0,
     )
     if show_logical_qubits:
         ax.set_xlim(-0.5, len(row_names) - 0.5)
@@ -702,14 +766,12 @@ def _plot_t_cultivation_execution_on_ax(
 ) -> None:
     rows = [f"q{i}" for i in range(n_qubits)] + [f"f{i}" for i in range(n_factories)]
     y_pos = {name: idx for idx, name in enumerate(rows)}
-    max_time = max(
-        entry.get("end_time", entry.get("start_time", 0)) for entry in execution_log
-    )
+    max_time = max(entry_end(entry) for entry in execution_log)
 
     for entry in execution_log:
-        start_time = entry.get("start_time", 0)
-        end_time = entry.get("end_time", start_time)
-        factories = _normalize_factories(entry.get("factories"))
+        start_time = entry_start(entry)
+        end_time = entry_end(entry)
+        factories = normalize_factories(entry.get("factories"))
         operation = entry.get("operation")
         aod_assignment = entry.get("aod_assignment")
         value = entry.get("targets")
@@ -806,10 +868,7 @@ def plot_t_cultivation_execution_subfigures(
     row_height_ratios = [max(0.8, lanes / 3.0) for lanes in lane_counts]
     global_xmax = (
         max(
-            max(
-                entry.get("end_time", entry.get("start_time", 0))
-                for entry in execution_log
-            )
+            max(entry_end(entry) for entry in execution_log)
             for _, execution_log, _, _ in row_plots
         )
         * 1.03

@@ -5,6 +5,7 @@ from src.execution_log.event_helpers import (
     normalize_factories,
     operation_end_time,
 )
+from src.execution_log.logical_se import LogicalSEScheduler
 
 
 def write_execution_log(
@@ -82,6 +83,7 @@ def execute_rus_teleportation(
     circuit_moment: float,
     execution_log: list,
     aod_id: int,
+    logical_se_scheduler: LogicalSEScheduler | None = None,
 ):
     factories = [factory_id for _, factory_id in qubit_factory_pairs]
     qubits = [qubit for qubit, _ in qubit_factory_pairs]
@@ -93,7 +95,10 @@ def execute_rus_teleportation(
         aod_assignment=aod_id,
         targets=qubits,
     )
-    return circuit_moment + CNOT_TIME
+    end_time = circuit_moment + CNOT_TIME
+    if logical_se_scheduler is not None:
+        logical_se_scheduler.reset(qubits, end_time)
+    return end_time
 
 
 def execute_movement(
@@ -146,6 +151,7 @@ def insert_s_gate(
     start_time: float,
     qubit: list[int],
     aod_id: int,
+    logical_se_scheduler: LogicalSEScheduler | None = None,
 ):
     """
     Update qubit states
@@ -158,6 +164,11 @@ def insert_s_gate(
         aod_assignment=aod_id,
         targets=qubit,
     )
+    if logical_se_scheduler is not None:
+        # S takes SE_TIME (1 cycle) and acts as an SE for the targeted qubits.
+        from src.star.config import SE_TIME
+
+        logical_se_scheduler.reset(qubit, start_time + SE_TIME)
 
 
 def clean_up_execution_log(
@@ -222,6 +233,11 @@ def validate_execution_log(
         if operation in ["Barrier", "RUS_success", "RUS_fail"]:
             continue
 
+        # Logical-qubit SE events (operation "SE_q", empty factories) ride
+        # alongside an already-booked SE AOD; they are intentionally concurrent
+        # with factory SE writes, so skip both factory and AOD overlap checks.
+        is_logical_se = operation == "SE_q"
+
         # Check for overlapping time intervals for the same factory
         for factory_id in factories:
             if start_time < factory_time_intervals[factory_id][-1][0]:
@@ -231,7 +247,7 @@ def validate_execution_log(
                 )
 
         # check for overlapping time intervals for the same AOD
-        if aod_assignment is not None:
+        if aod_assignment is not None and not is_logical_se:
             if start_time < aod_time_intervals[aod_assignment]:
                 raise AssertionError(
                     f"AOD {aod_assignment} is involved in overlapping operations {operation} at time {start_time}"
@@ -252,7 +268,7 @@ def validate_execution_log(
                         fac_op == "SE" and fac_val is not None
                     ), f"Expected SE before TMR failure for factory {factory_id}, but got {fac_op} with value {fac_val}"
 
-        if targets is not None and operation != "S":
+        if targets is not None and operation != "S" and not is_logical_se:
             assert len(factories) == len(
                 targets
             ), f"Number of factories and targets must match for operation {operation} at time {start_time}"

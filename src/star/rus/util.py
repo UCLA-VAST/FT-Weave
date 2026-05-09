@@ -8,7 +8,7 @@ from src.star.config import (
 
 from ...ds import FactoryPool, QubitAngleTracker
 from src.ds import move_duration
-from src.execution_log import insert_s_gate
+from src.execution_log import insert_s_gate, LogicalSEScheduler
 
 
 def update_qubit_state_per_teleportation(
@@ -18,6 +18,7 @@ def update_qubit_state_per_teleportation(
     execution_log: list,
     start_time: float,
     aod_id: int,
+    logical_se_scheduler: LogicalSEScheduler | None = None,
 ):
     """
     Update qubit states
@@ -32,7 +33,13 @@ def update_qubit_state_per_teleportation(
         if s_gate_inserted:
             qubit_with_s_gate.append(qubit)
     if qubit_with_s_gate:
-        insert_s_gate(execution_log, start_time, qubit_with_s_gate, aod_id)
+        insert_s_gate(
+            execution_log,
+            start_time,
+            qubit_with_s_gate,
+            aod_id,
+            logical_se_scheduler=logical_se_scheduler,
+        )
         start_time += SE_TIME
 
     return start_time
