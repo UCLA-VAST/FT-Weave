@@ -8,13 +8,13 @@ Behavior:
     - A logical qubit is considered idle since its last "active" event (CNOT,
       S, H, Rz, T/Tdg). Each such event resets the qubit's idle timer because
       the logical gate already implies a syndrome extraction.
-    - At every factory SE moment (single SE in STAR, or per-cycle expansion
-      inside SE_stage_1 / SE_stage_2 in T-cultivation), ``piggyback`` is called.
-      Any qubit that has been idle for at least ``interval - 2`` cycles then
-      gets a logical SE event written sharing the factory's ``aod_id``.
-    - If a logical qubit's idle ever exceeds ``interval + 2`` without a
-      factory SE moment to piggy-back onto, ``force_due`` issues an SE at the
-      requested time on the supplied AOD to keep the maximum gap bounded.
+    - At every factory SE or CNOT moment, ``piggyback`` is called. Any qubit
+      that has been idle for at least ``interval - 2`` cycles then gets a
+      logical SE event written sharing the host operation's ``aod_id``.
+    - ``interval`` is a hard maximum idle gap. If no piggy-back opportunity
+      occurs by then, ``force_due`` writes all missing logical SE rounds at
+      their deadlines so every logical qubit receives SE at least once per
+      ``interval`` idle cycles.
 
 Logical SE events are emitted with ``operation="SE_q"`` (distinct from the
 factory ``"SE"`` operation) so downstream consumers (validators, fidelity
@@ -42,7 +42,7 @@ class LogicalSEScheduler:
         self.enabled = interval is not None and interval > 0
         self.interval = int(interval) if interval is not None else 0
         self.lower = max(0, self.interval - 2)
-        self.upper = self.interval + 2
+        self.upper = self.interval
         self.last_active: dict[int, float] = {
             int(q): float(start_time) for q in qubit_ids
         }
@@ -105,9 +105,15 @@ class LogicalSEScheduler:
         aod_id: int | None,
         execution_log: list,
     ) -> None:
-        """Emit one SE_q entry at ``t`` covering every qubit whose idle >= lower."""
+        """Emit one SE_q entry at ``t`` covering every qubit whose idle >= lower.
+
+        Before using the current piggy-back opportunity, catch up any hard
+        deadlines that have already passed. This prevents a late factory-SE or
+        CNOT opportunity from stretching a qubit's idle gap beyond ``interval``.
+        """
         if not self.enabled:
             return
+        self.force_due(t, aod_id, execution_log)
         due = [qid for qid, last in self.last_active.items() if t - last >= self.lower]
         self._emit_grouped(t, aod_id, execution_log, due)
 
@@ -116,13 +122,29 @@ class LogicalSEScheduler:
         t_now: float,
         aod_id: int | None,
         execution_log: list,
+        *,
+        include_current: bool = True,
     ) -> None:
-        """Emit one SE_q entry covering every qubit whose idle has exceeded ``upper``.
+        """Emit all SE_q entries needed to satisfy the hard interval bound.
 
-        This guards against a long stretch with no factory SE event; it keeps
-        the maximum gap between SE rounds at roughly ``interval + 2`` cycles.
+        This guards against a long stretch with no factory-SE/CNOT piggy-back
+        opportunity. If a qubit is overdue by multiple intervals, this emits
+        multiple rounds at successive deadlines rather than only one late round.
+        Set ``include_current=False`` before a CNOT target reset so a CNOT that
+        starts exactly at the hard deadline can count as the target qubit's SE
+        round without also emitting a same-qubit SE_q at that time.
         """
         if not self.enabled:
             return
-        due = [qid for qid, last in self.last_active.items() if t_now - last > self.upper]
-        self._emit_grouped(t_now, aod_id, execution_log, due)
+        t_limit = float(t_now)
+        while True:
+            due_by_time: dict[float, list[int]] = {}
+            for qid, last in self.last_active.items():
+                due_time = float(last) + self.upper
+                is_due = due_time <= t_limit if include_current else due_time < t_limit
+                if is_due:
+                    due_by_time.setdefault(due_time, []).append(qid)
+            if not due_by_time:
+                return
+            for due_time in sorted(due_by_time):
+                self._emit_grouped(due_time, aod_id, execution_log, due_by_time[due_time])

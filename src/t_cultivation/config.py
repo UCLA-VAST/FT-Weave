@@ -9,18 +9,22 @@ import numpy as np
 # ============================================================================
 # CONFIGURATION CONSTANTS
 # ============================================================================
-SE_STAGE_1 = 10
+SE_STAGE_1 = 12.5
 # SE_STAGE_1 = 8  # for MSC-3
-SE_STAGE_2 = 4
+SE_STAGE_2 = 0.5
+SE_STAGE_2_BY_CODE_DISTANCE = {
+    9: 0.5,
+    15: 6,
+}
 CNOT_TIME = 1
 SE_TIME = 1
 TELEPORTATION_SUCCESS_RATE = 0.5
-STAGE_1_SUCCESS_RATE = 0.25  # will be fixed
+STAGE_1_SUCCESS_RATE = 0.30  # will be fixed
 # Stage-2 post-selection model selected by target fidelity.
 # Keep the mapping explicit so evaluations can switch fidelity assumptions.
 STAGE_2_SUCCESS_RATE_BY_FIDELITY = {
-    1e-10: 0.40,
-    1e-8: 0.90,
+    1e-9: 0.4,
+    1e-8: 0.66,
 }
 DEFAULT_STAGE_2_FIDELITY_TARGET = 1e-8
 
@@ -38,6 +42,17 @@ def stage2_success_rate_from_fidelity(fidelity_target: float) -> float:
     )
 
 
+def stage2_duration_from_code_distance(code_distance: int | None) -> float:
+    """Return stage-2 SE duration for the selected code distance.
+
+    The configured ``SE_STAGE_2`` remains the fallback for distances that are
+    not listed explicitly.
+    """
+    if code_distance is None:
+        return float(SE_STAGE_2)
+    return float(SE_STAGE_2_BY_CODE_DISTANCE.get(int(code_distance), SE_STAGE_2))
+
+
 STAGE_2_FIDELITY_TARGET = DEFAULT_STAGE_2_FIDELITY_TARGET
 STAGE_2_SUCCESS_RATE = stage2_success_rate_from_fidelity(STAGE_2_FIDELITY_TARGET)
 ANGLE_S = np.pi / 2
@@ -52,8 +67,9 @@ STAGE_1_RESOURCE_UNITS = 1
 # cost = move_duration + weight * (batch_max_lp - lp[node]). Higher lp => lower extra cost.
 RUS_ASSIGNMENT_CRITICAL_PATH_WEIGHT = 1.0
 
-# Cadence (in cycles) for syndrome extraction on idle logical qubits, with a soft
-# x-2 .. x+2 window so we can piggy-back onto factory SE moments. None = disabled.
+# Cadence (in cycles) for syndrome extraction on idle logical qubits. Logical SE
+# can piggy-back slightly early (x-2) onto factory SE / CNOT moments, but x is a
+# hard maximum idle gap. None = disabled.
 LOGICAL_SE_INTERVAL: int | None = None
 
 

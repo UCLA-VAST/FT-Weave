@@ -2,7 +2,7 @@
 
 Covers three layers:
 1. Unit tests of :class:`src.execution_log.LogicalSEScheduler` (enable/disable,
-   piggy-back lower bound, reset, force_due upper bound).
+   piggy-back lower bound, reset, force_due hard interval bound).
 2. STAR integration (both sequential and parallel) — driving one TFIM Trotter
    layer with ``LOGICAL_SE_INTERVAL`` set and asserting that logical SE entries
    appear with the canonical schema and that ``validate_execution_log`` accepts
@@ -138,30 +138,40 @@ class TestLogicalSEScheduler:
         scheduler.reset([None, "garbage"], t=10.0)
         assert scheduler.last_active[0] == 2.5
 
-    def test_force_due_only_when_strictly_above_upper(self):
-        # interval = 6 => upper = 8
+    def test_force_due_emits_at_hard_interval(self):
+        # interval = 6 is a hard maximum idle gap.
         scheduler = LogicalSEScheduler([0], interval=6)
         log: list = []
-        # idle = 8 is not strictly greater than upper -> no force
-        scheduler.force_due(t_now=8.0, aod_id=1, execution_log=log)
+        # idle = 5 < interval -> no force
+        scheduler.force_due(t_now=5.0, aod_id=1, execution_log=log)
         assert log == []
-        # idle = 9 > 8 -> force-emit
-        scheduler.force_due(t_now=9.0, aod_id=1, execution_log=log)
+        # idle = 6 == interval -> force-emit exactly at the deadline
+        scheduler.force_due(t_now=6.0, aod_id=1, execution_log=log)
         assert len(log) == 1
         entry = log[0]
         assert entry["operation"] == "SE_q"
         assert entry["factories"] == []
         assert entry["targets"] == [0]
         assert entry["aod_assignment"] == 1
+        assert entry["start_time"] == 6.0
+
+    def test_force_due_catches_up_multiple_missed_rounds(self):
+        scheduler = LogicalSEScheduler([0], interval=6)
+        log: list = []
+        scheduler.force_due(t_now=20.0, aod_id=1, execution_log=log)
+        # SE_TIME = 1, so after starts at 6 and 13, the next hard deadline is 20.
+        assert [entry["start_time"] for entry in log] == [6.0, 13.0, 20.0]
+        assert all(entry["targets"] == [0] for entry in log)
 
     def test_register_new_qubits_midrun(self):
         scheduler = LogicalSEScheduler([0], interval=6)
         scheduler.register_qubits([1, 2], t=10.0)
         log: list = []
         scheduler.piggyback(t=14.0, aod_id=0, execution_log=log)
-        # All three qubits are due at t=14, coalesced into one grouped entry.
-        assert len(log) == 1
-        assert log[0]["targets"] == [0, 1, 2]
+        # Existing qubit 0 is caught up at hard deadlines. Newly registered
+        # qubits 1 and 2 piggy-back together once they reach the lower bound.
+        assert [entry["start_time"] for entry in log] == [6.0, 13.0, 14.0]
+        assert log[-1]["targets"] == [1, 2]
 
     def test_register_qubits_does_not_overwrite_existing(self):
         scheduler = LogicalSEScheduler([0], interval=6)
@@ -376,12 +386,12 @@ class TestLogicalSECadence:
     """Statistical sanity check: most consecutive activity events for a qubit
     should be separated by approximately the configured interval ``x``.
 
-    We don't assert strict bounds (RUS / movement gaps can stretch beyond
-    ``x+2``), but we do require the median gap to fall in the [x-2, x+2]
-    window, ensuring the scheduler is doing its job.
+    Piggy-back opportunities may schedule logical SE slightly before ``x``,
+    but the scheduler's hard-deadline path prevents idle gaps from exceeding
+    the configured interval.
     """
 
-    def test_star_sequential_median_gap(self):
+    def test_star_sequential_idle_gap_never_exceeds_interval(self):
         try:
             _, layer_logs, _ = _run_star(parallel=False, interval=6)
         finally:
@@ -389,37 +399,38 @@ class TestLogicalSECadence:
 
         from collections import defaultdict
 
-        gaps: list[float] = []
+        idle_gaps: list[float] = []
         for layer in layer_logs:
             if not isinstance(layer, list):
                 continue
-            events_per_q: dict[int, list[float]] = defaultdict(list)
+            events_per_q: dict[int, list[tuple[float, float]]] = defaultdict(list)
             for entry in layer:
                 op = entry.get("operation")
                 targets = entry.get("targets")
                 factories = entry.get("factories")
+                start = entry.get("start_time")
                 end = entry.get("end_time")
                 if op == "SE_q":
                     for q in targets or []:
-                        events_per_q[q].append(end)
+                        events_per_q[q].append((start, end))
                 elif op == "CNOT" and factories:
                     for q in targets or []:
                         if isinstance(q, int):
-                            events_per_q[q].append(end)
+                            events_per_q[q].append((start, end))
                 elif op == "S":
                     for q in targets or []:
                         if isinstance(q, int):
-                            events_per_q[q].append(end)
+                            events_per_q[q].append((start, end))
             for times in events_per_q.values():
                 times.sort()
-                for prev, nxt in zip(times, times[1:]):
-                    gaps.append(nxt - prev)
+                for (_prev_start, prev_end), (next_start, _next_end) in zip(
+                    times, times[1:]
+                ):
+                    idle_gaps.append(next_start - prev_end)
 
-        assert gaps, "expected to gather some inter-event gaps"
-        gaps.sort()
-        median = gaps[len(gaps) // 2]
-        # interval = 6, window [4, 8].
-        assert 4 <= median <= 8, f"median gap {median} is outside [4, 8]"
+        assert idle_gaps, "expected to gather some inter-event gaps"
+        max_gap = max(idle_gaps)
+        assert max_gap <= 6, f"max idle gap {max_gap} exceeds interval 6"
 
 
 if __name__ == "__main__":

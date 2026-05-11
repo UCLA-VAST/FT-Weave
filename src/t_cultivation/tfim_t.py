@@ -25,6 +25,7 @@ def _build_t_exec_kwargs(
     n_qubits: int,
     logic_qubit_locations: list[tuple[int, int]],
     magic_state_locations: list[tuple[int, int]],
+    code_distance: int,
     config: dict,
 ) -> dict[str, Any]:
     rng = config["rng"]
@@ -40,6 +41,7 @@ def _build_t_exec_kwargs(
         "to_decompose": config.get("to_decompose", False),
         "print_profile": config.get("print_profile", False),
         "epsilon": config.get("epsilon", 1e-4),
+        "code_distance": code_distance,
     }
     if "num_subfactories" in config:
         exec_kwargs["num_subfactories"] = config["num_subfactories"]
@@ -148,6 +150,7 @@ def generate_one_layer_2d_tfim_circuit_t_cultivation(
         n_qubits=n_qubits,
         logic_qubit_locations=logic_qubit_locations,
         magic_state_locations=magic_state_locations,
+        code_distance=code_distance,
         config=config,
     )
 

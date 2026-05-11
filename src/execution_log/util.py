@@ -87,6 +87,17 @@ def execute_rus_teleportation(
 ):
     factories = [factory_id for _, factory_id in qubit_factory_pairs]
     qubits = [qubit for qubit, _ in qubit_factory_pairs]
+    if logical_se_scheduler is not None:
+        # If any qubit missed the hard SE deadline before this CNOT starts,
+        # emit those SE_q rounds first. A target whose deadline is exactly the
+        # CNOT start is handled by the CNOT itself (below), not by a separate
+        # overlapping SE_q on the same qubit.
+        logical_se_scheduler.force_due(
+            circuit_moment,
+            aod_id,
+            execution_log,
+            include_current=False,
+        )
     write_execution_log(
         execution_log,
         circuit_moment,

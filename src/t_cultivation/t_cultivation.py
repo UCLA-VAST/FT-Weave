@@ -53,7 +53,8 @@ def t_cultivation_execution(
     synchronize_factory_execution: Optional[bool] = None,
     print_profile: bool = False,
     logical_se_interval: Optional[int] = None,
-) -> list[tuple]:
+    code_distance: Optional[int] = None,
+) -> list[dict[str, Any]]:
     """
     Execute a quantum circuit using T cultivation.
 
@@ -66,9 +67,10 @@ def t_cultivation_execution(
             use AODs ``1 .. n_aods-1``; movement and RUS use ``pick_any_aod`` / ``execute_movement``.
         synchronize_factory_execution: If True, stage-1 restarts are delayed until all
             currently running stage-2 factories complete.
+        code_distance: Surface-code distance used to choose the stage-2 SE duration.
 
     Returns:
-        execution_log: List of execution tuples with timestamps and details.
+        execution_log: List of execution event dictionaries with timestamps and details.
     """
     _cfg = tcfg.get_config()
     logger.info("t_cultivation config (current global):")
@@ -83,6 +85,7 @@ def t_cultivation_execution(
         to_decompose,
         epsilon,
     )
+    se_stage_2_duration = tcfg.stage2_duration_from_code_distance(code_distance)
 
     if n_factories < 0:
         raise ValueError("n_factories must be non-negative")
@@ -163,7 +166,8 @@ def t_cultivation_execution(
     t_tdg_implemented_count = 0
     aod_earliest_available_time = [0.0] * n_aods
 
-    # Logical-qubit SE scheduler (cadence x with [x-2, x+2] piggy-back window).
+    # Logical-qubit SE scheduler: piggy-back slightly early when possible, but
+    # keep x as a hard maximum idle gap.
     se_interval = (
         logical_se_interval
         if logical_se_interval is not None
@@ -399,9 +403,21 @@ def t_cultivation_execution(
                     move_vecs=move_vecs,
                     movement_time=move_dur,
                 )
+                cnot_start_time = gate_start_time + move_dur
+                if logical_se_scheduler is not None:
+                    # Catch up any missed hard SE deadlines before the CNOT
+                    # starts. Qubits whose deadline is exactly the CNOT start
+                    # are covered by the CNOT itself, so they are reset below
+                    # rather than duplicated in an overlapping SE_q entry.
+                    logical_se_scheduler.force_due(
+                        cnot_start_time,
+                        aod_id,
+                        execution_log,
+                        include_current=False,
+                    )
                 write_execution_log(
                     execution_log,
-                    start_time=gate_start_time + move_dur,
+                    start_time=cnot_start_time,
                     factories=[],
                     operation=gate,
                     aod_assignment=aod_id,
@@ -527,7 +543,7 @@ def t_cultivation_execution(
             if success_factory_ids:
                 stage_2_start_time = local_time + redistribution_delay
                 aod_s2 = same_time_events["stage_1_completion"][0]["aod_id"]
-                stage_2_end = stage_2_start_time + tcfg.SE_STAGE_2
+                stage_2_end = stage_2_start_time + se_stage_2_duration
                 aod_earliest_available_time[aod_s2] = max(
                     aod_earliest_available_time[aod_s2], stage_2_end
                 )
@@ -538,9 +554,10 @@ def t_cultivation_execution(
                     operation="SE_stage_2",
                     aod_assignment=aod_s2,
                     targets=None,
+                    movement_time=se_stage_2_duration,
                 )
                 if logical_se_scheduler is not None:
-                    for k in range(int(tcfg.SE_STAGE_2)):
+                    for k in range(int(se_stage_2_duration)):
                         logical_se_scheduler.piggyback(
                             stage_2_start_time + k, aod_s2, execution_log
                         )
