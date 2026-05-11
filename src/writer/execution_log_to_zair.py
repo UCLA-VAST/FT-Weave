@@ -795,6 +795,7 @@ def execution_log_to_ft_zair_instructions(
                         "type": op,
                         "id": next_id,
                         "targets": entry.get("targets"),
+                        "factories": normalize_factories(entry.get("factories")),
                         "dependency": {"qubit": [next_id - 1]},
                         "begin_time": t0,
                         "end_time": t1,

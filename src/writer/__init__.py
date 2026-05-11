@@ -3,9 +3,13 @@ from .execution_log_to_zair import (
     default_init_locs_for_logic_grid,
     default_init_locs_with_factories,
     execution_log_to_animator_code,
+    execution_log_to_ft_animator_code,
+    execution_log_to_ft_zair_instructions,
     execution_log_to_zair_instructions,
     pack_timeline_for_matplotlib_animator,
 )
+from .ft_to_zair import build_rotated_surface_code_layout, ft_zair_to_zair_instructions
+from .ft_zair_writer import FTZAIRWriter
 
 class Writer:
     """Backward-compatible wrapper around `ZAIRWriter`.
