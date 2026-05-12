@@ -2054,10 +2054,7 @@ def _format_t_cultivation_setting_inline(
     factory_physical_size: float | int,
 ) -> str:
     """Single-line setting for subplot titles (below layer name)."""
-    return (
-        f"d={int(code_distance)}, size={int(factory_physical_size)}, "
-        f"LER={fidelity_target:g}"
-    )
+    return f"d={int(code_distance)}"
 
 
 def _format_t_cultivation_setting_label(
@@ -2066,11 +2063,7 @@ def _format_t_cultivation_setting_label(
     factory_physical_size: float | int,
 ) -> str:
     """Multi-line setting label for row titles in the T-cultivation AOD plot."""
-    return (
-        f"d={int(code_distance)}\n"
-        f"size={int(factory_physical_size)}\n"
-        f"LER={fidelity_target:g}"
-    )
+    return f"d={int(code_distance)}"
 
 
 def _dedupe_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -2082,11 +2075,30 @@ def _dedupe_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 # T-cultivation runtime lines vs STAR (matches fidelity evaluation triples).
 # Each tuple is (code_distance, fidelity_target, factory_physical_size).
+SHOW_T_CULTIVATION_D13 = False
 T_CULTIVATION_RUNTIME_LINE_SETTINGS: list[tuple[int, float, int]] = [
     (7, 1e-8, 2),
     (13, 1e-8, 4),
     (13, 1e-10, 4),
 ]
+
+
+def _t_cultivation_runtime_line_settings() -> list[tuple[int, float, int]]:
+    if SHOW_T_CULTIVATION_D13:
+        return T_CULTIVATION_RUNTIME_LINE_SETTINGS
+    return [
+        setting
+        for setting in T_CULTIVATION_RUNTIME_LINE_SETTINGS
+        if int(setting[0]) != 13
+    ]
+
+
+def _filter_t_cultivation_d13_for_plots(df: pd.DataFrame) -> pd.DataFrame:
+    if SHOW_T_CULTIVATION_D13 or "code_distance" not in df.columns:
+        return df
+    out = df.copy()
+    cd = pd.to_numeric(out["code_distance"], errors="coerce")
+    return out[cd != 13].copy()
 
 
 def _plot_star_vs_t_cultivation_best(
@@ -2144,6 +2156,7 @@ def _plot_star_vs_t_cultivation_best(
         9: {"color": "tab:red", "marker": "D"},
     }
     t_style_colors = ["tab:orange", "tab:green", "tab:purple"]
+    t_line_settings = _t_cultivation_runtime_line_settings()
 
     for row_idx, aod in enumerate(target_aods):
         for col_idx, layer_name in enumerate(layer_order):
@@ -2220,7 +2233,7 @@ def _plot_star_vs_t_cultivation_best(
                 )
             ):
                 t_candidates = t_work[t_work["n_aods"] == aod].copy()
-                for cd, ft, fps in T_CULTIVATION_RUNTIME_LINE_SETTINGS:
+                for cd, ft, fps in t_line_settings:
                     cd_match = pd.to_numeric(
                         t_candidates["code_distance"], errors="coerce"
                     ).astype(int) == int(cd)
@@ -2243,7 +2256,7 @@ def _plot_star_vs_t_cultivation_best(
                         continue
                     plotted_t += 1
                     t_color = t_style_colors[
-                        T_CULTIVATION_RUNTIME_LINE_SETTINGS.index((cd, ft, fps))
+                        t_line_settings.index((cd, ft, fps))
                         % len(t_style_colors)
                     ]
                     mean_vals = t_summary["execution_time_mean"]
@@ -2259,7 +2272,7 @@ def _plot_star_vs_t_cultivation_best(
                         capsize=3,
                         linewidth=1.8,
                         color=t_color,
-                        label=f"T Cultivation, d={int(cd)}, LER={float(ft):g}",
+                        label=f"T cultivation, d={int(cd)}",
                     )
                     x_t = sorted(
                         set(t_summary["n_qubits"].dropna().astype(int).tolist())
@@ -2283,9 +2296,7 @@ def _plot_star_vs_t_cultivation_best(
                             linestyle="-.",
                             linewidth=1.4,
                             alpha=0.9,
-                            label=(
-                                "Expected time (T), " f"d={int(cd)}, LER={float(ft):g}"
-                            ),
+                            label=f"Expected time (T), d={int(cd)}",
                         )
 
             if row_idx == 0:
@@ -2386,7 +2397,11 @@ def _plot_t_cultivation_multi_aod(
     )
     aod_color_map = _build_aod_color_map(all_t_aods)
 
-    n_settings = len(T_CULTIVATION_RUNTIME_LINE_SETTINGS)
+    t_line_settings = _t_cultivation_runtime_line_settings()
+    n_settings = len(t_line_settings)
+    if n_settings == 0:
+        print("Skipping T-cultivation multi-AOD plot: no selected settings.")
+        return
     fig, axes = plt.subplots(
         n_settings,
         len(layer_order),
@@ -2395,7 +2410,7 @@ def _plot_t_cultivation_multi_aod(
     )
 
     plotted_any = False
-    for row_idx, (cd, ft, fps) in enumerate(T_CULTIVATION_RUNTIME_LINE_SETTINGS):
+    for row_idx, (cd, ft, fps) in enumerate(t_line_settings):
         row_label = _format_t_cultivation_setting_label(cd, ft, fps)
         for col_idx, layer_name in enumerate(layer_order):
             ax = axes[row_idx][col_idx]
@@ -2588,7 +2603,7 @@ def _print_runtime_speedup_by_setting(
                     columns={"execution_time_mean": "star_runtime"}
                 )
 
-                for cd, ft, fps in T_CULTIVATION_RUNTIME_LINE_SETTINGS:
+                for cd, ft, fps in _t_cultivation_runtime_line_settings():
                     mask = _mask_t_cultivation_triple(t_aod, cd, ft, fps)
                     t_setting = t_aod.loc[mask].copy()
                     t_summary = _summarize_execution_by_qubits(
@@ -2621,7 +2636,7 @@ def _print_runtime_speedup_by_setting(
                     print(
                         "  "
                         f"layer={layer_name}, AOD={int(aod)}, STAR_d={int(sd)} vs "
-                        f"T(d={int(cd)}, size={int(fps)}, LER={float(ft):g}): "
+                        f"T(d={int(cd)}): "
                         f"n_points={len(merged)}, "
                         f"geomean_ratio_t_over_star={geomean_ratio:.4f}x, "
                         f"mean_ratio_t_over_star={mean_ratio:.4f}x"
@@ -2661,8 +2676,7 @@ def _print_requested_runtime_improvements(
     distance_placement = "col_based"
     star_setting_desc = "setting_4 (Sync. Execution)"
     t_setting_desc = ", ".join(
-        f"(d={cd}, LER={ft:g}, size={fps})"
-        for cd, ft, fps in T_CULTIVATION_RUNTIME_LINE_SETTINGS
+        f"(d={cd})" for cd, _ft, _fps in _t_cultivation_runtime_line_settings()
     )
     print(
         f"    context: placement={distance_placement}, STAR setting={star_setting_desc}"
@@ -2707,7 +2721,7 @@ def _print_requested_runtime_improvements(
     else:
         print("    STAR d9/d7: unavailable")
 
-    t_full_col = _filter_col_based(t_full)
+    t_full_col = _filter_t_cultivation_d13_for_plots(_filter_col_based(t_full))
     if not t_full_col.empty and "code_distance" in t_full_col.columns:
         tg = t_full_col.groupby(
             [
@@ -2771,38 +2785,40 @@ def _print_requested_runtime_improvements(
         t_d13_ler_1e8 = _select_t_runtime(13, 1e-8)
         t_d7_ler_1e8 = _select_t_runtime(7, 1e-8)
 
-        # Requested T-only distance comparison under different LER.
-        _print_pair_by_aod(
-            t_d13_ler_1e10,
-            t_d7_ler_1e8,
-            "T d13 (LER=1e-10) / d7 (LER=1e-8)",
-        )
-        _print_pair_by_aod(
-            t_d13_ler_1e10,
-            t_d13_ler_1e8,
-            "T d13 (LER=1e-10) / d13 (LER=1e-8)",
-        )
-        _print_pair_by_aod(
-            t_d7_ler_1e8,
-            t_d13_ler_1e8,
-            "T d7 (LER=1e-8) / d13 (LER=1e-8)",
-        )
+        if SHOW_T_CULTIVATION_D13:
+            # Requested T-only distance comparison under different LER.
+            _print_pair_by_aod(
+                t_d13_ler_1e10,
+                t_d7_ler_1e8,
+                "T d13 / d7",
+            )
+            _print_pair_by_aod(
+                t_d13_ler_1e10,
+                t_d13_ler_1e8,
+                "T d13 (LER=1e-10) / d13 (LER=1e-8)",
+            )
+            _print_pair_by_aod(
+                t_d7_ler_1e8,
+                t_d13_ler_1e8,
+                "T d7 / d13",
+            )
 
         # Requested cross-method comparison: T d13 (1e-8) / STAR d9.
         if not star_ref.empty and "code_distance" in star_ref.columns:
             s9 = sg[sg["code_distance"] == 9][["n_qubits", "n_aods", "runtime"]].copy()
-            _print_pair_by_aod(
-                t_d13_ler_1e8,
-                s9,
-                "T d13 (LER=1e-8) / STAR d9",
-            )
+            if SHOW_T_CULTIVATION_D13:
+                _print_pair_by_aod(
+                    t_d13_ler_1e8,
+                    s9,
+                    "T d13 / STAR d9",
+                )
             _print_pair_by_aod(
                 t_d7_ler_1e8,
                 s9,
-                "T d7 (LER=1e-8) / STAR d9",
+                "T d7 / STAR d9",
             )
         else:
-            print("    T d13 (LER=1e-8) / STAR d9: unavailable")
+            print("    T / STAR d9: unavailable")
     else:
         print("    T distance ratios: unavailable")
 
@@ -2874,7 +2890,7 @@ def _print_requested_runtime_improvements(
                     continue
                 g = _geomean_ratio(m["r1"].to_numpy(), m["r2"].to_numpy())
                 print(
-                    f"    T d={int(d)}, LER={float(ler):g}, size={int(fps)} AOD {a1}/{a2}: "
+                    f"    T d={int(d)} AOD {a1}/{a2}: "
                     f"avg_ratio={g:.4f}x"
                 )
 
@@ -3097,13 +3113,17 @@ def process_t_cultivation_runtime_comparison(
     t_df = _normalize_config_types(t_df)
 
     star_layers = _build_layer_frames(star_df)
-    t_layers = _build_layer_frames(t_df)
+    t_df_for_plots = _filter_t_cultivation_d13_for_plots(t_df)
+    t_layers = {
+        name: _filter_t_cultivation_d13_for_plots(layer_df)
+        for name, layer_df in _build_layer_frames(t_df_for_plots).items()
+    }
 
     _plot_star_vs_t_cultivation_best(
         star_layers, t_layers, output_dir, target_aods=[2, 5]
     )
     _plot_t_cultivation_multi_aod(t_layers, output_dir)
-    _print_requested_runtime_improvements(star_df, t_df)
+    _print_requested_runtime_improvements(star_df, t_df_for_plots)
     _print_t_cultivation_aod_vs_theoretical_improvement(t_layers)
     print("Saved T-cultivation runtime comparison plots to", output_dir)
 

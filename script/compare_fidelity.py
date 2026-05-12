@@ -1,6 +1,8 @@
 import os
 
 import matplotlib.pyplot as plt
+from matplotlib.legend_handler import HandlerTuple
+from matplotlib.lines import Line2D
 import pandas as pd
 import numpy as np
 
@@ -19,9 +21,37 @@ plt.rcParams.update(
     }
 )
 
-# process_csv.py SETTINGS[5]
+# Fidelity comparisons should compare runs under the same runtime architecture.
+# STAR setting 4 matches evaluation_fidelity_star.py / process_csv.py SETTINGS[4].
 # (trivial_return, tmr_assignment_method, consider_skip_rus, decompose_move, parallel_execution)
-_STAR_BEST_SETTING = (False, "matching", 0, False, True)
+_COMPARISON_N_AODS = 1
+_COMPARISON_PLACEMENT = "col_based"
+_STAR_COMPARISON_SETTING_INDEX = 4
+_STAR_COMPARISON_SETTING = (False, "matching", 2, True, False)
+_EXCLUDED_STAR_DISTANCES = {13}
+_EXCLUDE_T_CULTIVATION_D13 = True
+_EXCLUDED_T_CULTIVATION_TARGETS = {1e-9}
+_STAR_DISTANCE_COLORS = [
+    "#F1CE63",
+    "#F28E2B",
+    "#D55E00",
+    "#A63603",
+]
+_T_DISTANCE_COLORS = [
+    "#B2DF8A",
+    "#59A14F",
+    "#1B7837",
+    "#00441B",
+]
+_METHOD_STYLES = {
+    "Physical": {"marker": "s", "linestyle": "-", "color": "black"},
+    "STAR": {"marker": "o", "linestyle": "-"},
+    "T-cultivation": {"marker": "^", "linestyle": "--"},
+}
+_METHOD_LEGEND_COLORS = {
+    "STAR": "#F28E2B",
+    "T-cultivation": "#59A14F",
+}
 
 
 def get_n_qubit(layout_str):
@@ -36,7 +66,6 @@ def _resolve_t_cultivation_fidelity_csv_path() -> str | None:
         "fidelity_total",
         "code_distance",
         "fidelity_target",
-        "factory_physical_size",
     }
     candidates = [
         os.path.join("output", "evaluation", "evaluation_results.csv"),
@@ -63,13 +92,23 @@ def _normalize_star_df(star_df):
     return out
 
 
-def _select_star_best_setting_col_based(star_df):
+def _filter_comparison_architecture(df):
+    out = df.copy()
+    if "placement" in out.columns:
+        out = out[out["placement"] == _COMPARISON_PLACEMENT].copy()
+    if "n_aods" in out.columns:
+        n_aods = pd.to_numeric(out["n_aods"], errors="coerce")
+        out = out[n_aods == _COMPARISON_N_AODS].copy()
+    return out
+
+
+def _select_star_comparison_setting(star_df):
     out = _normalize_star_df(star_df)
-    out = out[out["placement"] == "col_based"].copy()
+    out = _filter_comparison_architecture(out)
     if out.empty:
         return out
     trivial_return, tmr_method, skip_rus, decompose_move, parallel_execution = (
-        _STAR_BEST_SETTING
+        _STAR_COMPARISON_SETTING
     )
     mask = (
         (out["trivial_return"] == trivial_return)
@@ -81,20 +120,236 @@ def _select_star_best_setting_col_based(star_df):
     return out[mask].copy()
 
 
-def _exclude_star_distances(df, excluded_distances):
-    if not excluded_distances or "code_distance" not in df.columns:
+def _select_t_cultivation_comparison_data(t_df):
+    if t_df is None:
+        return None
+    return _filter_comparison_architecture(t_df)
+
+
+def _exclude_star_d13(df):
+    if "code_distance" not in df.columns:
         return df
     out = df.copy()
     cd = pd.to_numeric(out["code_distance"], errors="coerce")
-    return out[~cd.isin([int(d) for d in excluded_distances])].copy()
+    return out[~cd.isin(_EXCLUDED_STAR_DISTANCES)].copy()
+
+
+def _exclude_t_cultivation_targets(df):
+    if df is None or "fidelity_target" not in df.columns:
+        return df
+    out = df.copy()
+    target = pd.to_numeric(out["fidelity_target"], errors="coerce")
+    return out[~target.isin(_EXCLUDED_T_CULTIVATION_TARGETS)].copy()
+
+
+def _exclude_t_cultivation_d13(df):
+    if not _EXCLUDE_T_CULTIVATION_D13 or df is None or "code_distance" not in df.columns:
+        return df
+    out = df.copy()
+    cd = pd.to_numeric(out["code_distance"], errors="coerce")
+    return out[cd != 13].copy()
+
+
+def _build_architecture_distance_colors(star_df, t_df):
+    distances: set[int] = set()
+    if "code_distance" in star_df.columns:
+        distances.update(
+            pd.to_numeric(star_df["code_distance"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .tolist()
+        )
+    if t_df is not None and "code_distance" in t_df.columns:
+        distances.update(
+            pd.to_numeric(t_df["code_distance"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .tolist()
+        )
+    ordered_distances = sorted(distances)
+    return {
+        "STAR": {
+            d: _STAR_DISTANCE_COLORS[i % len(_STAR_DISTANCE_COLORS)]
+            for i, d in enumerate(ordered_distances)
+        },
+        "T-cultivation": {
+            d: _T_DISTANCE_COLORS[i % len(_T_DISTANCE_COLORS)]
+            for i, d in enumerate(ordered_distances)
+        },
+    }
+
+
+def _add_overall_legends(
+    ax,
+    *,
+    include_raw: bool,
+    architecture_distance_colors: dict[str, dict[int, str]],
+):
+    method_handles = []
+    if include_raw:
+        method_handles.append(
+            Line2D(
+                [0],
+                [0],
+                label="Physical",
+                linewidth=3,
+                markersize=9,
+                **_METHOD_STYLES["Physical"],
+            )
+        )
+    method_handles.extend(
+        [
+            Line2D(
+                [0],
+                [0],
+                label="STAR",
+                color=_METHOD_LEGEND_COLORS["STAR"],
+                linewidth=2.5,
+                markersize=9,
+                **_METHOD_STYLES["STAR"],
+            ),
+            Line2D(
+                [0],
+                [0],
+                label="T-cultivation",
+                color=_METHOD_LEGEND_COLORS["T-cultivation"],
+                linewidth=2.5,
+                markersize=9,
+                **_METHOD_STYLES["T-cultivation"],
+            ),
+        ]
+    )
+    method_legend = ax.legend(
+        handles=method_handles,
+        loc="upper left",
+        frameon=True,
+        fontsize=_FIG_FONT_SIZE,
+    )
+    ax.add_artist(method_legend)
+
+    star_colors = architecture_distance_colors.get("STAR", {})
+    t_colors = architecture_distance_colors.get("T-cultivation", {})
+    distances = sorted(set(star_colors))
+    if distances:
+        distance_handles = [
+            (
+                Line2D(
+                    [0],
+                    [0],
+                    color=star_colors[d],
+                    linewidth=2.5,
+                    markersize=9,
+                    **_METHOD_STYLES["STAR"],
+                ),
+                Line2D(
+                    [0],
+                    [0],
+                    color=t_colors[d],
+                    linewidth=2.5,
+                    markersize=9,
+                    **_METHOD_STYLES["T-cultivation"],
+                ),
+            )
+            for d in distances
+        ]
+        ax.legend(
+            handles=distance_handles,
+            labels=[str(d) for d in distances],
+            title="d",
+            loc="lower right",
+            frameon=True,
+            fontsize=_FIG_FONT_SIZE,
+            title_fontsize=_FIG_FONT_SIZE,
+            handler_map={tuple: HandlerTuple(ndivide=None)},
+        )
 
 
 def load_data():
     raw_df = pd.read_csv("output/evaluation/fidelity/raw_fidelity_results.csv")
     star_df = pd.read_csv("output/evaluation/fidelity/star_fidelity_results.csv")
+    star_df = _exclude_star_d13(star_df)
+    star_df = _select_star_comparison_setting(star_df)
     t_path = _resolve_t_cultivation_fidelity_csv_path()
     t_df = pd.read_csv(t_path) if t_path else None
+    t_df = _exclude_t_cultivation_targets(t_df)
+    t_df = _exclude_t_cultivation_d13(t_df)
+    t_df = _select_t_cultivation_comparison_data(t_df)
     return raw_df, star_df, t_df
+
+
+def _collect_overall_infidelity_series(raw_df, star_df, t_cultivation_df):
+    """Return plotted overall curves as infidelity series indexed by n_qubit."""
+    series: dict[str, pd.Series] = {}
+
+    raw_mean = (
+        raw_df.groupby("n_qubit", as_index=False)["fidelity"]
+        .mean()
+        .sort_values("n_qubit")
+    )
+    if not raw_mean.empty:
+        values = pd.to_numeric(raw_mean["fidelity"], errors="coerce")
+        series["Physical"] = pd.Series(
+            1.0 - values.to_numpy(dtype=float),
+            index=raw_mean["n_qubit"].astype(int),
+        ).dropna()
+
+    star_data = _select_star_comparison_setting(star_df)
+    if not star_data.empty and "code_distance" in star_data.columns:
+        star_data = star_data.copy()
+        star_data["n_qubit"] = star_data["qubit_layout"].apply(get_n_qubit)
+        star_data["fidelity"] = pd.to_numeric(star_data["fidelity"], errors="coerce")
+        star_data = star_data.dropna(subset=["n_qubit", "fidelity"])
+        for d in sorted(star_data["code_distance"].dropna().astype(int).unique()):
+            sd = star_data[star_data["code_distance"] == d]
+            means = sd.groupby("n_qubit")["fidelity"].mean().sort_index()
+            series[f"STAR d={d}"] = (1.0 - means).dropna()
+
+    if t_cultivation_df is not None and not t_cultivation_df.empty:
+        t_df = _select_t_cultivation_comparison_data(t_cultivation_df)
+        if t_df is None:
+            return series
+        t_df["n_qubit"] = t_df["qubit_layout"].apply(get_n_qubit)
+        t_df["fidelity_total"] = pd.to_numeric(t_df["fidelity_total"], errors="coerce")
+        t_df = t_df.dropna(subset=["n_qubit", "fidelity_total"])
+        for d in sorted(t_df["code_distance"].dropna().astype(int).unique()):
+            sd = t_df[t_df["code_distance"] == d]
+            means = sd.groupby("n_qubit")["fidelity_total"].mean().sort_index()
+            series[f"T-cultivation d={d}"] = (1.0 - means).dropna()
+
+    return series
+
+
+def _print_pairwise_infidelity_improvements(raw_df, star_df, t_cultivation_df):
+    """Print pairwise lower-infidelity factors between every overall curve."""
+    series = _collect_overall_infidelity_series(raw_df, star_df, t_cultivation_df)
+    labels = sorted(series)
+    if len(labels) < 2:
+        return
+
+    print("\nPairwise infidelity improvement between overall curves:")
+    for i, left in enumerate(labels):
+        for right in labels[i + 1 :]:
+            joined = pd.concat([series[left], series[right]], axis=1, join="inner")
+            joined.columns = [left, right]
+            joined = joined.dropna()
+            joined = joined[(joined[left] > 0) & (joined[right] > 0)]
+            if joined.empty:
+                continue
+            # Geometric mean is less dominated by the largest system size on a
+            # log-scale infidelity plot.
+            left_mean = float(np.exp(np.log(joined[left]).mean()))
+            right_mean = float(np.exp(np.log(joined[right]).mean()))
+            if left_mean <= right_mean:
+                better, worse = left, right
+                factor = right_mean / left_mean
+            else:
+                better, worse = right, left
+                factor = left_mean / right_mean
+            qubits = ", ".join(str(int(q)) for q in joined.index)
+            print(
+                f"  {better} is {factor:.2f}x lower infidelity than {worse} "
+                f"(common n={qubits})"
+            )
 
 
 def _plot_stacked_bars_infidelity(ax, df, x_col, components, title):
@@ -220,7 +475,6 @@ def _plot_grouped_stacked_infidelity(
         ha="center",
         fontsize=max(10, _FIG_FONT_SIZE - 3),
     )
-    ax.set_xlabel("Setting", fontsize=_FIG_FONT_SIZE, labelpad=2)
     ax.set_ylabel("Total Infidelity", fontsize=_FIG_FONT_SIZE)
     ax.set_title(title, fontsize=_FIG_FONT_SIZE)
     ax.grid(True, axis="y", alpha=0.25)
@@ -240,7 +494,7 @@ def _plot_grouped_stacked_infidelity(
 
 
 def _plot_raw_fidelity_breakdown(raw_df, output_dir, *, filename=None):
-    fig, ax = plt.subplots(figsize=(10, 5.2))
+    fig, ax = plt.subplots(figsize=(10, 6.2))
     components = [
         ("fidelity_cz", "CZ", "#4C78A8"),
         ("fidelity_1q", "1Q", "#F58518"),
@@ -256,8 +510,8 @@ def _plot_raw_fidelity_breakdown(raw_df, output_dir, *, filename=None):
         components,
         "Raw Infidelity Breakdown",
     )
-    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
-    fig.subplots_adjust(right=0.75)
+    ax.legend(loc="upper left", frameon=True, fontsize=_FIG_FONT_SIZE - 2)
+    fig.subplots_adjust(right=0.96)
     if filename is None:
         filename = "raw_fidelity_breakdown_stacked.pdf"
     output_path = os.path.join(output_dir, filename)
@@ -270,25 +524,21 @@ def _plot_star_fidelity_breakdown(
     star_df,
     output_dir,
     *,
-    excluded_star_distances=None,
     filename=None,
 ):
-    data = _select_star_best_setting_col_based(star_df)
-    if data.empty:
-        data = _normalize_star_df(star_df)
+    data = _select_star_comparison_setting(star_df)
     data = data.copy()
     data["n_qubit"] = data["qubit_layout"].apply(get_n_qubit)
 
-    data = _exclude_star_distances(data, excluded_star_distances)
     if data.empty or "code_distance" not in data.columns:
         return
-    fig, ax = plt.subplots(figsize=(11.8, 5.4))
+    fig, ax = plt.subplots(figsize=(11.8, 6.6))
     components = [
         ("fidelity_cnot", "CNOT", "#4C78A8"),
         ("fidelity_1q", "H", "#8C564B"),
-        ("fidelity_of_rz_injection", "RZ Injection", "#C44E52"),
+        ("fidelity_of_rz_injection", "Rz(theta)", "#C44E52"),
         ("fidelity_of_rz_teleportaion", "Teleportation-CNOT", "#F28E2B"),
-        ("fidelity_of_rz_s", "Rz Correction", "#59A14F"),
+        ("fidelity_of_rz_s", "Rz-S", "#59A14F"),
         # Simulator-native idle: ``fidelity_idle`` = (1 - p_I) ** n_se_q,
         # produced by the SE_q-based logical-SE scheduler.
         ("fidelity_idle", "Idle", "#4DBBD5"),
@@ -303,14 +553,15 @@ def _plot_star_fidelity_breakdown(
         setting_label_fn=lambda s: f"d={int(s[0])}",
     )
     if handles:
-        fig.legend(
+        ax.legend(
             handles,
             labels,
-            loc="center left",
-            bbox_to_anchor=(0.84, 0.5),
+            loc="upper left",
             frameon=True,
+            fontsize=_FIG_FONT_SIZE - 2,
+            ncol=2,
         )
-    fig.subplots_adjust(bottom=0.34, right=0.83)
+    fig.subplots_adjust(bottom=0.34, right=0.96)
     if filename is None:
         filename = "star_fidelity_breakdown_stacked.pdf"
     output_path = os.path.join(output_dir, filename)
@@ -326,18 +577,18 @@ def _plot_t_cultivation_fidelity_breakdown(t_df, output_dir, *, filename=None):
     data["n_qubit"] = data["qubit_layout"].apply(get_n_qubit)
     if data.empty or "code_distance" not in data.columns:
         return
-    fig, ax = plt.subplots(figsize=(12.4, 5.6))
+    fig, ax = plt.subplots(figsize=(12.4, 6.8))
     components = [
         ("fidelity_cnot", "CNOT", "#4C78A8"),
         ("fidelity_h", "H", "#8C564B"),
         ("fidelity_of_rz_teleportaion", "Teleportation-CNOT", "#F58518"),
-        ("fidelity_of_rz_s", "Rz decomposition-S", "#54A24B"),
-        ("fidelity_of_rz_h", "Rz decomposition-H", "#BCBD22"),
+        ("fidelity_of_rz_s", "Rz-S", "#54A24B"),
+        ("fidelity_of_rz_h", "Rz-H", "#BCBD22"),
         # Cultivated T-state imperfection: one F_T factor per teleportation
         # CNOT (= per consumed magic state).
         ("fidelity_of_t_gate", "T state", "#E45756"),
         # Gridsynth approximation: per-Rz state infidelity ~ epsilon ** 2.
-        ("fidelity_synthesis", "Rz approximation", "#9467BD"),
+        ("fidelity_synthesis", "Rz approx.", "#9467BD"),
         # ``fidelity_idle`` from the simulator (SE_q-based).
         ("fidelity_idle", "Idle", "#4DBBD5"),
     ]
@@ -345,21 +596,22 @@ def _plot_t_cultivation_fidelity_breakdown(t_df, output_dir, *, filename=None):
         ax,
         data,
         "n_qubit",
-        ["code_distance", "factory_physical_size", "fidelity_target"],
+        ["code_distance"],
         components,
         "T-cultivation Infidelity Breakdown",
-        setting_label_fn=lambda s: f"{int(s[0])}/{int(s[1])}/{float(s[2]):g}",
-        qubit_axis_outward=74,
+        setting_label_fn=lambda s: f"d={int(s[0])}",
+        qubit_axis_outward=54,
     )
     if handles:
-        fig.legend(
+        ax.legend(
             handles,
             labels,
-            loc="center left",
-            bbox_to_anchor=(0.86, 0.5),
+            loc="upper left",
             frameon=True,
+            fontsize=_FIG_FONT_SIZE - 2,
+            ncol=2,
         )
-    fig.subplots_adjust(bottom=0.40, right=0.85)
+    fig.subplots_adjust(bottom=0.34, right=0.96)
     if filename is None:
         filename = "t_cultivation_fidelity_breakdown_stacked.pdf"
     output_path = os.path.join(output_dir, filename)
@@ -375,8 +627,8 @@ def _populate_overall_ax(
     t_cultivation_df,
     *,
     include_raw: bool,
-    excluded_star_distances,
     as_infidelity: bool = False,
+    architecture_distance_colors: dict[str, dict[int, str]] | None = None,
 ):
     """Render STAR / T-cultivation / (optionally) raw curves on ``ax``.
 
@@ -391,6 +643,11 @@ def _populate_overall_ax(
     def _to_y(series):
         return (1.0 - series) if as_infidelity else series
 
+    if architecture_distance_colors is None:
+        architecture_distance_colors = _build_architecture_distance_colors(
+            star_df, t_cultivation_df
+        )
+
     if include_raw:
         raw_mean = (
             raw_df.groupby("n_qubit", as_index=False)["fidelity"]
@@ -400,61 +657,59 @@ def _populate_overall_ax(
         ax.plot(
             raw_mean["n_qubit"],
             _to_y(raw_mean["fidelity"]),
-            marker="s",
             linewidth=3,
             markersize=10,
-            label="Raw (Physical)",
-            color="red",
+            label="Physical",
             alpha=0.7,
+            **_METHOD_STYLES["Physical"],
         )
 
-    star_data = _select_star_best_setting_col_based(star_df)
-    if star_data.empty:
-        star_data = _normalize_star_df(star_df)
-    star_data = _exclude_star_distances(star_data, excluded_star_distances)
-    star_data["n_qubit"] = star_data["qubit_layout"].apply(get_n_qubit)
-    star_data["fidelity"] = pd.to_numeric(star_data["fidelity"], errors="coerce")
-    star_data = star_data.dropna(subset=["n_qubit", "fidelity"])
+    star_data = _select_star_comparison_setting(star_df)
+    if not star_data.empty:
+        star_data["n_qubit"] = star_data["qubit_layout"].apply(get_n_qubit)
+        star_data["fidelity"] = pd.to_numeric(star_data["fidelity"], errors="coerce")
+        star_data = star_data.dropna(subset=["n_qubit", "fidelity"])
 
-    for d in sorted(star_data["code_distance"].dropna().astype(int).unique()):
-        sd = star_data[star_data["code_distance"] == d].copy()
-        if sd.empty:
-            continue
-        grouped = sd.groupby("n_qubit")["fidelity"]
-        means = grouped.mean().sort_index()
-        mins = grouped.min().reindex(means.index)
-        maxs = grouped.max().reindex(means.index)
-        # When plotting infidelity, ``1 - fidelity`` flips min/max ordering.
-        y_means = _to_y(means)
-        y_lo = _to_y(maxs) if as_infidelity else mins
-        y_hi = _to_y(mins) if as_infidelity else maxs
-        label = f"STAR (distance={d})"
-        line = ax.plot(
-            means.index,
-            y_means.values,
-            marker="o",
-            linewidth=2,
-            markersize=8,
-            label=label,
-            alpha=0.85,
-        )[0]
-        ax.fill_between(
-            means.index,
-            y_lo.values,
-            y_hi.values,
-            color=line.get_color(),
-            alpha=0.15,
-        )
+        for d in sorted(star_data["code_distance"].dropna().astype(int).unique()):
+            sd = star_data[star_data["code_distance"] == d].copy()
+            if sd.empty:
+                continue
+            grouped = sd.groupby("n_qubit")["fidelity"]
+            means = grouped.mean().sort_index()
+            mins = grouped.min().reindex(means.index)
+            maxs = grouped.max().reindex(means.index)
+            # When plotting infidelity, ``1 - fidelity`` flips min/max ordering.
+            y_means = _to_y(means)
+            y_lo = _to_y(maxs) if as_infidelity else mins
+            y_hi = _to_y(mins) if as_infidelity else maxs
+            color = architecture_distance_colors["STAR"].get(d)
+            line = ax.plot(
+                means.index,
+                y_means.values,
+                color=color,
+                linewidth=2,
+                markersize=8,
+                label=f"STAR d={d}",
+                alpha=0.85,
+                **_METHOD_STYLES["STAR"],
+            )[0]
+            ax.fill_between(
+                means.index,
+                y_lo.values,
+                y_hi.values,
+                color=line.get_color(),
+                alpha=0.15,
+            )
 
     if t_cultivation_df is not None and not t_cultivation_df.empty:
-        t_df = t_cultivation_df.copy()
+        t_df = _select_t_cultivation_comparison_data(t_cultivation_df)
+        if t_df is None or t_df.empty:
+            return
         t_df["n_qubit"] = t_df["qubit_layout"].apply(get_n_qubit)
         t_df["fidelity_total"] = pd.to_numeric(t_df["fidelity_total"], errors="coerce")
         t_df = t_df.dropna(subset=["n_qubit", "fidelity_total"])
 
-        for (code_distance, factory_size, fidelity_target), sdf in t_df.groupby(
-            ["code_distance", "factory_physical_size", "fidelity_target"]
-        ):
+        for code_distance, sdf in t_df.groupby("code_distance"):
             grouped = sdf.groupby("n_qubit")["fidelity_total"]
             means = grouped.mean().sort_index()
             mins = grouped.min().reindex(means.index)
@@ -462,19 +717,17 @@ def _populate_overall_ax(
             y_means = _to_y(means)
             y_lo = _to_y(maxs) if as_infidelity else mins
             y_hi = _to_y(mins) if as_infidelity else maxs
-            label = (
-                f"T-cultivation (d={int(code_distance)}, size={int(factory_size)}, "
-                f"target={fidelity_target:g})"
-            )
+            d = int(code_distance)
+            color = architecture_distance_colors["T-cultivation"].get(d)
             line = ax.plot(
                 means.index,
                 y_means.values,
-                marker="^",
+                color=color,
                 linewidth=2,
                 markersize=8,
-                linestyle="--",
-                label=label,
+                label=f"T-cultivation d={d}",
                 alpha=0.9,
+                **_METHOD_STYLES["T-cultivation"],
             )[0]
             ax.fill_between(
                 means.index,
@@ -496,28 +749,28 @@ def _plot_overall(
     t_cultivation_df=None,
     *,
     include_raw: bool = True,
-    excluded_star_distances=None,
     filename=None,
 ):
-    fig, ax = plt.subplots(figsize=(10, 5.0))
+    fig, ax = plt.subplots(figsize=(10, 6.4))
+    architecture_distance_colors = _build_architecture_distance_colors(
+        star_df, t_cultivation_df
+    )
     _populate_overall_ax(
         ax,
         raw_df,
         star_df,
         t_cultivation_df,
         include_raw=include_raw,
-        excluded_star_distances=excluded_star_distances,
+        architecture_distance_colors=architecture_distance_colors,
     )
     ax.set_ylabel("Mean Fidelity", fontsize=_FIG_FONT_SIZE)
     ax.set_title("Overall Fidelity Comparison", fontsize=_FIG_FONT_SIZE)
-    ax.legend(
-        fontsize=_FIG_FONT_SIZE,
-        loc="center left",
-        bbox_to_anchor=(1.02, 0.5),
-        ncol=1,
-        frameon=True,
+    _add_overall_legends(
+        ax,
+        include_raw=include_raw,
+        architecture_distance_colors=architecture_distance_colors,
     )
-    fig.subplots_adjust(right=0.74)
+    fig.subplots_adjust(right=0.96)
 
     if filename is None:
         filename = "overall_fidelity_comparison.pdf"
@@ -534,31 +787,31 @@ def _plot_overall_infidelity(
     t_cultivation_df=None,
     *,
     include_raw: bool = True,
-    excluded_star_distances=None,
     filename=None,
 ):
     """Overall infidelity (``1 - fidelity``) on a log y-axis."""
-    fig, ax = plt.subplots(figsize=(10, 5.0))
+    fig, ax = plt.subplots(figsize=(10, 6.4))
+    architecture_distance_colors = _build_architecture_distance_colors(
+        star_df, t_cultivation_df
+    )
     _populate_overall_ax(
         ax,
         raw_df,
         star_df,
         t_cultivation_df,
         include_raw=include_raw,
-        excluded_star_distances=excluded_star_distances,
         as_infidelity=True,
+        architecture_distance_colors=architecture_distance_colors,
     )
     ax.set_yscale("log")
     ax.set_ylabel("Mean Infidelity", fontsize=_FIG_FONT_SIZE)
     ax.set_title("Overall Infidelity Comparison", fontsize=_FIG_FONT_SIZE)
-    ax.legend(
-        fontsize=_FIG_FONT_SIZE,
-        loc="center left",
-        bbox_to_anchor=(1.02, 0.5),
-        ncol=1,
-        frameon=True,
+    _add_overall_legends(
+        ax,
+        include_raw=include_raw,
+        architecture_distance_colors=architecture_distance_colors,
     )
-    fig.subplots_adjust(right=0.74)
+    fig.subplots_adjust(right=0.96)
 
     if filename is None:
         filename = (
@@ -572,67 +825,6 @@ def _plot_overall_infidelity(
     print(f"Saved: {output_path}")
 
 
-def _plot_overall_no_star_d13_raw_vs_no_raw(
-    raw_df,
-    star_df,
-    output_dir,
-    t_cultivation_df=None,
-    *,
-    filename="overall_fidelity_comparison_no_star_d13_raw_vs_no_raw.pdf",
-):
-    # Independent y-scales: left shows raw on the full fidelity range; right omits raw
-    # so matplotlib can autoscale and spread STAR / T-cultivation curves (detail view).
-    fig, (ax_left, ax_right) = plt.subplots(
-        1,
-        2,
-        sharey=False,
-        figsize=(14.5, 5.2),
-    )
-    excluded = [13]
-    _populate_overall_ax(
-        ax_left,
-        raw_df,
-        star_df,
-        t_cultivation_df,
-        include_raw=True,
-        excluded_star_distances=excluded,
-    )
-    _populate_overall_ax(
-        ax_right,
-        raw_df,
-        star_df,
-        t_cultivation_df,
-        include_raw=False,
-        excluded_star_distances=excluded,
-    )
-    ax_left.set_ylabel("Mean Fidelity", fontsize=_FIG_FONT_SIZE)
-    ax_right.set_ylabel("Mean Fidelity", fontsize=_FIG_FONT_SIZE)
-    ax_left.margins(y=0.08)
-    ax_right.margins(y=0.08)
-    fig.suptitle("Overall Fidelity Comparison", fontsize=_FIG_FONT_SIZE, y=0.995)
-    ax_left.set_title("With raw (physical)", fontsize=_FIG_FONT_SIZE)
-    ax_right.set_title(
-        "Without raw (y-axis rescaled for detail)",
-        fontsize=_FIG_FONT_SIZE,
-    )
-
-    handles, labels = ax_left.get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.16),
-        ncol=3,
-        fontsize=_FIG_FONT_SIZE - 2,
-        frameon=True,
-    )
-    fig.subplots_adjust(bottom=0.3, wspace=0.18, top=0.90)
-    output_path = os.path.join(output_dir, filename)
-    plt.savefig(output_path, dpi=300, bbox_inches="tight", pad_inches=0.08)
-    plt.close(fig)
-    print(f"Saved: {output_path}")
-
-
 def main():
     print("=" * 80)
     print("FIDELITY COMPARISON PLOTTING")
@@ -641,12 +833,20 @@ def main():
     output_dir = "output/evaluation/fidelity/comparison"
     os.makedirs(output_dir, exist_ok=True)
 
+    print(
+        "Using comparison filters: "
+        f"placement={_COMPARISON_PLACEMENT}, "
+        f"n_aods={_COMPARISON_N_AODS}, "
+        f"STAR setting={_STAR_COMPARISON_SETTING_INDEX}"
+    )
+
     print("Loading data...")
     raw_df, star_df, t_df = load_data()
     print(
         f"Loaded raw={len(raw_df)}, star={len(star_df)}, "
         f"t_cultivation={0 if t_df is None else len(t_df)}"
     )
+    _print_pairwise_infidelity_improvements(raw_df, star_df, t_df)
 
     print("\n1. Plot raw stacked fidelity breakdown...")
     _plot_raw_fidelity_breakdown(raw_df, output_dir)
@@ -681,48 +881,6 @@ def main():
         star_df,
         output_dir,
         t_cultivation_df=t_df,
-    )
-
-    print("\n5b. Plot overall infidelity (log y, no raw line)...")
-    _plot_overall_infidelity(
-        raw_df,
-        star_df,
-        output_dir,
-        t_cultivation_df=t_df,
-        include_raw=False,
-    )
-
-    print(
-        "\n6. Plot overall fidelity without STAR d=13: raw (left) vs no raw (right), legend below..."
-    )
-    _plot_overall_no_star_d13_raw_vs_no_raw(
-        raw_df,
-        star_df,
-        output_dir,
-        t_cultivation_df=t_df,
-    )
-
-    print(
-        "\n7. Plot overall fidelity without STAR d=13 (single-panel, with raw line)..."
-    )
-    _plot_overall(
-        raw_df,
-        star_df,
-        output_dir,
-        t_cultivation_df=t_df,
-        excluded_star_distances=[13],
-        filename="overall_fidelity_comparison_no_star_d13.pdf",
-    )
-
-    print("\n8. Plot overall fidelity without STAR d=13 (no raw line)...")
-    _plot_overall(
-        raw_df,
-        star_df,
-        output_dir,
-        t_cultivation_df=t_df,
-        include_raw=False,
-        excluded_star_distances=[13],
-        filename="overall_fidelity_comparison_no_star_d13_no_raw.pdf",
     )
 
     print("\nDone.")

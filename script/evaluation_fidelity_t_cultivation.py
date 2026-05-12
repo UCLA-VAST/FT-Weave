@@ -352,7 +352,7 @@ if __name__ == "__main__":
         TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
         TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=9),
         TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
-        TSetting(fidelity_target=1e-10, factory_physical_size=4, distance=13),
+        TSetting(fidelity_target=1e-9, factory_physical_size=4, distance=13),
     ]
 
     physical_error_model: PhysicalErrorModel = PhysicalErrorModel("lookahead")

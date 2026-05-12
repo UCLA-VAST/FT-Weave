@@ -13,7 +13,9 @@ SE_STAGE_1 = 12.5
 # SE_STAGE_1 = 8  # for MSC-3
 SE_STAGE_2 = 0.5
 SE_STAGE_2_BY_CODE_DISTANCE = {
+    7: 0.5,
     9: 0.5,
+    13: 6,
     15: 6,
 }
 CNOT_TIME = 1
