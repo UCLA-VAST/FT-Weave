@@ -1940,8 +1940,8 @@ def process_full_trotter_csv(csv_file: str, output_dir: str):
         # Print AOD improvements vs theoretical bound for this distance
         if distance is not None:
             print(f"\n  AOD vs theoretical bound (distance={distance}):")
-            for round_name, df in dfs_dict_aod.items():
-                _print_aod_vs_theoretical_improvement({round_name: df})
+            for round_name, aod_df in dfs_dict_aod.items():
+                _print_aod_vs_theoretical_improvement({round_name: aod_df})
         else:
             print("\n  AOD vs theoretical bound (all distances):")
             _print_aod_vs_theoretical_improvement(dfs_dict_aod)
@@ -2412,7 +2412,7 @@ def _plot_t_cultivation_multi_aod(
     t_layers: dict[str, pd.DataFrame],
     output_dir: str,
 ):
-    """T-cultivation AOD comparison for presentation subset, full trotter only."""
+    """T-cultivation AOD comparison for presentation subset, full trotter only (col_based)."""
     os.makedirs(output_dir, exist_ok=True)
     pretty_name = {
         "full_trotter": "One Trotter Step",
@@ -2428,8 +2428,11 @@ def _plot_t_cultivation_multi_aod(
         print("Skipping T-cultivation multi-AOD plot: missing setting columns.")
         return
 
+    ref_layer = t_layers[layer_order[0]]
+    if "placement" in ref_layer.columns:
+        ref_layer = _filter_col_based(ref_layer)
     all_t_aods = sorted(
-        pd.to_numeric(t_layers[layer_order[0]]["n_aods"], errors="coerce")
+        pd.to_numeric(ref_layer["n_aods"], errors="coerce")
         .dropna()
         .astype(int)
         .unique()
@@ -2451,6 +2454,8 @@ def _plot_t_cultivation_multi_aod(
         for col_idx, layer_name in enumerate(layer_order):
             ax = axes[row_idx][col_idx]
             layer_df = t_layers[layer_name]
+            if "placement" in layer_df.columns:
+                layer_df = _filter_col_based(layer_df)
             mask = _mask_t_cultivation_triple(layer_df, cd, ft, fps)
             sub_df = layer_df.loc[mask].copy()
 
