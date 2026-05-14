@@ -54,6 +54,9 @@ def t_cultivation_execution(
     print_profile: bool = False,
     logical_se_interval: Optional[int] = None,
     code_distance: Optional[int] = None,
+    trivial_return: bool = False,
+    decompose_move: bool = False,
+    redistribute_stage1_success: bool = True,
 ) -> list[dict[str, Any]]:
     """
     Execute a quantum circuit using T cultivation.
@@ -68,6 +71,12 @@ def t_cultivation_execution(
         synchronize_factory_execution: If True, stage-1 restarts are delayed until all
             currently running stage-2 factories complete.
         code_distance: Surface-code distance used to choose the stage-2 SE duration.
+        trivial_return / decompose_move: Passed to :func:`rus_post_teleportation` for
+            return routing after RUS (aligned with STAR).
+        redistribute_stage1_success: If True (default), after stage-1 simulation spare
+            successes may be moved between factories via
+            :func:`redistribute_stage1_successes`. If False, raw subfactory outcomes are
+            kept and no patch-redistribution moves occur.
 
     Returns:
         execution_log: List of execution event dictionaries with timestamps and details.
@@ -78,12 +87,16 @@ def t_cultivation_execution(
         logger.info("  %s: %s", _k, _cfg[_k])
 
     logger.info(
-        "t_cultivation_execution: n_instr=%d n_factories=%d n_aods=%d to_decompose=%s epsilon=%g",
+        "t_cultivation_execution: n_instr=%d n_factories=%d n_aods=%d to_decompose=%s "
+        "epsilon=%g trivial_return=%s decompose_move=%s redistribute_stage1_success=%s",
         len(circuit),
         n_factories,
         n_aods,
         to_decompose,
         epsilon,
+        trivial_return,
+        decompose_move,
+        redistribute_stage1_success,
     )
     se_stage_2_duration = tcfg.stage2_duration_from_code_distance(code_distance)
 
@@ -530,6 +543,7 @@ def t_cultivation_execution(
                 execution_log,
                 local_time,
                 same_time_events["stage_1_completion"][0]["aod_id"],
+                redistribute_stage1_success=redistribute_stage1_success,
             )
             logger.debug(
                 "Stage 1 complete at t=%.3f success=%s failed=%d",
@@ -736,8 +750,8 @@ def t_cultivation_execution(
             return_routing_batches = rus_post_teleportation(
                 event["routing_batches"],
                 factory_pool,
-                trivial_return=False,
-                decompose_move=False,
+                trivial_return=trivial_return,
+                decompose_move=decompose_move,
             )
 
             local_time = execute_movement(

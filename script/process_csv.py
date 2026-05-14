@@ -203,15 +203,15 @@ def _get_theoretical_lower_bound_t_cultivation(
 
     # Stage-1: success-rate-dependent expected attempts.
     if code_distance is not None and int(code_distance) < 13:
-        stage1_factor = 2.0 * 10.0
+        stage1_factor = 12.5 * 1 / (1 - 0.7 * 0.7)
     else:
-        stage1_factor = 10.0
+        stage1_factor = 12.5
 
     # Stage-2: depends on LER target used by T-cultivation setting.
-    if fidelity_target is not None and np.isclose(float(fidelity_target), 1e-10):
-        stage2_factor = (1 / 0.4) * (4.0 + stage1_factor)
+    if code_distance is not None and int(code_distance) <= 13:
+        stage2_factor = (1 / 0.4) * (6 + stage1_factor)
     else:
-        stage2_factor = (1 / 0.9) * (4.0 + stage1_factor)
+        stage2_factor = (1 / 0.66) * (0.5 + stage1_factor)
 
     rus_factor = 2.0 + 1.0
     s_gate_overhead = 1.0
@@ -2163,6 +2163,239 @@ def _filter_t_cultivation_d13_for_plots(df: pd.DataFrame) -> pd.DataFrame:
     return out[cd != 13].copy()
 
 
+def _print_runtime_star_vs_t_all_in_one_improvements(
+    star_layers: dict[str, pd.DataFrame],
+    t_layers: dict[str, pd.DataFrame],
+    layer_order: list[str],
+    star_distances: list[int],
+    target_aods: list[int],
+    effective_t_placement: str,
+    setting_4: tuple,
+    filename_suffix: str,
+) -> None:
+    """Log T/STAR execution metrics for the all-in-one STAR vs T figure (matched ``n_qubits``)."""
+    eps = 1e-15
+
+    def _geomean_ratio(num: np.ndarray, den: np.ndarray) -> float:
+        r = np.clip(num, eps, None) / np.clip(den, eps, None)
+        return float(np.exp(np.mean(np.log(np.clip(r, eps, None)))))
+
+    def _star_dist_for_t(t_cd: int) -> int | None:
+        ti = int(t_cd)
+        if ti in star_distances:
+            return ti
+        if 9 in star_distances:
+            return 9
+        if 7 in star_distances:
+            return 7
+        return int(star_distances[0]) if star_distances else None
+
+    pretty_layer = {
+        "full_trotter": "Full Trotter",
+        "zz_layers": "ZZ layers",
+        "x_layer": "X layer",
+    }
+    t_line_settings = _t_cultivation_runtime_line_settings()
+    if not t_line_settings:
+        return
+
+    pdf_tail = (
+        f"runtime_star_vs_t_cultivation_all_in_one_aod_"
+        f"{'-'.join(str(a) for a in target_aods)}{filename_suffix}.pdf"
+    )
+    print(
+        "\n  [STAR vs T cultivation all-in-one figure — execution, matched n_qubits]"
+    )
+    print(
+        f"      figure: {pdf_tail} · AODs={list(target_aods)}, "
+        f"T placement={effective_t_placement}, STAR=setting_4 · "
+        "avg_improvement_vs_STAR = mean((STAR-T)/STAR)*100 (positive => T faster)"
+    )
+
+    # STAR: same compile/setting, compare code distances (same curve families as the figure).
+    sds_sorted = sorted(int(d) for d in star_distances)
+    if len(sds_sorted) >= 2:
+        print("    [STAR — distance ratio at matched n_qubits, setting_4]")
+        for layer_name in layer_order:
+            star_filtered = star_layers[layer_name][
+                _setting_filter(star_layers[layer_name], setting_4)
+            ].copy()
+            layer_title = pretty_layer.get(layer_name, layer_name)
+            for aod in target_aods:
+                for d_lo, d_hi in zip(sds_sorted, sds_sorted[1:]):
+                    star_lo = star_filtered[
+                        pd.to_numeric(star_filtered["code_distance"], errors="coerce")
+                        .astype(int)
+                        == int(d_lo)
+                    ].copy()
+                    star_hi = star_filtered[
+                        pd.to_numeric(star_filtered["code_distance"], errors="coerce")
+                        .astype(int)
+                        == int(d_hi)
+                    ].copy()
+                    sum_lo = _summarize_execution_by_qubits(star_lo, method="STAR")
+                    sum_hi = _summarize_execution_by_qubits(star_hi, method="STAR")
+                    row_lo = sum_lo[sum_lo["n_aods"] == int(aod)][
+                        ["n_qubits", "execution_time_mean"]
+                    ].rename(columns={"execution_time_mean": "rt_lo"})
+                    row_hi = sum_hi[sum_hi["n_aods"] == int(aod)][
+                        ["n_qubits", "execution_time_mean"]
+                    ].rename(columns={"execution_time_mean": "rt_hi"})
+                    m_sd = row_hi.merge(row_lo, on="n_qubits", how="inner")
+                    if m_sd.empty:
+                        continue
+                    g_sd = _geomean_ratio(
+                        m_sd["rt_hi"].to_numpy(dtype=float),
+                        m_sd["rt_lo"].to_numpy(dtype=float),
+                    )
+                    print(
+                        f"      {layer_title}, AOD={int(aod)}: "
+                        f"STAR d={int(d_hi)}/d={int(d_lo)}: avg_ratio={g_sd:.4f}x"
+                    )
+
+    # T cultivation: same placement, compare runtime line distances (each line’s triple).
+    t_pairs_sorted = sorted(t_line_settings, key=lambda s: int(s[0]))
+    if len(t_pairs_sorted) >= 2:
+        print(
+            "    [T cultivation — distance ratio at matched n_qubits, "
+            f"placement={effective_t_placement}]"
+        )
+        def _t_triple_aod_subdf(
+            work: pd.DataFrame, cd: int, ft: float, fps: int, aod_val: int
+        ) -> pd.DataFrame:
+            sub = work[work["n_aods"] == int(aod_val)].copy()
+            mask = (
+                pd.to_numeric(sub["code_distance"], errors="coerce").astype(int)
+                == int(cd)
+            ) & np.isclose(
+                pd.to_numeric(sub["fidelity_target"], errors="coerce"),
+                float(ft),
+                rtol=0.0,
+                atol=0.0,
+            ) & (sub["factory_physical_size"] == fps)
+            return sub.loc[mask].copy()
+
+        for layer_name in layer_order:
+            t_work = t_layers[layer_name]
+            if "placement" in t_work.columns:
+                t_work = t_work[
+                    t_work["placement"].astype(str).str.strip()
+                    == effective_t_placement
+                ].copy()
+            if not all(
+                c in t_work.columns
+                for c in ("code_distance", "fidelity_target", "factory_physical_size")
+            ):
+                continue
+            layer_title = pretty_layer.get(layer_name, layer_name)
+            for aod in target_aods:
+                for (cd_lo, ft_lo, fps_lo), (cd_hi, ft_hi, fps_hi) in zip(
+                    t_pairs_sorted, t_pairs_sorted[1:]
+                ):
+                    t_lo = _t_triple_aod_subdf(t_work, cd_lo, ft_lo, fps_lo, aod)
+                    t_hi = _t_triple_aod_subdf(t_work, cd_hi, ft_hi, fps_hi, aod)
+                    sum_lo = _summarize_execution_by_qubits(t_lo, method="T cultivation")
+                    sum_hi = _summarize_execution_by_qubits(t_hi, method="T cultivation")
+                    row_lo = sum_lo[["n_qubits", "execution_time_mean"]].rename(
+                        columns={"execution_time_mean": "rt_lo"}
+                    )
+                    row_hi = sum_hi[["n_qubits", "execution_time_mean"]].rename(
+                        columns={"execution_time_mean": "rt_hi"}
+                    )
+                    m_td = row_hi.merge(row_lo, on="n_qubits", how="inner")
+                    if m_td.empty:
+                        continue
+                    g_td = _geomean_ratio(
+                        m_td["rt_hi"].to_numpy(dtype=float),
+                        m_td["rt_lo"].to_numpy(dtype=float),
+                    )
+                    print(
+                        f"      {layer_title}, AOD={int(aod)}: "
+                        f"T d={int(cd_hi)}/d={int(cd_lo)} "
+                        f"(d{int(cd_hi)}: nf={int(fps_hi)}, LER={ft_hi:.0e}; "
+                        f"d{int(cd_lo)}: nf={int(fps_lo)}, LER={ft_lo:.0e}): "
+                        f"avg_ratio={g_td:.4f}x"
+                    )
+
+    print("    [T vs STAR — cross-method, matched n_qubits]")
+    printed_any = False
+    for layer_name in layer_order:
+        star_filtered = star_layers[layer_name][
+            _setting_filter(star_layers[layer_name], setting_4)
+        ].copy()
+        t_work = t_layers[layer_name]
+        if "placement" in t_work.columns:
+            t_work = t_work[
+                t_work["placement"].astype(str).str.strip() == effective_t_placement
+            ].copy()
+        if not all(
+            c in t_work.columns
+            for c in ("code_distance", "fidelity_target", "factory_physical_size")
+        ):
+            continue
+        layer_title = pretty_layer.get(layer_name, layer_name)
+        for aod in target_aods:
+            for cd, ft, fps in t_line_settings:
+                sd = _star_dist_for_t(int(cd))
+                if sd is None:
+                    continue
+                star_d = star_filtered[
+                    pd.to_numeric(star_filtered["code_distance"], errors="coerce")
+                    .astype(int)
+                    == int(sd)
+                ].copy()
+                star_summary = _summarize_execution_by_qubits(star_d, method="STAR")
+                star_a = star_summary[star_summary["n_aods"] == int(aod)]
+                if star_a.empty:
+                    continue
+                t_candidates = t_work[t_work["n_aods"] == int(aod)].copy()
+                cd_match = (
+                    pd.to_numeric(t_candidates["code_distance"], errors="coerce")
+                    .astype(int)
+                    == int(cd)
+                )
+                ft_match = np.isclose(
+                    pd.to_numeric(t_candidates["fidelity_target"], errors="coerce"),
+                    float(ft),
+                    rtol=0.0,
+                    atol=0.0,
+                )
+                mask = cd_match & ft_match & (
+                    t_candidates["factory_physical_size"] == fps
+                )
+                t_setting = t_candidates[mask]
+                t_summary = _summarize_execution_by_qubits(
+                    t_setting, method="T cultivation"
+                )
+                if t_summary.empty:
+                    continue
+                left = star_a[["n_qubits", "execution_time_mean"]].rename(
+                    columns={"execution_time_mean": "star_t"}
+                )
+                right = t_summary[["n_qubits", "execution_time_mean"]].rename(
+                    columns={"execution_time_mean": "t_t"}
+                )
+                m = left.merge(right, on="n_qubits", how="inner")
+                if m.empty:
+                    continue
+                star_arr = np.clip(m["star_t"].to_numpy(dtype=float), eps, None)
+                t_arr = np.clip(m["t_t"].to_numpy(dtype=float), eps, None)
+                g = _geomean_ratio(t_arr, star_arr)
+                arith_imp = float(np.mean((star_arr - t_arr) / star_arr) * 100.0)
+                if int(sd) == int(cd):
+                    pair = f"T d={int(cd)} / STAR d={int(cd)}"
+                else:
+                    pair = f"T d={int(cd)} / STAR d={int(sd)}"
+                print(
+                    f"      {layer_title}, AOD={int(aod)}: {pair} "
+                    f"(nf={int(fps)}, LER={ft:.0e}): avg_ratio={g:.4f}x, "
+                    f"avg_improvement_vs_STAR={arith_imp:+.2f}%"
+                )
+                printed_any = True
+    if not printed_any:
+        print("      ([T vs STAR] no overlapping T/STAR points for configured lines)")
+
+
 def _plot_star_vs_t_cultivation_best(
     star_layers: dict[str, pd.DataFrame],
     t_layers: dict[str, pd.DataFrame],
@@ -2412,6 +2645,17 @@ def _plot_star_vs_t_cultivation_best(
                     va="center",
                     fontsize=_FIG_FONT_SIZE,
                 )
+
+    _print_runtime_star_vs_t_all_in_one_improvements(
+        star_layers,
+        t_layers,
+        layer_order,
+        star_distances,
+        target_aods,
+        effective_t_placement,
+        setting_4,
+        filename_suffix,
+    )
 
     fig.suptitle(
         "STAR vs T cultivation runtime · "
@@ -2743,7 +2987,7 @@ def _plot_t_cultivation_compile_ablation(
             continue
         primary = distance_settings[0]
         cd, ft, fps = primary
-        triple_note = f"d={int(cd)}, LER≈{ft:g}, factories={int(fps)}"
+        triple_note = f"d={int(cd)}"
 
         compile_colors = {
             idx: plt.get_cmap("tab10")(idx % 10) for idx in range(n_compile)
@@ -2947,7 +3191,12 @@ def _plot_t_cultivation_architecture_placement_execution(
         )
         return
 
-    required = ("code_distance", "fidelity_target", "factory_physical_size", "placement")
+    required = (
+        "code_distance",
+        "fidelity_target",
+        "factory_physical_size",
+        "placement",
+    )
     if not all(c in t_layers[layer_order[0]].columns for c in required):
         print(
             "Skipping T-cultivation architecture placement plot: missing fidelity/placement columns."
@@ -2968,7 +3217,7 @@ def _plot_t_cultivation_architecture_placement_execution(
             continue
         primary = distance_settings[0]
         cd, ft, fps = primary
-        triple_note = f"d={int(cd)}, LER≈{ft:g}, factories={int(fps)}"
+        triple_note = f"d={int(cd)}"
 
         agg_data: dict[str, pd.DataFrame] = {}
         for layer_name in layer_order:
@@ -3605,6 +3854,79 @@ def _print_requested_runtime_improvements(
                         f"    {placement_name}/col_based, d={int(d)}, AOD={int(aod)}: avg_ratio={g:.4f}x"
                     )
 
+    # T-cultivation: same placement vs col_based geomean at main compile setting.
+    t_mic_need = (
+        "placement",
+        "total_time",
+        "n_qubits",
+        "n_aods",
+        "code_distance",
+        "fidelity_target",
+        "factory_physical_size",
+        "trivial_return",
+        "decompose_move",
+        "redistribute_stage1_success",
+    )
+    if not t_full.empty and all(c in t_full.columns for c in t_mic_need):
+        tr_m, dm_m, rs_m = T_CULTIVATION_MAIN_COMPILE_SETTING
+        t_mic_base = _filter_t_cultivation_d13_for_plots(t_full.copy())
+        t_mic = t_mic_base.loc[
+            _mask_t_cultivation_compile(t_mic_base, tr_m, dm_m, rs_m)
+        ].copy()
+        if not t_mic.empty:
+            for cd, ft, fps in _t_cultivation_runtime_line_settings():
+                sub = t_mic.loc[_mask_t_cultivation_triple(t_mic, cd, ft, fps)].copy()
+                if sub.empty:
+                    continue
+                tm = sub.groupby(
+                    ["code_distance", "placement", "n_aods", "n_qubits"],
+                    as_index=False,
+                ).agg(runtime=("total_time", "mean"))
+                setting_ctx = f"nf={int(fps)}, LER={ft:.0e}"
+                for placement_name in ["seperate_region_row", "checkerboard"]:
+                    for d in sorted(
+                        pd.to_numeric(tm["code_distance"], errors="coerce")
+                        .dropna()
+                        .astype(int)
+                        .unique()
+                    ):
+                        for aod in sorted(
+                            pd.to_numeric(tm["n_aods"], errors="coerce")
+                            .dropna()
+                            .astype(int)
+                            .unique()
+                        ):
+                            p = tm[
+                                (tm["placement"] == placement_name)
+                                & (
+                                    pd.to_numeric(tm["code_distance"], errors="coerce")
+                                    == int(d)
+                                )
+                                & (
+                                    pd.to_numeric(tm["n_aods"], errors="coerce")
+                                    == int(aod)
+                                )
+                            ][["n_qubits", "runtime"]].rename(columns={"runtime": "rp"})
+                            c = tm[
+                                (tm["placement"] == "col_based")
+                                & (
+                                    pd.to_numeric(tm["code_distance"], errors="coerce")
+                                    == int(d)
+                                )
+                                & (
+                                    pd.to_numeric(tm["n_aods"], errors="coerce")
+                                    == int(aod)
+                                )
+                            ][["n_qubits", "runtime"]].rename(columns={"runtime": "rc"})
+                            m = p.merge(c, on="n_qubits", how="inner")
+                            if m.empty:
+                                continue
+                            g = _geomean_ratio(m["rp"].to_numpy(), m["rc"].to_numpy())
+                            print(
+                                f"    T {placement_name}/col_based, d={int(d)}, "
+                                f"AOD={int(aod)} ({setting_ctx}): avg_ratio={g:.4f}x"
+                            )
+
     # 4) Ablation improvements (vanilla/setting)
     print("  [Ablation vs Vanilla]")
     ablation_labels = [
@@ -3679,6 +4001,100 @@ def _print_requested_runtime_improvements(
                         print(
                             f"        d={int(distance)}, AOD={int(aod)}: avg_improvement={pct:+.2f}%"
                         )
+
+    print("  [T-cultivation compile ablation]")
+    t_cab_cols = (
+        "placement",
+        "total_time",
+        "n_qubits",
+        "n_aods",
+        "code_distance",
+        "fidelity_target",
+        "factory_physical_size",
+        "trivial_return",
+        "decompose_move",
+        "redistribute_stage1_success",
+    )
+    if t_full.empty or not all(c in t_full.columns for c in t_cab_cols):
+        print("    (skipped: missing placement/compile columns or empty full_trotter)")
+    else:
+        t_work = _filter_t_cultivation_d13_for_plots(t_full.copy())
+        if "placement" in t_work.columns:
+            t_work = t_work[
+                t_work["placement"].astype(str).str.strip() == "col_based"
+            ].copy()
+        line_settings = _t_cultivation_runtime_line_settings()
+        if not line_settings:
+            print("    (skipped: no T runtime line settings)")
+        else:
+            tr0, dm0, rs0 = _T_COMPILE_ABLATION_GRID[0]
+            any_t_cab = False
+            for idx in range(
+                1, min(len(_T_COMPILE_ABLATION_GRID), len(_T_COMPILE_ABLATION_LABELS))
+            ):
+                trs, dms, rss = _T_COMPILE_ABLATION_GRID[idx]
+                printed_label = False
+                for distance in sorted({int(s[0]) for s in line_settings}):
+                    dist_settings = [
+                        s for s in line_settings if int(s[0]) == int(distance)
+                    ]
+                    if not dist_settings:
+                        continue
+                    cd, ft, fps = dist_settings[0]
+                    base_mask = _mask_t_cultivation_triple(
+                        t_work, cd, ft, fps
+                    ) & _mask_t_cultivation_compile(t_work, tr0, dm0, rs0)
+                    base_sub = t_work.loc[base_mask].copy()
+                    if base_sub.empty:
+                        continue
+                    bg = base_sub.groupby(
+                        ["n_aods", "n_qubits"], as_index=False
+                    ).agg(rt_base=("total_time", "mean"))
+                    s_mask = _mask_t_cultivation_triple(
+                        t_work, cd, ft, fps
+                    ) & _mask_t_cultivation_compile(t_work, trs, dms, rss)
+                    s_sub = t_work.loc[s_mask].copy()
+                    if s_sub.empty:
+                        continue
+                    sg = s_sub.groupby(
+                        ["n_aods", "n_qubits"], as_index=False
+                    ).agg(rt_set=("total_time", "mean"))
+                    m = bg.merge(sg, on=["n_aods", "n_qubits"], how="inner")
+                    if m.empty:
+                        continue
+                    if not printed_label:
+                        print(f"    {_T_COMPILE_ABLATION_LABELS[idx]}:")
+                        printed_label = True
+                    aod_values = sorted(
+                        set(
+                            int(v)
+                            for v in pd.to_numeric(
+                                m["n_aods"], errors="coerce"
+                            )
+                            .dropna()
+                            .astype(int)
+                            .unique()
+                            .tolist()
+                        ).intersection({1, 5})
+                    )
+                    for aod in aod_values:
+                        m_da = m[
+                            pd.to_numeric(m["n_aods"], errors="coerce") == int(aod)
+                        ]
+                        if m_da.empty:
+                            continue
+                        base_vals = np.clip(m_da["rt_base"].to_numpy(), eps, None)
+                        set_vals = np.clip(m_da["rt_set"].to_numpy(), eps, None)
+                        pct = float(
+                            np.mean((base_vals - set_vals) / base_vals) * 100.0
+                        )
+                        print(
+                            f"        d={int(cd)}, AOD={int(aod)} "
+                            f"(nf={int(fps)}, LER={ft:.0e}): avg_improvement={pct:+.2f}%"
+                        )
+                        any_t_cab = True
+            if not any_t_cab:
+                print("    (no overlapping vanilla vs compile rows for col_based)")
 
 
 def _print_t_cultivation_aod_vs_theoretical_improvement(

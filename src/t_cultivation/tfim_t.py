@@ -42,6 +42,11 @@ def _build_t_exec_kwargs(
         "print_profile": config.get("print_profile", False),
         "epsilon": config.get("epsilon", 1e-4),
         "code_distance": code_distance,
+        "trivial_return": bool(config.get("trivial_return", False)),
+        "decompose_move": bool(config.get("decompose_move", False)),
+        "redistribute_stage1_success": bool(
+            config.get("redistribute_stage1_success", True)
+        ),
     }
     if "num_subfactories" in config:
         exec_kwargs["num_subfactories"] = config["num_subfactories"]
@@ -63,6 +68,7 @@ def _build_t_profiling_row(
     placement: str,
     n_aods: int,
     profiling_result: dict[str, Any],
+    config: dict[str, Any],
 ) -> dict[str, Any]:
     ops = profiling_result["ops"]
 
@@ -82,6 +88,11 @@ def _build_t_profiling_row(
         "code_distance": code_distance,
         "placement": placement,
         "n_aods": n_aods,
+        "trivial_return": bool(config.get("trivial_return", False)),
+        "decompose_move": bool(config.get("decompose_move", False)),
+        "redistribute_stage1_success": bool(
+            config.get("redistribute_stage1_success", True)
+        ),
         "total_time": profiling_result["total_time"],
         "movement_time": _op_circuit_time("move"),
         "return_movement_time": _op_circuit_time("return_move"),
@@ -189,6 +200,7 @@ def generate_one_layer_2d_tfim_circuit_t_cultivation(
                 placement=placement,
                 n_aods=n_aods,
                 profiling_result=profiling_result,
+                config=config,
             )
             profiling_results.append(csv_result)
             rz_round += 1

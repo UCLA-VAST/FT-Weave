@@ -8,6 +8,10 @@ import pandas as pd
 
 _FIG_FONT_SIZE = 18
 
+# Plot only these logical-error targets and code distances (matches main T-cultivation LER).
+THROUGHPUT_PLOT_LER = 1e-8
+THROUGHPUT_PLOT_DISTANCES: tuple[int, ...] = (9, 13)
+
 plt.rcParams.update(
     {
         "font.family": "serif",
@@ -66,6 +70,18 @@ def _load_csv(csv_path: str) -> pd.DataFrame:
         raise ValueError("CSV is missing required column: metric_mode")
 
     return df
+
+
+def _filter_distance_ler_for_plots(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep rows for ``THROUGHPUT_PLOT_DISTANCES`` at ``THROUGHPUT_PLOT_LER`` only."""
+    if "distance" not in df.columns or "fidelity_target" not in df.columns:
+        return df
+    dnum = pd.to_numeric(df["distance"], errors="coerce")
+    ft = pd.to_numeric(df["fidelity_target"], errors="coerce")
+    mask = np.isclose(ft, float(THROUGHPUT_PLOT_LER), rtol=0.0, atol=1e-20) & dnum.isin(
+        list(THROUGHPUT_PLOT_DISTANCES)
+    )
+    return df.loc[mask].copy()
 
 
 def _save_fig1(df: pd.DataFrame, output_dir: str, metric_mode: str) -> None:
@@ -304,6 +320,14 @@ def _save_fig3(df: pd.DataFrame, output_dir: str, metric_mode: str) -> None:
 def process_t_cultivation_throughput_csv(csv_path: str, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
     df = _load_csv(csv_path)
+    df = _filter_distance_ler_for_plots(df)
+    if df.empty:
+        print(
+            "No rows left after filtering to "
+            f"distance in {THROUGHPUT_PLOT_DISTANCES} and LER={THROUGHPUT_PLOT_LER:g}; "
+            "skipping figures."
+        )
+        return
 
     metric_modes = [m for m in df["metric_mode"].dropna().astype(str).unique() if m]
     metric_mode = metric_modes[0] if metric_modes else "cycles_per_t"

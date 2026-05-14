@@ -28,8 +28,16 @@ _COMPARISON_N_AODS = 1
 _COMPARISON_PLACEMENT = "col_based"
 _STAR_COMPARISON_SETTING_INDEX = 4
 _STAR_COMPARISON_SETTING = (False, "matching", 2, True, False)
+# Must match ``MAIN_COMPILE_SETTING`` in ``evaluation_fidelity_t_cultivation.py``:
+# (trivial_return, decompose_move, redistribute_stage1_success).
+_T_MAIN_COMPILE_SETTING = (False, True, True)
+_T_COMPARISON_SETTINGS = [
+    (7, 1e-8, 2),
+    (9, 1e-8, 2),
+    (13, 1e-8, 4),
+]
 _EXCLUDED_STAR_DISTANCES = {13}
-_EXCLUDE_T_CULTIVATION_D13 = True
+_EXCLUDE_T_CULTIVATION_D13 = False
 _EXCLUDED_T_CULTIVATION_TARGETS = {1e-9}
 _STAR_DISTANCE_COLORS = [
     "#F1CE63",
@@ -123,7 +131,42 @@ def _select_star_comparison_setting(star_df):
 def _select_t_cultivation_comparison_data(t_df):
     if t_df is None:
         return None
-    return _filter_comparison_architecture(t_df)
+    out = _filter_comparison_architecture(t_df)
+    compile_cols = {
+        "trivial_return",
+        "decompose_move",
+        "redistribute_stage1_success",
+    }
+    if compile_cols.issubset(out.columns):
+        tr, dm, rs = _T_MAIN_COMPILE_SETTING
+        out = out[
+            (out["trivial_return"] == tr)
+            & (out["decompose_move"] == dm)
+            & (out["redistribute_stage1_success"] == rs)
+        ].copy()
+    required = {"code_distance", "fidelity_target", "factory_physical_size"}
+    if required.issubset(out.columns):
+        cd = pd.to_numeric(out["code_distance"], errors="coerce")
+        target = pd.to_numeric(out["fidelity_target"], errors="coerce")
+        size = pd.to_numeric(out["factory_physical_size"], errors="coerce")
+        selected = pd.Series(False, index=out.index)
+        for setting_cd, setting_target, setting_size in _T_COMPARISON_SETTINGS:
+            target_match = pd.Series(
+                np.isclose(
+                    target.to_numpy(dtype=float),
+                    float(setting_target),
+                    rtol=0.0,
+                    atol=1e-20,
+                ),
+                index=out.index,
+            )
+            selected |= (
+                (cd == int(setting_cd))
+                & target_match
+                & (size == int(setting_size))
+            )
+        out = out[selected].copy()
+    return out
 
 
 def _exclude_star_d13(df):
@@ -143,7 +186,11 @@ def _exclude_t_cultivation_targets(df):
 
 
 def _exclude_t_cultivation_d13(df):
-    if not _EXCLUDE_T_CULTIVATION_D13 or df is None or "code_distance" not in df.columns:
+    if (
+        not _EXCLUDE_T_CULTIVATION_D13
+        or df is None
+        or "code_distance" not in df.columns
+    ):
         return df
     out = df.copy()
     cd = pd.to_numeric(out["code_distance"], errors="coerce")
@@ -837,7 +884,8 @@ def main():
         "Using comparison filters: "
         f"placement={_COMPARISON_PLACEMENT}, "
         f"n_aods={_COMPARISON_N_AODS}, "
-        f"STAR setting={_STAR_COMPARISON_SETTING_INDEX}"
+        f"STAR setting={_STAR_COMPARISON_SETTING_INDEX}, "
+        f"T settings={_T_COMPARISON_SETTINGS}"
     )
 
     print("Loading data...")

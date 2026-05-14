@@ -395,20 +395,27 @@ def complete_stage1_preparation(
     execution_log: Optional[list],
     log_time: float,
     aod_id: int,
+    *,
+    redistribute_stage1_success: bool = True,
 ) -> tuple[list[int], float]:
     """
-    After ``simulate_stage1_preparation``: redistribute spare successes, sync subfactories,
-    and advance factories to stage 2 or free.
+    After ``simulate_stage1_preparation``: optionally redistribute spare successes across
+    factories, sync subfactories, and advance factories to stage 2 or free.
+
+    When ``redistribute_stage1_success`` is False, raw per-subfactory Bernoulli outcomes
+    are kept (no donor/receiver patch moves); ``redistribution_delay`` is zero.
     """
     counts = raw_stage1_counts(factory_pool, factory_ids)
-    transfers = redistribute_stage1_successes(
-        factory_pool,
-        factory_ids,
-        counts,
-        execution_log,
-        log_time,
-        aod_id,
-    )
+    transfers: list[tuple[int, int]] = []
+    if redistribute_stage1_success:
+        transfers = redistribute_stage1_successes(
+            factory_pool,
+            factory_ids,
+            counts,
+            execution_log,
+            log_time,
+            aod_id,
+        )
     redistribution_delay = 0.0
     for donor_id, receiver_id in transfers:
         donor = factory_pool.get_factory_by_id(donor_id).location
