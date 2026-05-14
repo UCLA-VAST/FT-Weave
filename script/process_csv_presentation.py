@@ -2439,6 +2439,19 @@ def _mask_t_cultivation_compile(
     )
 
 
+def _filter_t_cultivation_main_compile_setting(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep rows matching ``T_CULTIVATION_MAIN_COMPILE_SETTING`` when compile columns exist.
+
+    If ``trivial_return`` / ``decompose_move`` / ``redistribute_stage1_success`` are
+    absent (legacy CSV), returns ``df`` unchanged.
+    """
+    cols = ("trivial_return", "decompose_move", "redistribute_stage1_success")
+    if df.empty or not all(c in df.columns for c in cols):
+        return df
+    tr, dm, rs = T_CULTIVATION_MAIN_COMPILE_SETTING
+    return df.loc[_mask_t_cultivation_compile(df, tr, dm, rs)].copy()
+
+
 def _plot_t_cultivation_multi_aod(
     t_layers: dict[str, pd.DataFrame],
     output_dir: str,
@@ -2728,7 +2741,10 @@ def _print_requested_runtime_improvements(
 
     # Build full-trotter frames safely (fills missing config columns for T-cultivation).
     star_full = _build_layer_frames(star_df).get("full_trotter", pd.DataFrame()).copy()
-    t_full = _build_layer_frames(t_df).get("full_trotter", pd.DataFrame()).copy()
+    t_full = _build_layer_frames(
+        _filter_t_cultivation_main_compile_setting(t_df)
+    ).get("full_trotter", pd.DataFrame()).copy()
+    t_full_ablation = _build_layer_frames(t_df).get("full_trotter", pd.DataFrame()).copy()
 
     # Keep STAR aligned with plotted runtime setting.
     star_setting = SETTINGS[4]
@@ -3008,7 +3024,7 @@ def _print_requested_runtime_improvements(
                         f"    {placement_name}/col_based, d={int(d)}, AOD={int(aod)}: avg_ratio={g:.4f}x"
                     )
 
-    # T-cultivation: same placement vs col_based geomean at main compile setting.
+    # T-cultivation: same placement vs col_based (``t_full`` is already main compile).
     t_mic_need = (
         "placement",
         "total_time",
@@ -3017,16 +3033,9 @@ def _print_requested_runtime_improvements(
         "code_distance",
         "fidelity_target",
         "factory_physical_size",
-        "trivial_return",
-        "decompose_move",
-        "redistribute_stage1_success",
     )
     if not t_full.empty and all(c in t_full.columns for c in t_mic_need):
-        tr_m, dm_m, rs_m = T_CULTIVATION_MAIN_COMPILE_SETTING
-        t_mic_base = t_full.copy()
-        t_mic = t_mic_base.loc[
-            _mask_t_cultivation_compile(t_mic_base, tr_m, dm_m, rs_m)
-        ].copy()
+        t_mic = t_full.copy()
         if not t_mic.empty:
             for cd, ft, fps in T_CULTIVATION_RUNTIME_LINE_SETTINGS:
                 sub = t_mic.loc[_mask_t_cultivation_triple(t_mic, cd, ft, fps)].copy()
@@ -3169,10 +3178,10 @@ def _print_requested_runtime_improvements(
         "decompose_move",
         "redistribute_stage1_success",
     )
-    if t_full.empty or not all(c in t_full.columns for c in t_cab_cols):
+    if t_full_ablation.empty or not all(c in t_full_ablation.columns for c in t_cab_cols):
         print("    (skipped: missing placement/compile columns or empty full_trotter)")
     else:
-        t_work = t_full.copy()
+        t_work = t_full_ablation.copy()
         if "placement" in t_work.columns:
             t_work = t_work[
                 t_work["placement"].astype(str).str.strip() == "col_based"
@@ -3355,7 +3364,7 @@ def process_t_cultivation_runtime_comparison(
     t_df = _normalize_config_types(t_df)
 
     star_layers = _build_layer_frames(star_df)
-    t_layers = _build_layer_frames(t_df)
+    t_layers = _build_layer_frames(_filter_t_cultivation_main_compile_setting(t_df))
 
     _plot_star_vs_t_cultivation_best(star_layers, t_layers, output_dir, target_aods=[2])
     _plot_t_cultivation_multi_aod(t_layers, output_dir)
