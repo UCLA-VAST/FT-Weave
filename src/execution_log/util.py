@@ -125,6 +125,7 @@ def execute_movement(
     move_type: str = "move",
 ) -> float:
     move_time_idx_pairs = []
+
     for i, batches in enumerate(routing_batches):
         max_movement_time = 0.0
         for _, x_q, y_q, factory_id, x_f, y_f in batches:
@@ -133,12 +134,21 @@ def execute_movement(
             )
         move_time_idx_pairs.append((max_movement_time, i))
     # Sort by movement time descending
-    move_time_idx_pairs.sort(reverse=True)
+    if move_type == "move":
+        move_time_idx_pairs.sort(reverse=True)
+    # Return moves that share a grid endpoint (same physical site / qubit cell) cannot run
+    # in parallel on different AODs: the first move must finish before the second starts.
+    cell_earliest_done: dict[tuple[int, int], float] = {}
     end_time = 0
     for movement_time, idx in move_time_idx_pairs:
+        start_time = circuit_moment
+        if move_type == "return_move":
+            for _, x_q, y_q, factory_id, x_f, y_f in routing_batches[idx]:
+                for cell in ((x_f, y_f), (x_q, y_q)):
+                    start_time = max(start_time, cell_earliest_done.get(cell, 0.0))
         # Assign to the earliest available AOD
         aod_idx = aod_earliest_available_time.index(min(aod_earliest_available_time))
-        start_time = max(circuit_moment, aod_earliest_available_time[aod_idx])
+        start_time = max(start_time, aod_earliest_available_time[aod_idx])
         aod_earliest_available_time[aod_idx] = start_time + movement_time
         end_time = max(end_time, aod_earliest_available_time[aod_idx])
         move_vecs = []
@@ -159,6 +169,14 @@ def execute_movement(
             move_vecs=move_vecs,
             aod_assignment=aod_idx,
         )
+        if move_type == "return_move":
+            for _, x_q, y_q, factory_id, x_f, y_f in routing_batches[idx]:
+                move_t = move_duration(x_f, y_f, x_q, y_q)
+                done = start_time + move_t
+                for cell in ((x_f, y_f), (x_q, y_q)):
+                    cell_earliest_done[cell] = max(
+                        cell_earliest_done.get(cell, 0.0), done
+                    )
     return end_time
 
 
