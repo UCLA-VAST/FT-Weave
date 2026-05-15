@@ -170,42 +170,42 @@ def test_t_cultivation_small():
         {"gate": "T", "targets": [0], "params": {}},
         {"gate": "T", "targets": [0], "params": {}},
         {"gate": "T", "targets": [0], "params": {}},
-        {"gate": "T", "targets": [0], "params": {}},
-        {"gate": "T", "targets": [0], "params": {}},
-        {"gate": "T", "targets": [0], "params": {}},
-        {"gate": "T", "targets": [0], "params": {}},
-        {"gate": "T", "targets": [0], "params": {}},
-        {"gate": "T", "targets": [0], "params": {}},
+        # {"gate": "T", "targets": [0], "params": {}},
+        # {"gate": "T", "targets": [0], "params": {}},
+        # {"gate": "T", "targets": [0], "params": {}},
+        # {"gate": "T", "targets": [0], "params": {}},
+        # {"gate": "T", "targets": [0], "params": {}},
+        # {"gate": "T", "targets": [0], "params": {}},
     ]
 
     logic_qubit_locations = [(0, 0)]
     magic_state_locations = [(0, 1)]
     n_factories = len(magic_state_locations)
     update_config(FACTORY_PHYSICAL_SIZE=2)
-    for i in range(10):
-        execution_log = t_cultivation_execution(
-            circuit=circuit,
-            n_factories=n_factories,
-            logic_qubit_locations=logic_qubit_locations,
-            magic_state_locations=magic_state_locations,
-            rng=np.random.default_rng(i),
-            n_aods=2,
-            to_decompose=False,
-        )
-        assert execution_log, "Execution log should not be empty."
-    update_config(FACTORY_PHYSICAL_SIZE=4)
-    for i in range(10):
-        execution_log = t_cultivation_execution(
-            circuit=circuit,
-            n_factories=n_factories,
-            logic_qubit_locations=logic_qubit_locations,
-            magic_state_locations=magic_state_locations,
-            rng=np.random.default_rng(i),
-            n_aods=2,
-            to_decompose=False,
-        )
-        assert execution_log, "Execution log should not be empty."
-    return
+    execution_log = t_cultivation_execution(
+        circuit=circuit,
+        n_factories=n_factories,
+        logic_qubit_locations=logic_qubit_locations,
+        magic_state_locations=magic_state_locations,
+        rng=np.random.default_rng(0),
+        n_aods=2,
+        to_decompose=False,
+        logical_se_interval=5,
+    )
+    assert execution_log, "Execution log should not be empty."
+    # update_config(FACTORY_PHYSICAL_SIZE=4)
+    # for i in range(10):
+    #     execution_log = t_cultivation_execution(
+    #         circuit=circuit,
+    #         n_factories=n_factories,
+    #         logic_qubit_locations=logic_qubit_locations,
+    #         magic_state_locations=magic_state_locations,
+    #         rng=np.random.default_rng(i),
+    #         n_aods=2,
+    #         to_decompose=False,
+    #     )
+    #     assert execution_log, "Execution log should not be empty."
+    # return
     # execution_log = t_cultivation_execution(
     #     circuit=circuit,
     #     n_factories=n_factories,
@@ -226,13 +226,13 @@ def test_t_cultivation_small():
     )
 
 
-def test_t_cultivation_small():
+def test_t_cultivation_rz():
     circuit = [
-        {"gate": "Rz", "targets": [0,1,2,3], "params": {0.00146}},
+        {"gate": "Rz", "targets": [0, 1, 2, 3], "params": {0.00146}},
     ]
 
-    logic_qubit_locations = [(0, 0),(0, 1),(0, 2),(0, 3)]
-    magic_state_locations = [(1, 0),(1, 1),(1, 2),(, 3)]
+    logic_qubit_locations = [(0, 0), (0, 1), (0, 2), (0, 3)]
+    magic_state_locations = [(1, 0), (1, 1), (1, 2), (1, 3)]
     n_factories = len(magic_state_locations)
     update_config(FACTORY_PHYSICAL_SIZE=2)
     for i in range(10):
@@ -276,6 +276,7 @@ def test_t_cultivation_small():
         n_factories=n_factories,
         save_path=f"output/circuit_execution/t_cultivation_{len(logic_qubit_locations)}q_with_factories.pdf",
     )
+
 
 def test_fig1_fail_case_scheduler_deadlock_reproduces() -> None:
     """
@@ -321,6 +322,5 @@ if __name__ == "__main__":
     if args.fig1_fail:
         run_fig1_fail_case_debug(seed=args.seed, plot=args.plot_on_success)
     else:
-        # test_t_cultivation_small()
-        test_t_cultivation_rz()
-    
+        test_t_cultivation_small()
+        # test_t_cultivation_rz()

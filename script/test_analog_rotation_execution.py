@@ -121,6 +121,7 @@ def test(
     trivial_return: bool = False,
     parallel_execution: bool = False,
     show_logical_qubits: bool = False,
+    logical_se_interval: int = 10,
 ):
     target_qubits_angles = {}
     if same_angle:
@@ -165,7 +166,8 @@ def test(
             consider_skip_rus=consider_skip_rus,
             tmr_assignment_method=tmr_assignment_method,
             trivial_return=trivial_return,
-            rng=np.random.default_rng(42),
+            rng=np.random.default_rng(43),
+            logical_se_interval=logical_se_interval,
         )
     else:
         total_time, log = factory_angle_execution(
@@ -179,9 +181,14 @@ def test(
             consider_skip_rus=consider_skip_rus,
             tmr_assignment_method=tmr_assignment_method,
             trivial_return=trivial_return,
-            rng=np.random.default_rng(42),
+            rng=np.random.default_rng(43),
+            logical_se_interval=logical_se_interval,
         )
 
+    print("================================================")
+    for entry in log:
+        print(entry)
+    print("================================================")
     profiling_result = analyze_execution_log(log, n_factories=n_factories)
     print_execution_profile(profile=profiling_result)
 
@@ -281,19 +288,55 @@ if __name__ == "__main__":
     #     parallel_execution=True,
     # )
 
+    # test(
+    #     n_qubits=16,
+    #     n_factories=16,
+    #     qubit_layout=(4, 4),
+    #     same_angle=True,
+    #     placement="col_based",
+    #     visualize_rus=True,
+    #     prefix="",
+    #     n_aods=1,
+    #     n_aods_se=1,
+    #     consider_skip_rus=False,
+    #     tmr_assignment_method="matching",
+    #     trivial_return=False,
+    #     parallel_execution=False,
+    #     show_logical_qubits=True,
+    # )
+
     test(
-        n_qubits=2,
-        n_factories=2,
-        qubit_layout=(2, 2),
+        n_qubits=9,
+        n_factories=9,
+        qubit_layout=(3, 3),
         same_angle=True,
         placement="col_based",
         visualize_rus=True,
         prefix="",
-        n_aods=1,
-        n_aods_se=1,
+        n_aods=3,
+        n_aods_se=3,
         consider_skip_rus=False,
         tmr_assignment_method="matching",
         trivial_return=False,
         parallel_execution=False,
         show_logical_qubits=True,
+        logical_se_interval=100,
+    )
+
+    test(
+        n_qubits=9,
+        n_factories=9,
+        qubit_layout=(3, 3),
+        same_angle=True,
+        placement="col_based",
+        visualize_rus=True,
+        prefix="",
+        n_aods=3,
+        n_aods_se=3,
+        consider_skip_rus=False,
+        tmr_assignment_method="matching",
+        trivial_return=False,
+        parallel_execution=True,
+        show_logical_qubits=True,
+        logical_se_interval=100,
     )

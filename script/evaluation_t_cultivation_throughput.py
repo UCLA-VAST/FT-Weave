@@ -200,7 +200,7 @@ def run_t_cultivation_metrics(
     )
     if not execution_log:
         return 0.0, 0.0, []
-    makespan = max(entry[1] for entry in execution_log)
+    makespan = max(entry["end_time"] for entry in execution_log)
     if makespan <= 0:
         return 0.0, 0.0, execution_log
     single_factory_throughput = total_t_from_spec(spec) / makespan / max(1, n_factories)
@@ -322,8 +322,8 @@ def main(
     k_per_qubit = 10
     settings = [
         TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
+        TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=9),
         TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
-        TSetting(fidelity_target=1e-10, factory_physical_size=4, distance=13),
     ]
 
     original_cfg = get_config().copy()

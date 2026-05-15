@@ -37,7 +37,7 @@ def main(
     settings = [
         TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
         TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
-        TSetting(fidelity_target=1e-10, factory_physical_size=4, distance=13),
+        # TSetting(fidelity_target=1e-10, factory_physical_size=4, distance=13),
     ]
 
     target_setting = next(

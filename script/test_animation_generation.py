@@ -77,7 +77,7 @@ def main() -> None:
     )
 
     layer_logs: list[list[dict[str, Any]]] = []
-    for layer in raw_layer_logs[4:]:
+    for layer in raw_layer_logs[:4]:
         if isinstance(layer, list) and all(isinstance(entry, dict) for entry in layer):
             layer_logs.append([dict(entry) for entry in layer])
     merged_log = merge_layer_logs_with_global_timeline(
@@ -119,6 +119,7 @@ def main() -> None:
     print("merged_log")
     for log in merged_log:
         print(log)
+    print("\n\n\n================================================\n\n")
     print("code")
     for entry in code["instructions"]:
         print(entry)
