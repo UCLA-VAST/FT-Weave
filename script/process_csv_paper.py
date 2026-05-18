@@ -141,6 +141,11 @@ T_CULTIVATION_MAIN_COMPILE_SETTING: tuple[bool, bool, bool] = (False, True, True
 # Change ``STAR_T_GRID_COMPARISON_CODE_DISTANCE`` when comparing a different logical distance.
 STAR_T_GRID_COMPARISON_CODE_DISTANCE: int = 9
 STAR_T_GRID_STAR_SETTING_INDEX: int = 4
+# AOD band panel: shaded region between these execution-time curves (top / bottom).
+STAR_VS_T_AOD_BAND_TOP: int = 1
+STAR_VS_T_AOD_BAND_BOTTOM: int = 5
+# Overall single-AOD panel (no band): measured curves at this AOD only.
+STAR_VS_T_OVERALL_SINGLE_AOD: int = STAR_VS_T_AOD_BAND_TOP
 
 
 # --- Legend styling (aligned with ``compare_fidelity.py`` overall infidelity figure) ---
@@ -190,14 +195,27 @@ def _build_runtime_star_vs_t_distance_colors(
 
 
 def _add_runtime_star_vs_t_legends(
-    ax,
+    fig_or_ax,
     architecture_distance_colors: dict[str, dict[int, str]],
     *,
     star_distances: list[int],
     t_line_settings: list[tuple[int, float, int]],
+    legend_position: str = "right",
 ) -> None:
-    """Two-part legend: method / line family (compare_fidelity-style) + distance pairs."""
-    method_handles = [
+    """Legend for STAR vs T runtime figures.
+
+    ``legend_position="inset"``: on-axes boxes like ``compare_fidelity._add_overall_legends``
+    (upper left: expected time + methods; lower right: code distance ``d``).
+    ``"right"`` / ``"bottom"``: figure-level legend outside the axes.
+    """
+    star_colors = architecture_distance_colors.get("STAR", {})
+    t_colors = architecture_distance_colors.get("T-cultivation", {})
+    t_ds = sorted({int(cd) for cd, _ft, _fps in t_line_settings})
+    distances = sorted(set(int(d) for d in star_distances) | set(t_ds))
+    star_ms = _RUNTIME_LEGEND_METHOD_STYLES["STAR"]
+    t_ms = _RUNTIME_LEGEND_METHOD_STYLES["T-cultivation"]
+
+    arch_handles: list = [
         Line2D(
             [0],
             [0],
@@ -205,86 +223,131 @@ def _add_runtime_star_vs_t_legends(
             linestyle=":",
             linewidth=2.2,
             markersize=0,
-            label="Expected time (STAR)",
-        ),
-        Line2D(
-            [0],
-            [0],
-            color="black",
-            linestyle="-.",
-            linewidth=2.2,
-            markersize=0,
-            label="Expected time (T)",
-        ),
-        Line2D(
-            [0],
-            [0],
-            label="STAR",
-            color=_RUNTIME_LEGEND_METHOD_COLORS["STAR"],
-            linewidth=2.5,
-            markersize=9,
-            marker=_RUNTIME_LEGEND_METHOD_STYLES["STAR"]["marker"],
-            linestyle=_RUNTIME_LEGEND_METHOD_STYLES["STAR"]["linestyle"],
-        ),
-        Line2D(
-            [0],
-            [0],
-            label="T-cultivation",
-            color=_RUNTIME_LEGEND_METHOD_COLORS["T-cultivation"],
-            linewidth=2.5,
-            markersize=9,
-            marker=_RUNTIME_LEGEND_METHOD_STYLES["T-cultivation"]["marker"],
-            linestyle=_RUNTIME_LEGEND_METHOD_STYLES["T-cultivation"]["linestyle"],
         ),
     ]
-    method_legend = ax.legend(
-        handles=method_handles,
-        loc="upper left",
-        frameon=True,
-        fontsize=_FIG_FONT_SIZE,
-    )
-    ax.add_artist(method_legend)
-
-    star_colors = architecture_distance_colors.get("STAR", {})
-    t_colors = architecture_distance_colors.get("T-cultivation", {})
-    t_ds = sorted({int(cd) for cd, _ft, _fps in t_line_settings})
-    distances = sorted(set(star_colors) | set(t_ds))
-    if distances:
-        distance_handles = [
-            (
-                Line2D(
-                    [0],
-                    [0],
-                    color=star_colors.get(d, "#333333"),
-                    linewidth=2.5,
-                    markersize=9,
-                    marker=_RUNTIME_LEGEND_METHOD_STYLES["STAR"]["marker"],
-                    linestyle=_RUNTIME_LEGEND_METHOD_STYLES["STAR"]["linestyle"],
-                ),
-                Line2D(
-                    [0],
-                    [0],
-                    color=t_colors.get(d, "#333333"),
-                    linewidth=2.5,
-                    markersize=9,
-                    marker=_RUNTIME_LEGEND_METHOD_STYLES["T-cultivation"]["marker"],
-                    linestyle=_RUNTIME_LEGEND_METHOD_STYLES["T-cultivation"][
-                        "linestyle"
-                    ],
-                ),
-            )
-            for d in distances
+    arch_labels: list[str] = ["Expected time"]
+    arch_handles.extend(
+        [
+            Line2D(
+                [0],
+                [0],
+                color=_RUNTIME_LEGEND_METHOD_COLORS["STAR"],
+                linewidth=2.5,
+                markersize=9,
+                marker=star_ms["marker"],
+                linestyle=star_ms["linestyle"],
+            ),
+            Line2D(
+                [0],
+                [0],
+                color=_RUNTIME_LEGEND_METHOD_COLORS["T-cultivation"],
+                linewidth=2.5,
+                markersize=9,
+                marker=t_ms["marker"],
+                linestyle=t_ms["linestyle"],
+            ),
         ]
-        ax.legend(
-            handles=distance_handles,
-            labels=[str(d) for d in distances],
-            title="d",
-            loc="lower right",
+    )
+    arch_labels.extend(["STAR", "T-cultivation"])
+
+    distance_handles = [
+        (
+            Line2D(
+                [0],
+                [0],
+                color=star_colors.get(int(d), "#333333"),
+                linewidth=2.5,
+                markersize=9,
+                marker=star_ms["marker"],
+                linestyle=star_ms["linestyle"],
+            ),
+            Line2D(
+                [0],
+                [0],
+                color=t_colors.get(int(d), "#333333"),
+                linewidth=2.5,
+                markersize=9,
+                marker=t_ms["marker"],
+                linestyle=t_ms["linestyle"],
+            ),
+        )
+        for d in distances
+    ]
+    distance_labels = [str(d) for d in distances]
+
+    legend_fs = _FIG_FONT_SIZE
+    if legend_position == "inset":
+        method_legend = fig_or_ax.legend(
+            handles=arch_handles,
+            labels=arch_labels,
+            loc="upper left",
             frameon=True,
-            fontsize=_FIG_FONT_SIZE,
-            title_fontsize=_FIG_FONT_SIZE,
+            fontsize=legend_fs,
+        )
+        fig_or_ax.add_artist(method_legend)
+        if distances:
+            fig_or_ax.legend(
+                handles=distance_handles,
+                labels=distance_labels,
+                title="d",
+                loc="lower right",
+                frameon=True,
+                fontsize=legend_fs,
+                title_fontsize=legend_fs,
+                handler_map={tuple: HandlerTuple(ndivide=None)},
+            )
+        return
+
+    fig = fig_or_ax
+    if legend_position == "bottom":
+        arch_legend = fig.legend(
+            handles=arch_handles,
+            labels=arch_labels,
+            title="Architecture",
+            loc="upper center",
+            bbox_to_anchor=(0.24, -0.0),
+            ncol=1,
+            frameon=True,
+            fontsize=legend_fs,
+            title_fontsize=legend_fs,
+        )
+        fig.add_artist(arch_legend)
+        fig.legend(
+            handles=distance_handles,
+            labels=distance_labels,
+            title="d",
+            loc="upper center",
+            bbox_to_anchor=(0.74, -0.0),
+            ncol=1,
+            frameon=True,
+            fontsize=legend_fs,
+            title_fontsize=legend_fs,
             handler_map={tuple: HandlerTuple(ndivide=None)},
         )
+        return
+
+    arch_legend = fig.legend(
+        handles=arch_handles,
+        labels=arch_labels,
+        title="Architecture",
+        loc="center left",
+        bbox_to_anchor=(0.93, 0.72),
+        frameon=True,
+        fontsize=legend_fs,
+        title_fontsize=legend_fs,
+    )
+    fig.add_artist(arch_legend)
+    fig.legend(
+        handles=distance_handles,
+        labels=distance_labels,
+        title="d",
+        loc="center left",
+        bbox_to_anchor=(0.93, 0.28),
+        frameon=True,
+        fontsize=legend_fs,
+        title_fontsize=legend_fs,
+        handler_map={tuple: HandlerTuple(ndivide=None)},
+    )
 
 
 def _setting_filter(df: pd.DataFrame, setting: tuple) -> pd.Series:
@@ -1499,7 +1562,7 @@ def plot_microarch_comp_setting_combined(
         top=0.86,
         bottom=0.36,
         hspace=0.40,
-        wspace=0.25,
+        wspace=0.0,
         left=0.04,
         right=0.98,
     )
@@ -2335,6 +2398,464 @@ def _print_runtime_star_vs_t_all_in_one_improvements(
         print("      ([T vs STAR] no overlapping T/STAR points for configured lines)")
 
 
+def _star_vs_t_layer_expected_bounds(
+    layer_name: str, x_vals: list[int]
+) -> dict[str, list]:
+    bounds = _get_theoretical_lower_bound(x_vals)
+    if layer_name == "full_trotter":
+        return {"star": bounds["full_trotter"]}
+    if layer_name == "zz_layers":
+        return {"star": bounds["zz_layer"]}
+    return {"star": bounds["x_layer"]}
+
+
+def _t_layer_expected_y(layer_name: str, t_bounds: dict[str, list]) -> list:
+    if layer_name == "full_trotter":
+        return t_bounds["full_trotter"]
+    if layer_name == "zz_layers":
+        return t_bounds["zz_layer"]
+    return t_bounds["x_layer"]
+
+
+def _draw_star_vs_t_runtime_panel(
+    ax,
+    *,
+    layer_name: str,
+    aod: int,
+    star_filtered: pd.DataFrame,
+    t_work: pd.DataFrame,
+    star_distances: list[int],
+    t_line_settings: list[tuple[int, float, int]],
+    architecture_distance_colors: dict[str, dict[int, str]],
+    single_black_star_expected: bool = False,
+) -> tuple[list[float], bool]:
+    """Draw one STAR vs T runtime panel; return STAR reference y-values and whether data exist."""
+    star_ms = _RUNTIME_LEGEND_METHOD_STYLES["STAR"]
+    t_ms = _RUNTIME_LEGEND_METHOD_STYLES["T-cultivation"]
+    star_ref_values: list[float] = []
+    star_x_all: list[int] = []
+    plotted_star = 0
+    plotted_t = 0
+
+    for sd in star_distances:
+        star_d = star_filtered[
+            pd.to_numeric(star_filtered["code_distance"], errors="coerce").astype(int)
+            == int(sd)
+        ].copy()
+        star_summary = _summarize_execution_by_qubits(star_d, method="STAR")
+        star_a = star_summary[star_summary["n_aods"] == aod].sort_values("n_qubits")
+        if star_a.empty:
+            continue
+        plotted_star += 1
+        star_color = architecture_distance_colors["STAR"].get(
+            int(sd), _RUNTIME_LEGEND_METHOD_COLORS["STAR"]
+        )
+        mean_vals = star_a["execution_time_mean"]
+        min_vals = star_a["execution_time_min"]
+        max_vals = star_a["execution_time_max"]
+        ax.errorbar(
+            star_a["n_qubits"],
+            mean_vals,
+            yerr=[mean_vals - min_vals, max_vals - mean_vals],
+            marker=star_ms["marker"],
+            linestyle=star_ms["linestyle"],
+            capsize=3,
+            linewidth=2.0,
+            color=star_color,
+        )
+        star_ref_values.extend(
+            star_a["execution_time_mean"].to_numpy(dtype=float).tolist()
+        )
+        x_sd = sorted(star_a["n_qubits"].dropna().astype(int).unique().tolist())
+        if x_sd and not single_black_star_expected:
+            y_star_exp = _star_vs_t_layer_expected_bounds(layer_name, x_sd)["star"]
+            ax.plot(
+                x_sd,
+                y_star_exp,
+                color=star_color,
+                linestyle=":",
+                linewidth=1.6,
+                alpha=0.9,
+            )
+        elif x_sd:
+            star_x_all.extend(x_sd)
+
+    if single_black_star_expected and star_x_all:
+        x_star = sorted(set(int(v) for v in star_x_all))
+        y_star_exp = _star_vs_t_layer_expected_bounds(layer_name, x_star)["star"]
+        ax.plot(
+            x_star,
+            y_star_exp,
+            color="black",
+            linestyle=":",
+            linewidth=1.6,
+            alpha=0.9,
+            zorder=3,
+        )
+
+    if all(
+        c in t_work.columns
+        for c in ("code_distance", "fidelity_target", "factory_physical_size")
+    ):
+        t_candidates = t_work[t_work["n_aods"] == aod].copy()
+        for cd, ft, fps in t_line_settings:
+            cd_match = pd.to_numeric(
+                t_candidates["code_distance"], errors="coerce"
+            ).astype(int) == int(cd)
+            ft_match = np.isclose(
+                pd.to_numeric(t_candidates["fidelity_target"], errors="coerce"),
+                float(ft),
+                rtol=0.0,
+                atol=0.0,
+            )
+            mask = cd_match & ft_match & (t_candidates["factory_physical_size"] == fps)
+            t_setting = t_candidates[mask]
+            t_summary = _summarize_execution_by_qubits(
+                t_setting, method="T cultivation"
+            ).sort_values("n_qubits")
+            if t_summary.empty:
+                continue
+            plotted_t += 1
+            t_color = architecture_distance_colors["T-cultivation"].get(
+                int(cd), _RUNTIME_LEGEND_METHOD_COLORS["T-cultivation"]
+            )
+            mean_vals = t_summary["execution_time_mean"]
+            min_vals = t_summary["execution_time_min"]
+            max_vals = t_summary["execution_time_max"]
+            ax.errorbar(
+                t_summary["n_qubits"],
+                mean_vals,
+                yerr=[mean_vals - min_vals, max_vals - mean_vals],
+                marker=t_ms["marker"],
+                linestyle=t_ms["linestyle"],
+                capsize=3,
+                linewidth=1.8,
+                color=t_color,
+            )
+            x_t = sorted(set(t_summary["n_qubits"].dropna().astype(int).tolist()))
+            if x_t:
+                t_bounds = _get_theoretical_lower_bound_t_cultivation(
+                    x_t, code_distance=cd, fidelity_target=ft
+                )
+                y_t_exp = _t_layer_expected_y(layer_name, t_bounds)
+                ax.plot(
+                    x_t,
+                    y_t_exp,
+                    color=t_color,
+                    linestyle="-.",
+                    linewidth=1.4,
+                    alpha=0.9,
+                )
+
+    ax.set_ylim(bottom=0)
+    if layer_name in {"zz_layers", "x_layer"}:
+        if star_ref_values:
+            _add_standard_y_ticks_with_star_reference(
+                ax, np.asarray(star_ref_values, dtype=float)
+            )
+    elif star_ref_values:
+        _add_star_reference_tick(ax, np.asarray(star_ref_values, dtype=float))
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(axis="both", which="major", pad=1)
+
+    has_data = plotted_star > 0 or plotted_t > 0
+    if not has_data:
+        ax.text(
+            0.5,
+            0.5,
+            "No data",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=_FIG_FONT_SIZE,
+        )
+    return star_ref_values, has_data
+
+
+def _merge_execution_means_at_aod_pair(
+    summary: pd.DataFrame,
+    *,
+    aod_top: int,
+    aod_bottom: int,
+) -> pd.DataFrame | None:
+    """Align mean execution time at two AOD values on shared ``n_qubits``."""
+    top = summary.loc[
+        summary["n_aods"] == int(aod_top), ["n_qubits", "execution_time_mean"]
+    ]
+    bot = summary.loc[
+        summary["n_aods"] == int(aod_bottom), ["n_qubits", "execution_time_mean"]
+    ]
+    if top.empty or bot.empty:
+        return None
+    merged = top.merge(
+        bot,
+        on="n_qubits",
+        how="inner",
+        suffixes=("_top", "_bottom"),
+    ).sort_values("n_qubits")
+    if merged.empty:
+        return None
+    return merged.rename(
+        columns={
+            "execution_time_mean_top": "y_top",
+            "execution_time_mean_bottom": "y_bottom",
+        }
+    )
+
+
+def _errorbar_at_aod(
+    ax,
+    summary: pd.DataFrame,
+    *,
+    aod: int,
+    color: str,
+    marker: str,
+    linestyle: str,
+    linewidth: float,
+) -> pd.DataFrame:
+    """Plot measured execution time at one AOD; return the subset (may be empty)."""
+    sub = summary.loc[summary["n_aods"] == int(aod)].sort_values("n_qubits")
+    if sub.empty:
+        return sub
+    mean_vals = sub["execution_time_mean"]
+    min_vals = sub["execution_time_min"]
+    max_vals = sub["execution_time_max"]
+    ax.errorbar(
+        sub["n_qubits"],
+        mean_vals,
+        yerr=[mean_vals - min_vals, max_vals - mean_vals],
+        marker=marker,
+        linestyle=linestyle,
+        capsize=3,
+        linewidth=linewidth,
+        color=color,
+        zorder=4,
+    )
+    return sub
+
+
+def _star_runtime_col_based(star_df: pd.DataFrame, setting: tuple) -> pd.DataFrame:
+    """STAR rows for runtime comparison: chosen setting and column-based placement."""
+    work = star_df[_setting_filter(star_df, setting)].copy()
+    if "placement" in work.columns:
+        work = _filter_col_based(work)
+    return work
+
+
+def _draw_star_vs_t_runtime_aod_band_panel(
+    ax,
+    *,
+    layer_name: str,
+    star_filtered: pd.DataFrame,
+    t_work: pd.DataFrame,
+    star_distances: list[int],
+    t_line_settings: list[tuple[int, float, int]],
+    architecture_distance_colors: dict[str, dict[int, str]],
+    aod_top: int = STAR_VS_T_AOD_BAND_TOP,
+    aod_bottom: int = STAR_VS_T_AOD_BAND_BOTTOM,
+) -> tuple[list[float], bool]:
+    """Single panel: shaded band between AOD ``aod_top`` (upper) and ``aod_bottom`` (lower)."""
+    star_ms = _RUNTIME_LEGEND_METHOD_STYLES["STAR"]
+    t_ms = _RUNTIME_LEGEND_METHOD_STYLES["T-cultivation"]
+    star_ref_values: list[float] = []
+    plotted = False
+    star_x_all: list[int] = []
+
+    for sd in star_distances:
+        star_d = star_filtered[
+            pd.to_numeric(star_filtered["code_distance"], errors="coerce").astype(int)
+            == int(sd)
+        ].copy()
+        star_summary = _summarize_execution_by_qubits(star_d, method="STAR")
+        band = _merge_execution_means_at_aod_pair(
+            star_summary, aod_top=aod_top, aod_bottom=aod_bottom
+        )
+        if band is None:
+            continue
+        plotted = True
+        star_color = architecture_distance_colors["STAR"].get(
+            int(sd), _RUNTIME_LEGEND_METHOD_COLORS["STAR"]
+        )
+        x = band["n_qubits"].astype(int).to_numpy()
+        y_top = band["y_top"].to_numpy(dtype=float)
+        y_bot = band["y_bottom"].to_numpy(dtype=float)
+        ax.fill_between(
+            x,
+            y_bot,
+            y_top,
+            color=star_color,
+            alpha=0.28,
+            linewidth=0,
+            zorder=1,
+        )
+        ax.plot(
+            x,
+            y_bot,
+            color=star_color,
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.85,
+            zorder=2,
+        )
+        star_at_top = _errorbar_at_aod(
+            ax,
+            star_summary,
+            aod=aod_top,
+            color=star_color,
+            marker=star_ms["marker"],
+            linestyle=star_ms["linestyle"],
+            linewidth=2.0,
+        )
+        if not star_at_top.empty:
+            star_ref_values.extend(
+                star_at_top["execution_time_mean"].to_numpy(dtype=float).tolist()
+            )
+            star_x_all.extend(star_at_top["n_qubits"].astype(int).tolist())
+        star_ref_values.extend(y_bot.tolist())
+
+    if star_x_all:
+        x_star = sorted(set(int(v) for v in star_x_all))
+        y_star_exp = _star_vs_t_layer_expected_bounds(layer_name, x_star)["star"]
+        ax.plot(
+            x_star,
+            y_star_exp,
+            color="black",
+            linestyle=":",
+            linewidth=1.6,
+            alpha=0.9,
+            zorder=3,
+        )
+
+    if all(
+        c in t_work.columns
+        for c in ("code_distance", "fidelity_target", "factory_physical_size")
+    ):
+        for cd, ft, fps in t_line_settings:
+            cd_match = pd.to_numeric(t_work["code_distance"], errors="coerce").astype(
+                int
+            ) == int(cd)
+            ft_match = np.isclose(
+                pd.to_numeric(t_work["fidelity_target"], errors="coerce"),
+                float(ft),
+                rtol=0.0,
+                atol=0.0,
+            )
+            mask = cd_match & ft_match & (t_work["factory_physical_size"] == fps)
+            t_setting = t_work.loc[mask].copy()
+            t_summary = _summarize_execution_by_qubits(
+                t_setting, method="T cultivation"
+            )
+            band = _merge_execution_means_at_aod_pair(
+                t_summary, aod_top=aod_top, aod_bottom=aod_bottom
+            )
+            if band is None:
+                continue
+            plotted = True
+            t_color = architecture_distance_colors["T-cultivation"].get(
+                int(cd), _RUNTIME_LEGEND_METHOD_COLORS["T-cultivation"]
+            )
+            x = band["n_qubits"].astype(int).to_numpy()
+            y_top = band["y_top"].to_numpy(dtype=float)
+            y_bot = band["y_bottom"].to_numpy(dtype=float)
+            ax.fill_between(
+                x,
+                y_bot,
+                y_top,
+                color=t_color,
+                alpha=0.28,
+                linewidth=0,
+                zorder=1,
+            )
+            ax.plot(
+                x,
+                y_bot,
+                color=t_color,
+                linestyle="--",
+                linewidth=1.4,
+                alpha=0.85,
+                zorder=2,
+            )
+            t_at_top = _errorbar_at_aod(
+                ax,
+                t_summary,
+                aod=aod_top,
+                color=t_color,
+                marker=t_ms["marker"],
+                linestyle=t_ms["linestyle"],
+                linewidth=1.8,
+            )
+            x_t = (
+                t_at_top["n_qubits"].astype(int).tolist()
+                if not t_at_top.empty
+                else x.tolist()
+            )
+            if x_t:
+                t_bounds = _get_theoretical_lower_bound_t_cultivation(
+                    x_t, code_distance=cd, fidelity_target=ft
+                )
+                y_t_exp = _t_layer_expected_y(layer_name, t_bounds)
+                ax.plot(
+                    x_t,
+                    y_t_exp,
+                    color=t_color,
+                    linestyle="-.",
+                    linewidth=1.4,
+                    alpha=0.9,
+                    zorder=3,
+                )
+
+    ax.set_ylim(bottom=0)
+    if star_ref_values:
+        _add_star_reference_tick(ax, np.asarray(star_ref_values, dtype=float))
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(axis="both", which="major", pad=1)
+    if not plotted:
+        ax.text(
+            0.5,
+            0.5,
+            "No data",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=_FIG_FONT_SIZE,
+        )
+    return star_ref_values, plotted
+
+
+def _apply_star_vs_t_shared_axis_labels(
+    axes,
+    *,
+    n_rows: int,
+    n_cols: int,
+    row_titles: list[str] | None = None,
+    col_titles: list[str] | None = None,
+    y_label: str = "Execution time",
+    x_label: str = "Number of Qubits",
+) -> None:
+    """One y-label per row (left column) and one x-label per column (bottom row)."""
+    for row_idx in range(n_rows):
+        for col_idx in range(n_cols):
+            ax = axes[row_idx][col_idx]
+            if col_idx == 0:
+                if row_titles is not None and row_idx < len(row_titles):
+                    ax.set_ylabel(
+                        f"{row_titles[row_idx]}\n{y_label}",
+                        fontsize=_FIG_FONT_SIZE,
+                    )
+                else:
+                    ax.set_ylabel(y_label, fontsize=_FIG_FONT_SIZE)
+            else:
+                ax.set_ylabel("")
+            if row_idx == n_rows - 1:
+                ax.set_xlabel(x_label, fontsize=_FIG_FONT_SIZE, labelpad=0)
+            else:
+                ax.set_xlabel("")
+    if col_titles is not None:
+        for col_idx, title in enumerate(col_titles):
+            if col_idx < n_cols:
+                axes[0][col_idx].set_title(title, fontsize=_FIG_FONT_SIZE, pad=10)
+
+
 def _plot_star_vs_t_cultivation_best(
     star_layers: dict[str, pd.DataFrame],
     t_layers: dict[str, pd.DataFrame],
@@ -2344,14 +2865,22 @@ def _plot_star_vs_t_cultivation_best(
     t_placement: str | None = None,
     log_console: bool = True,
 ):
-    """Compare STAR (d=7, 9 when present) and T-cultivation runtime in one 2x3 figure.
+    """Compare STAR (d=7, 9 when present) and T-cultivation runtime.
 
-    STAR d=13 is intentionally omitted from this figure; T-cultivation may still show
-    d=13 when enabled via ``_t_cultivation_runtime_line_settings``.
+    Writes two PDFs:
 
-    T-cultivation curves use a single ``placement`` slice (e.g. ``col_based``). When
-    ``t_placement`` is omitted, T rows default to ``col_based`` so one mixed-placement
-    CSV does not merge distinct architectures.
+    - ``runtime_star_vs_t_cultivation_all_in_one_aod_{aods}.pdf``: rows = AOD,
+      columns = circuit layer; legend outside on the right.
+    - ``runtime_star_vs_t_cultivation_full_trotter_aod_{aods}.pdf``: one row,
+      columns = AOD 2 and 5 (full Trotter only); legend below.
+    - ``runtime_star_vs_t_cultivation_overall_aod_1-5_band.pdf``: single full-Trotter
+      panel; shaded band between AOD 1 (top) and AOD 5 (bottom) per distance curve.
+    - ``runtime_star_vs_t_cultivation_overall_aod_{n}.pdf``: same filters, single AOD
+      measured curves only (no band; default AOD 1).
+
+    STAR d=13 is omitted from STAR curves; T-cultivation may include d=13 when
+    ``SHOW_T_CULTIVATION_D13`` is enabled. T expected-time curves are colored by
+    code distance.
     """
     if target_aods is None:
         target_aods = [2, 5]
@@ -2375,9 +2904,7 @@ def _plot_star_vs_t_cultivation_best(
     if len(layer_order) == 0:
         return
 
-    # Use setting 4 (index 4)
     setting_4 = SETTINGS[4]
-
     star_dist_all: set[int] = set()
     for layer_name in layer_order:
         star_filtered = star_layers[layer_name][
@@ -2395,196 +2922,50 @@ def _plot_star_vs_t_cultivation_best(
     if len(star_distances) == 0:
         return
 
-    fig, axes = plt.subplots(len(target_aods), len(layer_order), figsize=(16, 8.5))
-    if len(target_aods) == 1:
-        axes = [axes]
-    if len(layer_order) == 1:
-        axes = [[ax] for ax in axes]
-
     t_line_settings = _t_cultivation_runtime_line_settings()
     architecture_distance_colors = _build_runtime_star_vs_t_distance_colors(
         list(star_distances), list(t_line_settings)
     )
-    star_ms = _RUNTIME_LEGEND_METHOD_STYLES["STAR"]
-    t_ms = _RUNTIME_LEGEND_METHOD_STYLES["T-cultivation"]
-    any_runtime_data = False
+    aod_tag = "-".join(str(a) for a in target_aods)
 
+    def _t_work_for_layer(layer_name: str) -> pd.DataFrame:
+        t_work = t_layers[layer_name]
+        if "placement" not in t_work.columns:
+            return t_work
+        return t_work[
+            t_work["placement"].astype(str).str.strip() == effective_t_placement
+        ].copy()
+
+    # --- Full grid: rows = AOD, columns = layer ---
+    fig, axes = plt.subplots(len(target_aods), len(layer_order), figsize=(16, 8.5))
+    axes = np.atleast_2d(axes)
+
+    any_runtime_data = False
     for row_idx, aod in enumerate(target_aods):
         for col_idx, layer_name in enumerate(layer_order):
-            ax = axes[row_idx][col_idx]
+            ax = axes[row_idx, col_idx]
             star_filtered = star_layers[layer_name][
                 _setting_filter(star_layers[layer_name], setting_4)
             ].copy()
-            t_work = t_layers[layer_name]
-            if "placement" in t_work.columns:
-                t_work = t_work[
-                    t_work["placement"].astype(str).str.strip() == effective_t_placement
-                ].copy()
+            _, has_data = _draw_star_vs_t_runtime_panel(
+                ax,
+                layer_name=layer_name,
+                aod=int(aod),
+                star_filtered=star_filtered,
+                t_work=_t_work_for_layer(layer_name),
+                star_distances=star_distances,
+                t_line_settings=t_line_settings,
+                architecture_distance_colors=architecture_distance_colors,
+            )
+            any_runtime_data = any_runtime_data or has_data
 
-            star_ref_values: list[float] = []
-            star_x_values: list[int] = []
-            plotted_star = 0
-            for sd in star_distances:
-                star_d = star_filtered[
-                    pd.to_numeric(
-                        star_filtered["code_distance"], errors="coerce"
-                    ).astype(int)
-                    == int(sd)
-                ].copy()
-                star_summary = _summarize_execution_by_qubits(star_d, method="STAR")
-                star_a = star_summary[star_summary["n_aods"] == aod].sort_values(
-                    "n_qubits"
-                )
-                if star_a.empty:
-                    continue
-                plotted_star += 1
-                star_color = architecture_distance_colors["STAR"].get(
-                    int(sd), _RUNTIME_LEGEND_METHOD_COLORS["STAR"]
-                )
-                mean_vals = star_a["execution_time_mean"]
-                min_vals = star_a["execution_time_min"]
-                max_vals = star_a["execution_time_max"]
-                err_lower = mean_vals - min_vals
-                err_upper = max_vals - mean_vals
-                ax.errorbar(
-                    star_a["n_qubits"],
-                    mean_vals,
-                    yerr=[err_lower, err_upper],
-                    marker=star_ms["marker"],
-                    linestyle=star_ms["linestyle"],
-                    capsize=3,
-                    linewidth=2.0,
-                    color=star_color,
-                )
-                star_x_values.extend(star_a["n_qubits"].astype(int).tolist())
-                star_ref_values.extend(
-                    star_a["execution_time_mean"].to_numpy(dtype=float).tolist()
-                )
-
-            if len(star_x_values) > 0:
-                x_star = sorted(set(int(v) for v in star_x_values))
-                star_bounds = _get_theoretical_lower_bound(x_star)
-                if layer_name == "full_trotter":
-                    y_star_exp = star_bounds["full_trotter"]
-                elif layer_name == "zz_layers":
-                    y_star_exp = star_bounds["zz_layer"]
-                else:
-                    y_star_exp = star_bounds["x_layer"]
-                ax.plot(
-                    x_star,
-                    y_star_exp,
-                    color="black",
-                    linestyle=":",
-                    linewidth=1.6,
-                    alpha=0.9,
-                )
-
-            plotted_t = 0
-            if all(
-                c in t_work.columns
-                for c in (
-                    "code_distance",
-                    "fidelity_target",
-                    "factory_physical_size",
-                )
-            ):
-                t_candidates = t_work[t_work["n_aods"] == aod].copy()
-                for cd, ft, fps in t_line_settings:
-                    cd_match = pd.to_numeric(
-                        t_candidates["code_distance"], errors="coerce"
-                    ).astype(int) == int(cd)
-                    ft_match = np.isclose(
-                        pd.to_numeric(t_candidates["fidelity_target"], errors="coerce"),
-                        float(ft),
-                        rtol=0.0,
-                        atol=0.0,
-                    )
-                    mask = (
-                        cd_match
-                        & ft_match
-                        & (t_candidates["factory_physical_size"] == fps)
-                    )
-                    t_setting = t_candidates[mask]
-                    t_summary = _summarize_execution_by_qubits(
-                        t_setting, method="T cultivation"
-                    ).sort_values("n_qubits")
-                    if t_summary.empty:
-                        continue
-                    plotted_t += 1
-                    t_color = architecture_distance_colors["T-cultivation"].get(
-                        int(cd), _RUNTIME_LEGEND_METHOD_COLORS["T-cultivation"]
-                    )
-                    mean_vals = t_summary["execution_time_mean"]
-                    min_vals = t_summary["execution_time_min"]
-                    max_vals = t_summary["execution_time_max"]
-                    err_lower = mean_vals - min_vals
-                    err_upper = max_vals - mean_vals
-                    ax.errorbar(
-                        t_summary["n_qubits"],
-                        mean_vals,
-                        yerr=[err_lower, err_upper],
-                        marker=t_ms["marker"],
-                        linestyle=t_ms["linestyle"],
-                        capsize=3,
-                        linewidth=1.8,
-                        color=t_color,
-                    )
-                    x_t = sorted(
-                        set(t_summary["n_qubits"].dropna().astype(int).tolist())
-                    )
-                    if len(x_t) > 0:
-                        t_bounds = _get_theoretical_lower_bound_t_cultivation(
-                            x_t,
-                            code_distance=cd,
-                            fidelity_target=ft,
-                        )
-                        if layer_name == "full_trotter":
-                            y_t_exp = t_bounds["full_trotter"]
-                        elif layer_name == "zz_layers":
-                            y_t_exp = t_bounds["zz_layer"]
-                        else:
-                            y_t_exp = t_bounds["x_layer"]
-                        ax.plot(
-                            x_t,
-                            y_t_exp,
-                            color="black",
-                            linestyle="-.",
-                            linewidth=1.4,
-                            alpha=0.9,
-                        )
-
-            if row_idx == 0:
-                ax.set_title(pretty_name[layer_name], fontsize=_FIG_FONT_SIZE, pad=10)
-            ax.tick_params(axis="both", which="major", pad=1)
-            ax.set_xlabel("Number of Qubits", labelpad=0)
-            if col_idx == 0:
-                ax.set_ylabel(f"AOD {aod}\nExecution Time", fontsize=_FIG_FONT_SIZE)
-            else:
-                ax.set_ylabel("Execution Time", labelpad=0)
-            ax.set_ylim(bottom=0)
-            if layer_name in {"zz_layers", "x_layer"}:
-                if len(star_ref_values) > 0:
-                    _add_standard_y_ticks_with_star_reference(
-                        ax, np.asarray(star_ref_values, dtype=float)
-                    )
-            else:
-                if len(star_ref_values) > 0:
-                    _add_star_reference_tick(
-                        ax, np.asarray(star_ref_values, dtype=float)
-                    )
-            ax.grid(True, alpha=0.3)
-            if plotted_star > 0 or plotted_t > 0:
-                any_runtime_data = True
-            else:
-                ax.text(
-                    0.5,
-                    0.5,
-                    "No data",
-                    transform=ax.transAxes,
-                    ha="center",
-                    va="center",
-                    fontsize=_FIG_FONT_SIZE,
-                )
+    _apply_star_vs_t_shared_axis_labels(
+        axes,
+        n_rows=len(target_aods),
+        n_cols=len(layer_order),
+        row_titles=[f"AOD = {int(a)}" for a in target_aods],
+        col_titles=[pretty_name[k] for k in layer_order],
+    )
 
     if log_console:
         _print_runtime_star_vs_t_all_in_one_improvements(
@@ -2600,34 +2981,164 @@ def _plot_star_vs_t_cultivation_best(
 
     fig.suptitle(
         "Overall execution time comparison: STAR vs T",
-        # "Columns: Full Trotter | ZZ layers | X layer · "
-        # f"Rows: AOD 2 (top), AOD 5 (bottom)",
         fontsize=_FIG_FONT_SIZE,
         y=0.99,
     )
     if any_runtime_data:
         _add_runtime_star_vs_t_legends(
-            axes[0][0],
+            fig,
             architecture_distance_colors,
             star_distances=star_distances,
             t_line_settings=t_line_settings,
+            legend_position="right",
         )
-    fig.tight_layout(rect=(0.04, 0.06, 0.98, 0.90), pad=0.10, w_pad=0.03, h_pad=0.03)
+    fig.tight_layout(rect=(0.04, 0.06, 0.95, 0.90), pad=0.10, w_pad=0.03, h_pad=0.03)
     fig.subplots_adjust(
         top=0.90,
         hspace=0.42,
         wspace=0.28,
         bottom=0.08,
-        left=0.04,
-        right=0.98,
+        left=0.06,
+        right=0.9,
     )
-    filename = os.path.join(
+    all_in_one_path = os.path.join(
         output_dir,
-        f"runtime_star_vs_t_cultivation_all_in_one_aod_"
-        f"{'-'.join(str(a) for a in target_aods)}{filename_suffix}.pdf",
+        f"runtime_star_vs_t_cultivation_all_in_one_aod_{aod_tag}{filename_suffix}.pdf",
     )
-    fig.savefig(filename, bbox_inches="tight", pad_inches=0.04)
+    fig.savefig(all_in_one_path, bbox_inches="tight", pad_inches=0.04)
     plt.close(fig)
+
+    # --- Compact: full Trotter only, one row per AOD column ---
+    if "full_trotter" not in layer_order:
+        return
+
+    layer_name = "full_trotter"
+    fig_c, axes_c = plt.subplots(1, len(target_aods), figsize=(10, 4.2), squeeze=False)
+    axes_c = axes_c.reshape(1, -1)
+    any_compact = False
+    star_filtered_ft = star_layers[layer_name][
+        _setting_filter(star_layers[layer_name], setting_4)
+    ].copy()
+    t_work_ft = _t_work_for_layer(layer_name)
+    for col_idx, aod in enumerate(target_aods):
+        _, has_data = _draw_star_vs_t_runtime_panel(
+            axes_c[0, col_idx],
+            layer_name=layer_name,
+            aod=int(aod),
+            star_filtered=star_filtered_ft,
+            t_work=t_work_ft,
+            star_distances=star_distances,
+            t_line_settings=t_line_settings,
+            architecture_distance_colors=architecture_distance_colors,
+        )
+        any_compact = any_compact or has_data
+
+    _apply_star_vs_t_shared_axis_labels(
+        axes_c,
+        n_rows=1,
+        n_cols=len(target_aods),
+        col_titles=[f"AOD = {int(a)}" for a in target_aods],
+    )
+    fig_c.suptitle(
+        "Overall execution time comparison: STAR vs T",
+        fontsize=_FIG_FONT_SIZE,
+        y=0.98,
+    )
+    if any_compact:
+        _add_runtime_star_vs_t_legends(
+            fig_c,
+            architecture_distance_colors,
+            star_distances=star_distances,
+            t_line_settings=t_line_settings,
+            legend_position="bottom",
+        )
+    fig_c.tight_layout(rect=(0.04, 0.14, 0.98, 0.8), pad=0.10, w_pad=0.12)
+    fig_c.subplots_adjust(top=0.8, bottom=0.22, left=0.08, right=0.98)
+    compact_path = os.path.join(
+        output_dir,
+        f"runtime_star_vs_t_cultivation_full_trotter_aod_{aod_tag}{filename_suffix}.pdf",
+    )
+    fig_c.savefig(compact_path, bbox_inches="tight", pad_inches=0.04)
+    plt.close(fig_c)
+
+    # --- Single panel: full Trotter, AOD band between 1 (top) and 5 (bottom) ---
+    # STAR: setting 4 + col_based; T: main compile (``t_layers``) + col_based.
+    star_filtered_band = _star_runtime_col_based(star_layers[layer_name], setting_4)
+    t_work_band = _t_work_for_layer(layer_name)
+    fig_b, ax_b = plt.subplots(1, 1, figsize=(10, 7))
+    _, has_band = _draw_star_vs_t_runtime_aod_band_panel(
+        ax_b,
+        layer_name=layer_name,
+        star_filtered=star_filtered_band,
+        t_work=t_work_band,
+        star_distances=star_distances,
+        t_line_settings=t_line_settings,
+        architecture_distance_colors=architecture_distance_colors,
+    )
+    ax_b.set_xlabel("Number of Qubits", fontsize=_FIG_FONT_SIZE, labelpad=0)
+    ax_b.set_ylabel("Execution time", fontsize=_FIG_FONT_SIZE)
+    # ax_b.set_title("Full Trotter", fontsize=_FIG_FONT_SIZE, pad=10)
+    fig_b.suptitle(
+        "Overall execution time comparison: STAR vs T",
+        fontsize=_FIG_FONT_SIZE,
+        y=0.98,
+    )
+    if has_band:
+        _add_runtime_star_vs_t_legends(
+            ax_b,
+            architecture_distance_colors,
+            star_distances=star_distances,
+            t_line_settings=t_line_settings,
+            legend_position="inset",
+        )
+    fig_b.tight_layout(rect=(0.04, 0.06, 0.98, 0.88), pad=0.10)
+    fig_b.subplots_adjust(top=0.88, bottom=0.10, left=0.10, right=0.98)
+    band_path = os.path.join(
+        output_dir,
+        f"runtime_star_vs_t_cultivation_overall_aod_"
+        f"{STAR_VS_T_AOD_BAND_TOP}-{STAR_VS_T_AOD_BAND_BOTTOM}_band"
+        f"{filename_suffix}.pdf",
+    )
+    fig_b.savefig(band_path, bbox_inches="tight", pad_inches=0.04)
+    plt.close(fig_b)
+
+    # --- Overall panel: single AOD, no band ---
+    overall_aod = int(STAR_VS_T_OVERALL_SINGLE_AOD)
+    fig_n, ax_n = plt.subplots(1, 1, figsize=(10, 7))
+    _, has_noband = _draw_star_vs_t_runtime_panel(
+        ax_n,
+        layer_name=layer_name,
+        aod=overall_aod,
+        star_filtered=star_filtered_band,
+        t_work=t_work_band,
+        star_distances=star_distances,
+        t_line_settings=t_line_settings,
+        architecture_distance_colors=architecture_distance_colors,
+        single_black_star_expected=True,
+    )
+    ax_n.set_xlabel("Number of Qubits", fontsize=_FIG_FONT_SIZE, labelpad=0)
+    ax_n.set_ylabel("Execution time", fontsize=_FIG_FONT_SIZE)
+    fig_n.suptitle(
+        "Overall execution time comparison: STAR vs T",
+        fontsize=_FIG_FONT_SIZE,
+        y=0.98,
+    )
+    if has_noband:
+        _add_runtime_star_vs_t_legends(
+            ax_n,
+            architecture_distance_colors,
+            star_distances=star_distances,
+            t_line_settings=t_line_settings,
+            legend_position="inset",
+        )
+    fig_n.tight_layout(rect=(0.04, 0.06, 0.98, 0.88), pad=0.10)
+    fig_n.subplots_adjust(top=0.88, bottom=0.10, left=0.10, right=0.98)
+    noband_path = os.path.join(
+        output_dir,
+        f"runtime_star_vs_t_cultivation_overall_aod_{overall_aod}{filename_suffix}.pdf",
+    )
+    fig_n.savefig(noband_path, bbox_inches="tight", pad_inches=0.04)
+    plt.close(fig_n)
 
 
 def _mask_t_cultivation_triple(
@@ -3638,7 +4149,7 @@ def _plot_star_t_microarchitecture_comparison_grid(
         if y_hi > 0.0:
             ax.set_ylim(max(0.0, y_lo), y_hi)
 
-    fig, axes = plt.subplots(2, 2, figsize=(12.5, 11), squeeze=False)
+    fig, axes = plt.subplots(2, 2, figsize=(11.5, 11), squeeze=False)
     row_labels = ["STAR architecture", "T-cultivation"]
     for row, g_src, theory in (
         (0, g_star, "star"),
@@ -3726,7 +4237,7 @@ def _plot_star_t_microarchitecture_comparison_grid(
         bottom=0.26,
         left=0.06,
         right=0.98,
-        wspace=0.22,
+        wspace=0.3,
         hspace=0.50,
     )
     _fig_star_t_grid_row_arch_and_aod_titles(fig, axes, row_labels, required_aods)
@@ -3825,7 +4336,7 @@ def _plot_star_t_aod_comparison_grid(
 
     aod_color_map = _build_aod_color_map(plot_aods)
 
-    fig, axes = plt.subplots(1, 2, figsize=(13.8, 6.8), squeeze=False)
+    fig, axes = plt.subplots(1, 2, figsize=(12.5, 6.8), squeeze=False)
     ax_star = axes[0, 0]
     ax_t = axes[0, 1]
 
