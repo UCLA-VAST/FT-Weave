@@ -9,6 +9,7 @@ For each round, displays a 2D layout of magic state factories and qubits with:
 - Assignment arrows showing factory-to-qubit connections
 """
 
+from attr import Factory
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -445,7 +446,7 @@ def plot_rus_round(
 
     # Create figure
     if len(logic_qubit_locations) < 30:
-        fig, ax = plt.subplots(figsize=(8.5, 10))
+        fig, ax = plt.subplots(figsize=(6, 5))
     else:
         fig, ax = plt.subplots(figsize=(11, 13))
 
@@ -512,9 +513,9 @@ def plot_rus_round(
 
         # Angle if available
         if qubit_id in qubit_angles:
-            angle_str = f"θ={qubit_angles[qubit_id]:.4f}"
+            angle_str = f"θ={qubit_angles[qubit_id]:.3f}"
         elif qubit_trackers and qubit_id in qubit_trackers:
-            angle_str = f"θ={qubit_trackers[qubit_id].target_angle:.4f}"
+            angle_str = f"θ={qubit_trackers[qubit_id].target_angle:.3f}"
         else:
             angle_str = "?"
 
@@ -728,25 +729,19 @@ def plot_rus_round(
             facecolor=color_qubit,
             edgecolor=color_qubit_border,
             linewidth=2,
-            label="$Q_L$",
-        ),
-        mpatches.Patch(
-            facecolor=color_qubit_fail,
-            edgecolor=color_qubit_border,
-            linewidth=2,
-            label="$Q_L$ (RUS fail)",
+            label="Logical Qubit",
         ),
         mpatches.Patch(
             facecolor=color_factory,
             edgecolor=color_factory_border,
             linewidth=2,
-            label="$Q_F$",
+            label="Factory",
         ),
         mpatches.Patch(
-            facecolor="#D4AF99",
-            edgecolor=color_factory_border,
+            facecolor="#808080",
+            edgecolor="black",
             linewidth=2,
-            label="TMR:Fail",
+            label="Fail Operation",
         ),
         mpatches.FancyArrow(
             0,
@@ -769,17 +764,18 @@ def plot_rus_round(
             label="Return Move",
         ),
     ]
-    ax.legend(
+    # Widen the axes only; keep legend in a narrow right margin (same overall figsize).
+    fig.subplots_adjust(left=0.08, right=0.86, bottom=0.08, top=0.92)
+    fig.legend(
         handles=legend_elements,
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.12),
-        ncol=6,
+        loc="center left",
+        bbox_to_anchor=(0.88, 0.5),
+        bbox_transform=fig.transFigure,
+        ncol=1,
         fontsize=11,
         frameon=True,
         fancybox=True,
     )
-
-    plt.tight_layout(rect=(0, 0.16, 1, 1))
     return fig, magic_state_locations
 
 
