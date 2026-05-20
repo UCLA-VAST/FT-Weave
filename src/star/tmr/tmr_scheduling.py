@@ -11,6 +11,7 @@ def schedule_tmr_round(
     column_based_placement: bool = True,
     tmr_assignment_method: str = "matching",
     factories_list: list[int] | None = None,
+    prepare_lookahead_angles: bool = True,
 ) -> list[Factory]:
     """Schedule TMR preparation for idle factories."""
     if factories_list is None:
@@ -24,7 +25,10 @@ def schedule_tmr_round(
 
     # Get angles to prepare
     batch_angles = get_angles_for_preparation(
-        qubit_trackers, len(factories_ready_for_rz), code_distance=code_distance
+        qubit_trackers,
+        len(factories_ready_for_rz),
+        code_distance=code_distance,
+        prepare_lookahead_angles=prepare_lookahead_angles,
     )
 
     if not batch_angles:

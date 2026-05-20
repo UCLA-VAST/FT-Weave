@@ -12,7 +12,13 @@ def get_angles_for_preparation(
     qubit_trackers: dict[int, QubitAngleTracker],
     n_available_factories: int,
     code_distance: int,
+    *,
+    prepare_lookahead_angles: bool = True,
 ) -> dict[int, dict[int, int]]:
+    # Demand uses levels 0–1; factory allocation can use level 2 when lookahead is on.
+    demand_level_range = range(0, 2) if prepare_lookahead_angles else range(0, 1)
+    allocation_level_range = range(0, 3) if prepare_lookahead_angles else range(0, 1)
+
     #  compute demand for qubits
     qubit_demands = defaultdict(int)
     sum_demands = 0
@@ -21,7 +27,7 @@ def get_angles_for_preparation(
         if tracker.waiting_for_rus:
             level_demand = 2
 
-        for level in range(0, 2):
+        for level in demand_level_range:
             angle = tracker.get_angle_level(level)
             if np.isclose(angle, 0.0, atol=1e-8):
                 continue
@@ -42,7 +48,6 @@ def get_angles_for_preparation(
     # print("allocation")
     # print(allocation)
     qubit_angle_factories = {}
-    level_threshold = 3
     # print("Allocating factories for qubits:")
     # print(allocation)
     for qubit, tracker in qubit_trackers.items():
@@ -51,7 +56,7 @@ def get_angles_for_preparation(
         level_demand = 1
         demands = {}
         sum_demands = 0
-        for level in range(0, level_threshold):
+        for level in allocation_level_range:
             angle = tracker.get_angle_level(level)
             if np.isclose(angle, 0.0, atol=1e-8):
                 continue

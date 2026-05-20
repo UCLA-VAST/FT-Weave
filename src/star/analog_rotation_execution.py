@@ -45,6 +45,7 @@ def _run_tmr_round(
     code_distance: int,
     column_based_placement: bool,
     tmr_assignment_method: str,
+    prepare_lookahead_angles: bool,
     rng: np.random.Generator,
     logical_se_scheduler: LogicalSEScheduler | None = None,
 ) -> tuple[float, list[dict]]:
@@ -63,6 +64,7 @@ def _run_tmr_round(
         code_distance=code_distance,
         column_based_placement=column_based_placement,
         tmr_assignment_method=tmr_assignment_method,
+        prepare_lookahead_angles=prepare_lookahead_angles,
     )
     circuit_moment, execution_log = execute_tmr_preparation_rz(
         factory_list,
@@ -191,6 +193,7 @@ def factory_angle_execution(
     save_log: bool = False,
     log_path: str | None = None,
     logical_se_interval: int | None = None,
+    prepare_lookahead_angles: bool = True,
 ):
     """
     Execute angle preparation on magic state factories with lookahead optimization.
@@ -270,6 +273,7 @@ def factory_angle_execution(
             code_distance=code_distance,
             column_based_placement=column_based_placement,
             tmr_assignment_method=tmr_assignment_method,
+            prepare_lookahead_angles=prepare_lookahead_angles,
             rng=rng,
             logical_se_scheduler=logical_se_scheduler,
         )

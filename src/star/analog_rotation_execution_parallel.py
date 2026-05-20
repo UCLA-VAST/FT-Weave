@@ -58,6 +58,7 @@ def factory_angle_execution_parallel(
     save_log: bool = False,
     log_path: str | None = None,
     logical_se_interval: int | None = None,
+    prepare_lookahead_angles: bool = True,
 ):
     """
     Execute angle preparation with parallel TMR and RUS operations using time-stepped simulation.
@@ -323,6 +324,7 @@ def factory_angle_execution_parallel(
                 column_based_placement=column_based_placement,
                 tmr_assignment_method=tmr_assignment_method,
                 factories_list=event["factory_list"],
+                prepare_lookahead_angles=prepare_lookahead_angles,
             )
             logger.debug(f"Scheduled {len(factory_list)} factories for TMR RZ")
             local_moment, execution_log = execute_tmr_preparation_rz(

@@ -124,6 +124,7 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
     print(f"  settings_count: {len(params.get('settings', []))}")
     print(f"  trials_per_config: {params.get('trials_per_config')}")
     print(f"  logical_se_interval: {params.get('logical_se_interval')}")
+    print(f"  prepare_lookahead_angles: {params.get('prepare_lookahead_angles')}")
     print(
         "  code_distances:",
         [model.code_distance for model in logical_error_models],
@@ -167,113 +168,118 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                 for J, h, dt, n_trotter in params["tfim"]:
                     for placement in params["placement_methods"]:
                         for n_aods in params["n_aods"]:
-                            for (
-                                trivial_ret,
-                                tmr_assignment_method,
-                                skip_rus,
-                                decompose_move,
-                                parallel_execution,
-                            ) in params["settings"]:
-                                for trial in range(params["trials_per_config"]):
-                                    rng = np.random.default_rng(42 + trial)
-                                    config = {
-                                        "n_aods": n_aods,
-                                        "consider_skip_rus": skip_rus,
-                                        "trivial_return": trivial_ret,
-                                        "decompose_move": decompose_move,
-                                        "tmr_assignment_method": tmr_assignment_method,
-                                        "rng": rng,
-                                        "save_log": False,
-                                    }
-                                    print(
-                                        "Compile setting:",
-                                        config,
-                                    )
-                                    (
-                                        qc_one_layer,
-                                        full_logs,
-                                        profiling_results_per_case,
-                                    ) = generate_one_layer_2d_tfim_circuit_star(
-                                        n_qubits=n_cols * n_rows,
-                                        qubit_layout=(n_rows, n_cols),
-                                        placement=placement,
-                                        J=J,
-                                        h=h,
-                                        dt=dt,
-                                        code_distance=logical_error_model.code_distance,
-                                        config=config,
-                                        parallel_execution=parallel_execution,
-                                        analyze_result=analyze_result,
-                                        # result_path=log_dir + f"/trial_{trial}.pickle",
-                                    )
+                            for prepare_lookahead_angles in params.get(
+                                "prepare_lookahead_angles", [True]
+                            ):
+                                for (
+                                    trivial_ret,
+                                    tmr_assignment_method,
+                                    skip_rus,
+                                    decompose_move,
+                                    parallel_execution,
+                                ) in params["settings"]:
+                                    for trial in range(params["trials_per_config"]):
+                                        rng = np.random.default_rng(42 + trial)
+                                        config = {
+                                            "n_aods": n_aods,
+                                            "consider_skip_rus": skip_rus,
+                                            "trivial_return": trivial_ret,
+                                            "decompose_move": decompose_move,
+                                            "tmr_assignment_method": tmr_assignment_method,
+                                            "prepare_lookahead_angles": prepare_lookahead_angles,
+                                            "rng": rng,
+                                            "save_log": False,
+                                        }
+                                        print(
+                                            "Compile setting:",
+                                            config,
+                                        )
+                                        (
+                                            qc_one_layer,
+                                            full_logs,
+                                            profiling_results_per_case,
+                                        ) = generate_one_layer_2d_tfim_circuit_star(
+                                            n_qubits=n_cols * n_rows,
+                                            qubit_layout=(n_rows, n_cols),
+                                            placement=placement,
+                                            J=J,
+                                            h=h,
+                                            dt=dt,
+                                            code_distance=logical_error_model.code_distance,
+                                            config=config,
+                                            parallel_execution=parallel_execution,
+                                            analyze_result=analyze_result,
+                                            # result_path=log_dir + f"/trial_{trial}.pickle",
+                                        )
 
-                                    if analyze_result:
-                                        if (
-                                            profiling_writer is None
-                                            and profiling_results_per_case
-                                        ):
-                                            if profiling_file is None:
-                                                raise RuntimeError(
-                                                    "profiling_file is None while analyze_result is True"
+                                        if analyze_result:
+                                            if (
+                                                profiling_writer is None
+                                                and profiling_results_per_case
+                                            ):
+                                                if profiling_file is None:
+                                                    raise RuntimeError(
+                                                        "profiling_file is None while analyze_result is True"
+                                                    )
+                                                profiling_writer = csv.DictWriter(
+                                                    profiling_file,
+                                                    fieldnames=profiling_results_per_case[
+                                                        0
+                                                    ].keys(),
                                                 )
-                                            profiling_writer = csv.DictWriter(
-                                                profiling_file,
-                                                fieldnames=profiling_results_per_case[
-                                                    0
-                                                ].keys(),
-                                            )
-                                            if profiling_header_needed:
-                                                profiling_writer.writeheader()
-                                        if profiling_writer is not None:
-                                            for row in profiling_results_per_case:
-                                                profiling_writer.writerow(row)
+                                                if profiling_header_needed:
+                                                    profiling_writer.writeheader()
+                                            if profiling_writer is not None:
+                                                for row in profiling_results_per_case:
+                                                    profiling_writer.writerow(row)
 
-                                    result = simluate_trotter_2d_tfim_fidelity_star(
-                                        n_qubits=n_cols * n_rows,
-                                        n_factories=n_cols * n_rows,
-                                        qubit_layout=(n_rows, n_cols),
-                                        n_trotter_steps=1,  # for simplicity, we only evaluate 1 trotter step for star compilation
-                                        execution_logs=full_logs,
-                                        logical_error_model=logical_error_model,
-                                    )
-                                    total_depth = None
-                                    if analyze_result and profiling_results_per_case:
-                                        total_depth = float(
-                                            sum(
-                                                float(r.get("total_time", 0.0))
-                                                for r in profiling_results_per_case
+                                        result = simluate_trotter_2d_tfim_fidelity_star(
+                                            n_qubits=n_cols * n_rows,
+                                            n_factories=n_cols * n_rows,
+                                            qubit_layout=(n_rows, n_cols),
+                                            n_trotter_steps=1,  # for simplicity, we only evaluate 1 trotter step for star compilation
+                                            execution_logs=full_logs,
+                                            logical_error_model=logical_error_model,
+                                        )
+                                        total_depth = None
+                                        if analyze_result and profiling_results_per_case:
+                                            total_depth = float(
+                                                sum(
+                                                    float(r.get("total_time", 0.0))
+                                                    for r in profiling_results_per_case
+                                                )
                                             )
-                                        )
-                                    # ``result["fidelity"]`` already folds in
-                                    # ``fidelity_idle`` (computed from the
-                                    # SE_q events emitted by the logical-SE
-                                    # scheduler). All counts and component
-                                    # fidelities live in ``result``; we just
-                                    # add per-trial bookkeeping here.
-                                    row = {
-                                        "trial": trial,
-                                        "code_distance": logical_error_model.code_distance,
-                                        "qubit_layout": (n_rows, n_cols),
-                                        "n_trotter_steps": 1,
-                                        "placement": placement,
-                                        "n_aods": n_aods,
-                                        "tmr_assignment_method": tmr_assignment_method,
-                                        "consider_skip_rus": skip_rus,
-                                        "trivial_return": trivial_ret,
-                                        "decompose_move": decompose_move,
-                                        "parallel_execution": parallel_execution,
-                                        "logical_se_interval": logical_se_interval,
-                                        "total_depth": total_depth,
-                                        **result,
-                                    }
-                                    if result_writer is None:
-                                        result_writer = csv.DictWriter(
-                                            result_file,
-                                            fieldnames=row.keys(),
-                                        )
-                                        if result_header_needed:
-                                            result_writer.writeheader()
-                                    result_writer.writerow(row)
+                                        # ``result["fidelity"]`` already folds in
+                                        # ``fidelity_idle`` (computed from the
+                                        # SE_q events emitted by the logical-SE
+                                        # scheduler). All counts and component
+                                        # fidelities live in ``result``; we just
+                                        # add per-trial bookkeeping here.
+                                        row = {
+                                            "trial": trial,
+                                            "code_distance": logical_error_model.code_distance,
+                                            "qubit_layout": (n_rows, n_cols),
+                                            "n_trotter_steps": 1,
+                                            "placement": placement,
+                                            "n_aods": n_aods,
+                                            "tmr_assignment_method": tmr_assignment_method,
+                                            "consider_skip_rus": skip_rus,
+                                            "trivial_return": trivial_ret,
+                                            "decompose_move": decompose_move,
+                                            "parallel_execution": parallel_execution,
+                                            "prepare_lookahead_angles": prepare_lookahead_angles,
+                                            "logical_se_interval": logical_se_interval,
+                                            "total_depth": total_depth,
+                                            **result,
+                                        }
+                                        if result_writer is None:
+                                            result_writer = csv.DictWriter(
+                                                result_file,
+                                                fieldnames=row.keys(),
+                                            )
+                                            if result_header_needed:
+                                                result_writer.writeheader()
+                                        result_writer.writerow(row)
     finally:
         update_star_config(LOGICAL_SE_INTERVAL=original_logical_se_interval)
         result_file.close()
@@ -311,24 +317,76 @@ if __name__ == "__main__":
     }
 
     # fidelity evaluation for star compilation
+    # star_params = {
+    #     "qubit_layout": qubit_layout,
+    #     "tfim": tfim,
+    #     "placement_methods": ["col_based"],
+    #     "n_aods": [2, 3, 4],
+    #     "settings": [SETTINGS[4]],
+    #     "trials_per_config": 5,
+    #     # Logical-qubit SE cadence (in cycles). ``None`` disables the
+    #     # scheduler and ``fidelity_idle`` becomes 1.0.
+    #     "logical_se_interval": 10,
+    # }
+    # run_evaluation_raw(params=params, physical_error_model=physical_error_model)
+
+    logical_error_models = [
+        # LogicalErrorModel(physical_model=physical_error_model, code_distance=7),
+        LogicalErrorModel(physical_model=physical_error_model, code_distance=9),
+        # LogicalErrorModel(physical_model=physical_error_model, code_distance=13),
+    ]
+
+    # run_evaluation_star(
+    #     params=star_params,
+    #     logical_error_models=logical_error_models,
+    #     analyze_result=True,
+    # )
+
+    # # architecture study
+    # star_params = {
+    #     "qubit_layout": qubit_layout,
+    #     "tfim": tfim,
+    #     "placement_methods": ["seperate_region_row", "checkerboard"],
+    #     "n_aods": [1, 5],
+    #     "settings": [SETTINGS[4]],
+    #     "trials_per_config": 5,
+    #     "logical_se_interval": 10,
+    # }
+
+    # run_evaluation_star(
+    #     params=star_params,
+    #     logical_error_models=logical_error_models,
+    #     analyze_result=True,
+    # )
+
+    # # ablation study
+    # star_params = {
+    #     "qubit_layout": qubit_layout,
+    #     "tfim": tfim,
+    #     "placement_methods": ["col_based"],
+    #     "n_aods": [1, 5],
+    #     "settings": SETTINGS,
+    #     "trials_per_config": 5,
+    #     "logical_se_interval": 10,
+    # }
+
+    # run_evaluation_star(
+    #     params=star_params,
+    #     logical_error_models=logical_error_models,
+    #     analyze_result=True,
+    # )
+
+    # lookahead angle preparation ablation (current level only vs default)
     star_params = {
         "qubit_layout": qubit_layout,
         "tfim": tfim,
         "placement_methods": ["col_based"],
         "n_aods": [2, 3, 4],
         "settings": [SETTINGS[4]],
+        "prepare_lookahead_angles": [True, False],
         "trials_per_config": 5,
-        # Logical-qubit SE cadence (in cycles). ``None`` disables the
-        # scheduler and ``fidelity_idle`` becomes 1.0.
         "logical_se_interval": 10,
     }
-    run_evaluation_raw(params=params, physical_error_model=physical_error_model)
-
-    logical_error_models = [
-        LogicalErrorModel(physical_model=physical_error_model, code_distance=7),
-        LogicalErrorModel(physical_model=physical_error_model, code_distance=9),
-        LogicalErrorModel(physical_model=physical_error_model, code_distance=13),
-    ]
 
     run_evaluation_star(
         params=star_params,
@@ -336,13 +394,12 @@ if __name__ == "__main__":
         analyze_result=True,
     )
 
-    # architecture study
     star_params = {
         "qubit_layout": qubit_layout,
         "tfim": tfim,
-        "placement_methods": ["seperate_region_row", "checkerboard"],
+        "placement_methods": ["seperate_region_row"],
         "n_aods": [1, 5],
-        "settings": [SETTINGS[4]],
+        "settings": [SETTINGS[0]],
         "trials_per_config": 5,
         "logical_se_interval": 10,
     }
@@ -353,13 +410,28 @@ if __name__ == "__main__":
         analyze_result=True,
     )
 
-    # ablation study
     star_params = {
         "qubit_layout": qubit_layout,
         "tfim": tfim,
         "placement_methods": ["col_based"],
         "n_aods": [1, 5],
         "settings": SETTINGS,
+        "trials_per_config": 5,
+        "logical_se_interval": 10,
+    }
+
+    run_evaluation_star(
+        params=star_params,
+        logical_error_models=logical_error_models,
+        analyze_result=True,
+    )
+
+    star_params = {
+        "qubit_layout": qubit_layout,
+        "tfim": tfim,
+        "placement_methods": ["col_based"],
+        "n_aods": [2, 3, 4],
+        "settings": [SETTINGS[4]],
         "trials_per_config": 5,
         "logical_se_interval": 10,
     }
