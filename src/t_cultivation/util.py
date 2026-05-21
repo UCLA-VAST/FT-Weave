@@ -358,7 +358,11 @@ def redistribute_stage1_successes(
                     [
                         f"({dloc[0]},{dloc[1]})",
                         f"({rloc[0]},{rloc[1]})",
-                    ]
+                    ],
+                    [
+                        f"({rloc[0]},{rloc[1]})",
+                        f"({dloc[0]},{dloc[1]})",
+                    ],
                 ],
             )
 

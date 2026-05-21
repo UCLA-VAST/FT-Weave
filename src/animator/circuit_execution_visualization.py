@@ -1226,7 +1226,7 @@ def plot_star_t_cultivation_execution_subfigures(
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    fig.tight_layout(rect=(0.02, 0.02, 0.9, 0.98 if suptitle else 0.96))
+    fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.98 if suptitle else 0.96))
 
     if suptitle:
         fig.canvas.draw()
@@ -1240,13 +1240,16 @@ def plot_star_t_cultivation_execution_subfigures(
             va="bottom",
         )
 
-    fig.legend(
+    axes[0].legend(
         handles=_combined_star_t_legend_handles(),
-        loc="center left",
-        bbox_to_anchor=(0.88, 0.5),
-        ncol=1,
-        fontsize=max(10, _LEGEND_FONT_SIZE - 4),
+        loc="upper right",
+        bbox_to_anchor=(1.06, 1.0),
+        ncol=2,
+        fontsize=max(10, heading_fs - 2),
         frameon=True,
+        framealpha=0.95,
+        columnspacing=0.4,
+        handletextpad=0.2,
     )
 
     fig.savefig(save_path, dpi=300, bbox_inches="tight")

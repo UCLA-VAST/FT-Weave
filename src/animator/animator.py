@@ -521,10 +521,27 @@ class Animator:
             f' | {inst["id"]} {inst["type"]} \n elapsed time: {inst["end_time"]:.2f}'
         )
 
+        target_qs: list[int] = []
+        if "gates" in inst:
+            target_qs = [int(g["q"]) for g in inst["gates"]]
+        else:
+            for block in inst.get("inst", []):
+                for loc in block.get("locs", []):
+                    if not loc:
+                        continue
+                    target_qs.append(int(loc[0]))
+
+        uniq_qs: list[int] = []
+        seen_q: set[int] = set()
+        for q in target_qs:
+            if q in seen_q:
+                continue
+            seen_q.add(q)
+            uniq_qs.append(q)
+
         gate_xs = []
         gate_ys = []
-        for g in inst["gates"]:
-            q = g["q"]
+        for q in uniq_qs:
             gate_xs.append(self.qubit_xs[q])
             gate_ys.append(self.qubit_ys[q])
 

@@ -345,9 +345,7 @@ def t_cultivation_execution(
         )
         if logical_se_scheduler is not None:
             for k in range(int(tcfg.SE_STAGE_1)):
-                logical_se_scheduler.piggyback(
-                    start_time + k, aod_id, execution_log
-                )
+                logical_se_scheduler.piggyback(start_time + k, aod_id, execution_log)
         heapq.heappush(
             events,
             (
@@ -451,9 +449,7 @@ def t_cultivation_execution(
                     # CNOT/CZ already performs an SE round on its participants;
                     # reset their clocks first, then piggy-back any other
                     # still-idle logical qubits onto the same CNOT moment.
-                    logical_se_scheduler.reset(
-                        c_qubits + t_qubits, finish_time
-                    )
+                    logical_se_scheduler.reset(c_qubits + t_qubits, finish_time)
                     logical_se_scheduler.piggyback(
                         gate_start_time + move_dur, aod_id, execution_log
                     )
@@ -510,12 +506,15 @@ def t_cultivation_execution(
         current_time, _, first_event = heapq.heappop(events)
         # if current_time > 1000:
         #     raise RuntimeError(f"Current time is {current_time}, which is too large")
-        logger.debug(
-            "Processing events at t=%.3f first_event=%s pending_events=%d",
-            current_time,
-            first_event["type"],
-            len(events),
-        )
+        # print("current time: ", current_time)
+        # print("first event: ", first_event)
+        # print("pending events: ", len(events))
+        # logger.debug(
+        #     "Processing events at t=%.3f first_event=%s pending_events=%d",
+        #     current_time,
+        #     first_event["type"],
+        #     len(events),
+        # )
         same_time_events = {
             "op_complete": [],
             "rus_teleportation": [],
@@ -780,9 +779,7 @@ def t_cultivation_execution(
                         targets=[qubit],
                     )
                     if logical_se_scheduler is not None:
-                        logical_se_scheduler.reset(
-                            [qubit], local_time + tcfg.SE_TIME
-                        )
+                        logical_se_scheduler.reset([qubit], local_time + tcfg.SE_TIME)
                     insert_s = True
                 ready_t.remove(qubit_idx_to_node[qubit])
                 node = qubit_idx_to_node[qubit]
@@ -809,6 +806,8 @@ def t_cultivation_execution(
             )
 
             schedule_ready_clifford_operations(local_time)
+            if len(completed_nodes) == len(expanded_circuit):
+                current_time = local_time
 
         for event in same_time_events["rus_completion"]:
             factory_pool.free_factories(event["factory_list"])
@@ -828,6 +827,11 @@ def t_cultivation_execution(
         if logical_se_scheduler is not None:
             logical_se_scheduler.force_due(current_time, None, execution_log)
 
+    # print("================================================")
+    # for log in execution_log:
+    #     print(log)
+    # print("================================================")
+    # print("current time: ", current_time)
     execution_log = clean_up_execution_log(execution_log, current_time)
     for log in execution_log:
         logger.debug("Execution log: %s", log)

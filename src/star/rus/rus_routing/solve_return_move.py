@@ -75,7 +75,9 @@ def decompose_return_move(
     all_factory_locations = {}  # (x, y) -> factory_id
     for factory in factory_pool.factories:
         all_factory_locations[factory.location] = factory.id
-
+    # print("--------------------------------")
+    # print("all_factory_locations: ", all_factory_locations)
+    # print("routing_batches: ", routing_batches)
     for batch in routing_batches:
         if not batch:
             continue
@@ -112,7 +114,9 @@ def decompose_return_move(
             all_factory_locations[(x_d, y_d)] = factory_id
             if (x_s, y_s) in all_factory_locations:
                 del all_factory_locations[(x_s, y_s)]
-
+    # print("--------------------------------")
+    # print("new_routing_batches: ", new_routing_batches)
+    # print("--------------------------------")
     return new_routing_batches
 
 
