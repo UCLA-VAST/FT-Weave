@@ -2,6 +2,45 @@ from typing import Any
 from collections import defaultdict
 from src.execution_log.event_helpers import normalize_factories, resolve_indexed
 
+# Logical Clifford gates on AODs during T-cultivation (excludes factory RUS CNOTs).
+_T_CULTIVATION_CLIFFORD_OPS = frozenset({"H", "S"})
+
+
+def merge_execution_intervals(intervals: list[tuple[float, float]]) -> float:
+    """Merge overlapping ``(start, end)`` intervals and return total span."""
+    if not intervals:
+        return 0.0
+    merged: list[list[float]] = []
+    for start, end in sorted({(float(s), float(e)) for s, e in intervals}):
+        if merged and merged[-1][1] >= start:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return float(sum(end - start for start, end in merged))
+
+
+def clifford_circuit_time_from_execution_log(execution_log: list[dict]) -> float:
+    """Merged circuit time for logical Clifford ops
+
+    Factory-attached ``CNOT`` events are RUS teleportations and are excluded.
+    """
+    intervals: list[tuple[float, float]] = []
+    for entry in execution_log:
+        operation = entry.get("operation")
+        if operation not in _T_CULTIVATION_CLIFFORD_OPS:
+            continue
+        intervals.append((float(entry["start_time"]), float(entry["end_time"])))
+    return merge_execution_intervals(intervals)
+
+
+def execution_log_wall_time(execution_log: list[dict]) -> float:
+    """Wall-clock span covered by log entries (``max(end) - min(start)``)."""
+    if not execution_log:
+        return 0.0
+    starts = [float(entry["start_time"]) for entry in execution_log]
+    ends = [float(entry["end_time"]) for entry in execution_log]
+    return max(ends) - min(starts)
+
 
 def validate_assignment(result: dict) -> bool:
     """
@@ -275,30 +314,8 @@ def analyze_execution_log(
             for fid in factories:
                 tmr_failures_by_factory[fid] += 1
 
-    # Compute circuit_time for each operation (merge overlapping intervals)
-    def merge_intervals(intervals: list[tuple]) -> int:
-        """Merge overlapping intervals and return total time covered."""
-        if not intervals:
-            return 0
-        intervals = list(set(intervals))
-        intervals.sort()
-        total = 0
-        for start, end in intervals:
-            total += end - start
-
-        # merged_start, merged_end = intervals[0]
-        # total = 0
-        # for start, end in intervals[1:]:
-        #     if start <= merged_end:
-        #         merged_end = max(merged_end, end)
-        #     else:
-        #         total += merged_end - merged_start
-        #         merged_start, merged_end = start, end
-        # total += merged_end - merged_start
-        return total
-
     for op_name in ops.keys():
-        circuit_time = merge_intervals(op_intervals[op_name])
+        circuit_time = merge_execution_intervals(op_intervals[op_name])
         ops[op_name]["circuit_time"] = circuit_time
 
     # Finalize averages
@@ -328,6 +345,18 @@ def analyze_execution_log(
         info["timeline"].sort(key=lambda x: x[0])
         info["idle_time"] = overall_end - info.get("busy_time", 0)
 
+    # cal_total_time = (
+    #     6 * ops["Rz"]["circuit_time"]
+    #     + ops["CNOT"]["circuit_time"]
+    #     + ops["move"]["circuit_time"]
+    #     + ops["return_move"]["circuit_time"]
+    # )
+    # if cal_total_time != overall_end:
+    #     for log in execution_log:
+    #         print(log)
+    #     assert (
+    #         cal_total_time == overall_end
+    #     ), f"CALCULATED TOTAL TIME: {cal_total_time} != {overall_end}, {ops['Rz']['circuit_time']}, {ops['CNOT']['circuit_time']}, {ops['move']['circuit_time']}, {ops['return_move']['circuit_time']}"
     profile = {
         "total_time": overall_end,
         "ops": ops,

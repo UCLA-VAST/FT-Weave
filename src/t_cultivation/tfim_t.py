@@ -17,7 +17,11 @@ from src.ds import get_microarchitecture
 from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
 from src.tfim_layer_log import build_clifford_layer_log
 from src.t_cultivation.t_cultivation import t_cultivation_execution
-from src.util import analyze_execution_log
+from src.util import (
+    analyze_execution_log,
+    clifford_circuit_time_from_execution_log,
+    execution_log_wall_time,
+)
 
 
 def _build_t_exec_kwargs(
@@ -59,6 +63,32 @@ def _build_t_exec_kwargs(
     return exec_kwargs
 
 
+def _tfim_clifford_layer_time_before_rz(
+    qc_one_layer: list[dict],
+    full_logs: list[list[dict]],
+    round_idx: int,
+) -> float:
+    """Wall-clock time of consecutive TFIM ``CNOT``/``H`` layer logs before Rz round ``round_idx``."""
+    rz_seen = 0
+    rz_pos: int | None = None
+    for i, instr in enumerate(qc_one_layer):
+        if instr["gate"] != "Rz":
+            continue
+        if rz_seen == round_idx:
+            rz_pos = i
+            break
+        rz_seen += 1
+    if rz_pos is None:
+        return 0.0
+
+    clifford_time = 0.0
+    j = rz_pos - 1
+    while j >= 0 and qc_one_layer[j]["gate"] in ("CNOT", "H"):
+        clifford_time += execution_log_wall_time(full_logs[j])
+        j -= 1
+    return clifford_time
+
+
 def _build_t_profiling_row(
     *,
     n_qubits: int,
@@ -67,8 +97,10 @@ def _build_t_profiling_row(
     code_distance: int,
     placement: str,
     n_aods: int,
+    execution_log: list[dict],
     profiling_result: dict[str, Any],
     config: dict[str, Any],
+    tfim_clifford_layer_time: float = 0.0,
 ) -> dict[str, Any]:
     ops = profiling_result["ops"]
 
@@ -76,6 +108,7 @@ def _build_t_profiling_row(
         return float(ops.get(name, {}).get("circuit_time", 0.0))
 
     qubit_cnot_counts = profiling_result.get("qubit_cnot_counts") or []
+    n_cnot = int(sum(qubit_cnot_counts))
     max_rus = max(qubit_cnot_counts) if qubit_cnot_counts else 0
     avg_rus = (
         sum(qubit_cnot_counts) / len(qubit_cnot_counts) if qubit_cnot_counts else 0.0
@@ -96,8 +129,13 @@ def _build_t_profiling_row(
         "total_time": profiling_result["total_time"],
         "movement_time": _op_circuit_time("move"),
         "return_movement_time": _op_circuit_time("return_move"),
+        "stage1_time": _op_circuit_time("SE_stage_1"),
+        "stage2_time": _op_circuit_time("SE_stage_2"),
+        "clifford_time": tfim_clifford_layer_time
+        + clifford_circuit_time_from_execution_log(execution_log),
         "TMR_round": _op_circuit_time("Rz"),
         "RUS_round": _op_circuit_time("CNOT"),
+        "n_cnot": n_cnot,
         "max_rus_per_qubit": max_rus,
         "avg_rus_per_qubit": avg_rus,
         "initial_angle": profiling_result.get("initial_angle"),
@@ -199,8 +237,12 @@ def generate_one_layer_2d_tfim_circuit_t_cultivation(
                 code_distance=code_distance,
                 placement=placement,
                 n_aods=n_aods,
+                execution_log=log,
                 profiling_result=profiling_result,
                 config=config,
+                tfim_clifford_layer_time=_tfim_clifford_layer_time_before_rz(
+                    qc_one_layer, full_logs, rz_round
+                ),
             )
             profiling_results.append(csv_result)
             rz_round += 1

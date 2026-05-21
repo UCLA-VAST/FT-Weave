@@ -39,12 +39,11 @@ logging.getLogger("src").setLevel(logging.WARNING)
 # RUS skip, TMR assignment, and parallel angle execution are STAR-only.
 COMPILE_SETTINGS = [
     (True, False, False),
-    (False, False, False),
     (False, True, False),
     (False, True, True),
 ]
 
-_DEFAULT_COMPILE = (False, False, True)
+_DEFAULT_COMPILE = (False, True, True)
 # Former main default: ``decompose_move=True`` with stage-1 redistribution on.
 MAIN_COMPILE_SETTING = (False, True, True)
 
@@ -133,6 +132,38 @@ def run_evaluation_t_cultivation(
         output_dir, "t_cultivation_fidelity_profiling_results.csv"
     )
 
+    # Per-round execution profiling (from ``_build_t_profiling_row`` in ``tfim_t``).
+    profiling_fields = [
+        "n_qubits",
+        "qubit_cols",
+        "qubit_rows",
+        "round",
+        "code_distance",
+        "placement",
+        "n_aods",
+        "trivial_return",
+        "decompose_move",
+        "redistribute_stage1_success",
+        "total_time",
+        "movement_time",
+        "return_movement_time",
+        "stage1_time",
+        "stage2_time",
+        "clifford_time",
+        "TMR_round",
+        "RUS_round",
+        "n_cnot",
+        "max_rus_per_qubit",
+        "avg_rus_per_qubit",
+        "initial_angle",
+        "largest_angle",
+        "tmr_total",
+        "rus_total",
+        "trial",
+        "fidelity_target",
+        "factory_physical_size",
+    ]
+
     fidelity_fields = [
         "trial",
         "code_distance",
@@ -180,13 +211,12 @@ def run_evaluation_t_cultivation(
         fidelity_results_path, fidelity_fields
     )
 
-    profiling_file = (
-        open(profiling_results_path, "a", newline="") if analyze_result else None
-    )
+    profiling_file = None
     profiling_writer: csv.DictWriter | None = None
-    profiling_header_needed = (not os.path.exists(profiling_results_path)) or (
-        os.path.getsize(profiling_results_path) == 0
-    )
+    if analyze_result:
+        profiling_file, profiling_writer = ensure_csv_writer(
+            profiling_results_path, profiling_fields
+        )
 
     original_cfg = get_config().copy()
     compile_settings = params.get("compile_settings") or [_DEFAULT_COMPILE]
@@ -276,8 +306,7 @@ def run_evaluation_t_cultivation(
                                         logic_qubit_locations=logic_qubit_locations,
                                         magic_state_locations=magic_state_locations,
                                     )
-                                    if analyze_result and profiling_file is not None:
-                                        # add "code_distance", "fidelity_target""factory_physical_size" to profiling_results_per_case
+                                    if analyze_result and profiling_writer is not None:
                                         for row in profiling_results_per_case:
                                             row["trial"] = trial
                                             row["code_distance"] = setting.distance
@@ -287,15 +316,12 @@ def run_evaluation_t_cultivation(
                                             row["factory_physical_size"] = (
                                                 setting.factory_physical_size
                                             )
-                                            if profiling_writer is None:
-                                                profiling_writer = csv.DictWriter(
-                                                    profiling_file,
-                                                    fieldnames=list(row.keys()),
-                                                )
-                                                if profiling_header_needed:
-                                                    profiling_writer.writeheader()
-                                            if profiling_writer is not None:
-                                                profiling_writer.writerow(row)
+                                            profiling_writer.writerow(
+                                                {
+                                                    field: row.get(field)
+                                                    for field in profiling_fields
+                                                }
+                                            )
 
                                     n_trotter_fidelity = 1
                                     fprof = (
@@ -434,35 +460,35 @@ if __name__ == "__main__":
     }
 
     # Main fidelity/runtime sweep, matching the STAR script structure.
-    params = {
-        **common_params,
-        "placement_methods": ["col_based"],
-        "n_aods": [2, 3, 4],
-        "settings": t_settings,
-        "trials_per_config": 5,
-    }
-    run_evaluation_t_cultivation(
-        params=params,
-        physical_error_model=physical_error_model,
-        analyze_result=True,
-    )
+    # params = {
+    #     **common_params,
+    #     "placement_methods": ["col_based"],
+    #     "n_aods": [2, 3, 4],
+    #     "settings": t_settings,
+    #     "trials_per_config": 5,
+    # }
+    # run_evaluation_t_cultivation(
+    #     params=params,
+    #     physical_error_model=physical_error_model,
+    #     analyze_result=True,
+    # )
 
-    # Architecture study.
-    params = {
-        **common_params,
-        "placement_methods": ["seperate_region_row", "checkerboard"],
-        "n_aods": [1, 5],
-        "settings": t_settings,
-        "trials_per_config": 5,
-    }
-    run_evaluation_t_cultivation(
-        params=params,
-        physical_error_model=physical_error_model,
-        analyze_result=True,
-    )
+    # # Architecture study.
+    # params = {
+    #     **common_params,
+    #     "placement_methods": ["seperate_region_row", "checkerboard"],
+    #     "n_aods": [1, 5],
+    #     "settings": t_settings,
+    #     "trials_per_config": 5,
+    # }
+    # run_evaluation_t_cultivation(
+    #     params=params,
+    #     physical_error_model=physical_error_model,
+    #     analyze_result=True,
+    # )
 
-    # Ablation study. This includes AOD=1 so compare_fidelity.py can use the
-    # same col-based, one-AOD architecture subset for STAR and T-cultivation.
+    # # Ablation study. This includes AOD=1 so compare_fidelity.py can use the
+    # # same col-based, one-AOD architecture subset for STAR and T-cultivation.
     params = {
         **common_params,
         "placement_methods": ["col_based"],
@@ -470,6 +496,34 @@ if __name__ == "__main__":
         "settings": t_settings,
         "trials_per_config": 5,
         "compile_settings": COMPILE_SETTINGS,
+    }
+    run_evaluation_t_cultivation(
+        params=params,
+        physical_error_model=physical_error_model,
+        analyze_result=True,
+    )
+
+    params = {
+        **common_params,
+        "placement_methods": ["seperate_region_row"],
+        "n_aods": [1, 5],
+        "settings": t_settings,
+        "trials_per_config": 5,
+        "compile_settings": [COMPILE_SETTINGS[0]],
+    }
+    run_evaluation_t_cultivation(
+        params=params,
+        physical_error_model=physical_error_model,
+        analyze_result=True,
+    )
+
+    params = {
+        **common_params,
+        "placement_methods": ["col_based"],
+        "n_aods": [2, 3, 4],
+        "settings": t_settings,
+        "trials_per_config": 5,
+        "compile_settings": [MAIN_COMPILE_SETTING],
     }
     run_evaluation_t_cultivation(
         params=params,

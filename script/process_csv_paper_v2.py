@@ -1,4 +1,4 @@
-"""Plot STAR vs T-cultivation runtime: single 2×2 setting-study + AOD comparison figure."""
+"""Plot STAR vs T-cultivation runtime figures (setting study, AOD, runtime profile)."""
 
 import math
 import os
@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 from matplotlib.cm import ScalarMappable
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FuncFormatter
+from matplotlib.patches import Patch
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 _FIG_FONT_SIZE = 28
 
@@ -43,6 +44,8 @@ RESULT_COLS = ["total_time", "movement_time", "return_movement_time"]
 STAR_T_GRID_COMPARISON_CODE_DISTANCE: int = 9
 STAR_T_GRID_STAR_SETTING_INDEX: int = 4
 STAR_T_SETTING_STUDY_AOD: int = 1
+# Right-hand STAR figure panel: denser y-axis ticks on the AOD sweep.
+STAR_AOD_COMPARISON_Y_NBINS: int = 8
 # Setting-study left panel: crop y-axis when Vanilla (index 0) dominates the scale.
 STAR_SETTING_STUDY_VANILLA_IDX: int = 0
 # Broken-axis split: bottom panel [0, break], top panel [break, Vanilla max].
@@ -55,6 +58,48 @@ T_SETTING_STUDY_VANILLA_COMPILE: tuple[bool, bool, bool] = (True, False, False)
 T_SETTING_STUDY_COL_BASED_COMPILE_IDXS: tuple[int, ...] = (1, 2, 3)
 
 T_CULTIVATION_MAIN_COMPILE_SETTING: tuple[bool, bool, bool] = (False, True, True)
+
+# Runtime stacked-bar profile: col_based, compare AOD = 1 vs 5 at best compile setting.
+RUNTIME_PROFILE_AODS: tuple[int, ...] = (1, 5)
+RUNTIME_PROFILE_AOD_HATCH: dict[int, str | None] = {1: None, 5: "///"}
+# STAR runtime profile: col_based, (d) + Opt. skip RUS — index 4 in ``SETTINGS``.
+RUNTIME_PROFILE_STAR_SETTING: tuple = (
+    "col_based",
+    True,
+    False,
+    2,
+    True,
+    False,
+)
+RUNTIME_PROFILE_STAR_SETTING_INDEX: int = 4
+RUNTIME_PROFILE_T_COMPILE_IDX: int = 3  # "(c) + Opt. patch redist."
+_RUNTIME_PROFILE_MOVE_COMPONENTS: list[tuple[str, str, str]] = [
+    ("forward_move_mean", "Forward move", "#4C78A8"),
+    ("return_move_mean", "Return move", "#9ECAE9"),
+]
+_RUNTIME_PROFILE_T_COMPONENTS: list[tuple[str, str, str]] = [
+    *_RUNTIME_PROFILE_MOVE_COMPONENTS,
+    ("stage1_mean", "Stage 1", "#F5B318BD"),
+    ("stage2_mean", "Stage 2", "#B1BC1B"),
+    ("rus_mean", "CNOT", "#54A24B"),
+]
+_RUNTIME_PROFILE_STAR_COMPONENTS: list[tuple[str, str, str]] = [
+    *_RUNTIME_PROFILE_MOVE_COMPONENTS,
+    ("tmr_mean", "TMR", "#F58518"),
+    ("rus_mean", "CNOT", "#54A24B"),
+]
+
+_T_PROFILING_REQUIRED_COLS: tuple[str, ...] = (
+    "total_time",
+    "movement_time",
+    "return_movement_time",
+    "stage1_time",
+    "stage2_time",
+    "RUS_round",
+)
+
+_RUNTIME_PROFILE_STACK_RTOL: float = 2.0
+_RUNTIME_PROFILE_STACK_ATOL: float = 2.0
 
 SHOW_T_CULTIVATION_D13 = False
 T_CULTIVATION_RUNTIME_LINE_SETTINGS: list[tuple[int, float, int]] = [
@@ -290,6 +335,8 @@ def aggregate_full_trotter(df: pd.DataFrame) -> pd.DataFrame:
         "total_time",
         "movement_time",
         "return_movement_time",
+        "stage1_time",
+        "stage2_time",
         "TMR_round",
         "RUS_round",
     ]
@@ -334,8 +381,15 @@ def _apply_y_axis_thousands(axes: list) -> None:
         ax.yaxis.set_major_formatter(formatter)
 
 
+def _apply_panel_y_ticks(ax, *, nbins: int = STAR_AOD_COMPARISON_Y_NBINS) -> None:
+    """Use more y-axis tick marks on execution-time panels."""
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=int(nbins), prune="lower"))
+
+
 def _coerce_result_cols_numeric(df: pd.DataFrame) -> pd.DataFrame:
     numeric_cols = RESULT_COLS + [
+        "stage1_time",
+        "stage2_time",
         "TMR_round",
         "RUS_round",
         "max_rus_per_qubit",
@@ -867,6 +921,468 @@ def _draw_errorbar_from_agg(
     return sub["n_qubits"].dropna().astype(int).tolist()
 
 
+def _validate_t_profiling_workframe(
+    df: pd.DataFrame, *, context: str = ""
+) -> pd.DataFrame:
+    """Require measured stage/CNOT profiling columns from the evaluation CSV."""
+    suffix = f" ({context})" if context else ""
+    if df.empty:
+        raise ValueError(f"T-cultivation profiling data is empty{suffix}.")
+
+    _validate_t_profiling_csv_columns(df)
+
+    work = df.copy()
+    for col in _T_PROFILING_REQUIRED_COLS:
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+
+    invalid_mask = work[list(_T_PROFILING_REQUIRED_COLS)].isna().any(axis=1)
+    if invalid_mask.any():
+        raise ValueError(
+            "T-cultivation profiling CSV has non-numeric values in required columns"
+            f"{suffix} ({int(invalid_mask.sum())} row(s))."
+        )
+
+    work = work.fillna(0.0)
+    if (work["stage1_time"] + work["stage2_time"] <= 0.0).all():
+        raise ValueError(
+            "T-cultivation profiling CSV has no stage-1/stage-2 time recorded"
+            f"{suffix}. "
+            "Re-run script/evaluation_fidelity_t_cultivation.py."
+        )
+
+    return work
+
+
+def _validate_t_profiling_csv_columns(
+    df: pd.DataFrame, csv_path: str | None = None
+) -> None:
+    """Fail fast if the T-cultivation profiling CSV lacks required columns."""
+    missing = [c for c in _T_PROFILING_REQUIRED_COLS if c not in df.columns]
+    if not missing:
+        return
+    path_hint = f" ({csv_path})" if csv_path else ""
+    raise ValueError(
+        "T-cultivation profiling CSV is missing required columns"
+        f"{path_hint}: {missing}. "
+        "Re-run script/evaluation_fidelity_t_cultivation.py to regenerate "
+        "t_cultivation_fidelity_profiling_results.csv."
+    )
+
+
+def _runtime_profile_stack_sum(
+    grouped: pd.DataFrame, component_cols: list[str]
+) -> np.ndarray:
+    out = np.zeros(len(grouped), dtype=float)
+    for col in component_cols:
+        out += grouped[col].to_numpy(dtype=float)
+    return out
+
+
+def _assert_runtime_profile_stack_matches_total(
+    grouped: pd.DataFrame,
+    component_cols: list[str],
+    *,
+    context: str = "",
+    total_col: str = "total_mean",
+) -> None:
+    """Raise when stacked bar components do not sum to mean wall-clock ``total_time``."""
+    stack = _runtime_profile_stack_sum(grouped, component_cols)
+    total = grouped[total_col].to_numpy(dtype=float)
+    if np.allclose(
+        stack, total, rtol=_RUNTIME_PROFILE_STACK_RTOL, atol=_RUNTIME_PROFILE_STACK_ATOL
+    ):
+        return
+    diff = stack - total
+    bad = ~np.isclose(
+        stack, total, rtol=_RUNTIME_PROFILE_STACK_RTOL, atol=_RUNTIME_PROFILE_STACK_ATOL
+    )
+    if not bad.any():
+        return
+    details = "; ".join(
+        f"n={int(grouped.loc[idx, 'n_qubits'])}: stack={stack[idx]:.1f} "
+        f"vs total={grouped.loc[idx, total_col]:.1f} (diff={diff[idx]:+.1f})"
+        for idx in grouped.index[bad]
+    )
+    suffix = f" ({context})" if context else ""
+    raise ValueError(
+        "Runtime profile stack does not match total execution time"
+        f"{suffix}: {details}"
+    )
+
+
+def _finalize_runtime_profile_grouped(
+    grouped: pd.DataFrame,
+    components: list[tuple[str, str, str]],
+    *,
+    context: str = "",
+) -> pd.DataFrame:
+    component_cols = [col for col, _label, _color in components]
+    _assert_runtime_profile_stack_matches_total(
+        grouped, component_cols, context=context
+    )
+    return grouped
+
+
+def _aggregate_star_runtime_profile_by_qubits(
+    df: pd.DataFrame, *, context: str = ""
+) -> pd.DataFrame | None:
+    """Mean forward/return move, TMR, and RUS time per ``n_qubits`` (STAR panel)."""
+    if df.empty or "n_qubits" not in df.columns:
+        return None
+    work = df.copy()
+    work["forward_move"] = pd.to_numeric(
+        work.get("movement_time"), errors="coerce"
+    ).fillna(0.0)
+    work["return_move"] = pd.to_numeric(
+        work.get("return_movement_time"), errors="coerce"
+    ).fillna(0.0)
+    work["tmr_time"] = 6 * pd.to_numeric(work.get("TMR_round"), errors="coerce").fillna(
+        0.0
+    )
+    work["rus_time"] = pd.to_numeric(work.get("RUS_round"), errors="coerce").fillna(0.0)
+    grouped = (
+        work.groupby("n_qubits", as_index=False)
+        .agg(
+            forward_move_mean=("forward_move", "mean"),
+            return_move_mean=("return_move", "mean"),
+            tmr_mean=("tmr_time", "mean"),
+            rus_mean=("rus_time", "mean"),
+            total_mean=("total_time", "mean"),
+        )
+        .sort_values("n_qubits")
+    )
+    if grouped.empty:
+        return None
+    star_ctx = context or "STAR runtime profile"
+    return _finalize_runtime_profile_grouped(
+        grouped, _RUNTIME_PROFILE_STAR_COMPONENTS, context=star_ctx
+    )
+
+
+def _aggregate_t_runtime_profile_by_qubits(
+    df: pd.DataFrame, *, context: str = ""
+) -> pd.DataFrame | None:
+    """Mean movement, stage-1/2, CNOT time, and ``n_cnot`` per ``n_qubits`` (T panel)."""
+    if "n_qubits" not in df.columns:
+        raise ValueError(
+            "T-cultivation profiling data has no n_qubits column"
+            f"{f' ({context})' if context else ''}."
+        )
+    work = _validate_t_profiling_workframe(df, context=context)
+    work["forward_move"] = pd.to_numeric(
+        work.get("movement_time"), errors="coerce"
+    ).fillna(0.0)
+    work["return_move"] = pd.to_numeric(
+        work.get("return_movement_time"), errors="coerce"
+    ).fillna(0.0)
+    grouped = (
+        work.groupby("n_qubits", as_index=False)
+        .agg(
+            forward_move_mean=("forward_move", "mean"),
+            return_move_mean=("return_move", "mean"),
+            stage1_mean=("stage1_time", "mean"),
+            stage2_mean=("stage2_time", "mean"),
+            rus_mean=("RUS_round", "mean"),
+            total_mean=("total_time", "mean"),
+        )
+        .sort_values("n_qubits")
+    )
+    if grouped.empty:
+        return None
+    t_ctx = context or "T-cultivation runtime profile"
+    return _finalize_runtime_profile_grouped(
+        grouped, _RUNTIME_PROFILE_T_COMPONENTS, context=t_ctx
+    )
+
+
+def _star_runtime_profile_frame(
+    dfs_dict_micro: dict[str, pd.DataFrame],
+    code_distance: int,
+    aod: int,
+    *,
+    setting: tuple = RUNTIME_PROFILE_STAR_SETTING,
+) -> pd.DataFrame | None:
+    round_name = "full_trotter"
+    if round_name not in dfs_dict_micro:
+        return None
+    df = (
+        dfs_dict_micro[round_name]
+        .loc[_setting_filter(dfs_dict_micro[round_name], setting)]
+        .copy()
+    )
+    if df.empty:
+        raise ValueError(
+            "No STAR profiling rows for runtime profile setting "
+            f"{setting} (code_distance={code_distance}, AOD={aod})."
+        )
+    if "code_distance" in df.columns:
+        df = df[
+            pd.to_numeric(df["code_distance"], errors="coerce").astype(int)
+            == int(code_distance)
+        ].copy()
+    if df.empty:
+        raise ValueError(
+            f"No STAR profiling rows at code_distance={code_distance} for setting "
+            f"{setting}, AOD={aod}."
+        )
+    df["n_aods"] = pd.to_numeric(df["n_aods"], errors="coerce").astype(int)
+    df = df[df["n_aods"] == int(aod)].copy()
+    if df.empty:
+        raise ValueError(
+            f"No STAR profiling rows at AOD={aod} for setting {setting}, "
+            f"code_distance={code_distance}."
+        )
+    ctx = f"STAR setting={setting}, code_distance={code_distance}, AOD={aod}"
+    return _aggregate_star_runtime_profile_by_qubits(df, context=ctx)
+
+
+def _t_runtime_profile_frame(
+    layer_df: pd.DataFrame,
+    triple: tuple[int, float, int],
+    compile_tuple: tuple[bool, bool, bool],
+    code_distance: int,
+    aod: int,
+) -> pd.DataFrame | None:
+    work = _filter_col_based(layer_df.copy())
+    if work.empty:
+        return None
+    cd_t, ft, fps = triple
+    tr, dm, rs = compile_tuple
+    mask = _mask_t_cultivation_triple(
+        work, cd_t, ft, fps
+    ) & _mask_t_cultivation_compile(work, tr, dm, rs)
+    work = work.loc[mask].copy()
+    if work.empty:
+        return None
+    work = work[
+        pd.to_numeric(work["code_distance"], errors="coerce").astype(int)
+        == int(code_distance)
+    ].copy()
+    work["n_aods"] = pd.to_numeric(work["n_aods"], errors="coerce").astype(int)
+    work = work[work["n_aods"] == int(aod)].copy()
+    ctx = (
+        f"code_distance={code_distance}, AOD={aod}, "
+        f"compile={compile_tuple}, placement=col_based"
+    )
+    return _aggregate_t_runtime_profile_by_qubits(work, context=ctx)
+
+
+def _profile_values_for_x(
+    profile: pd.DataFrame, x_vals: list[int], col: str
+) -> np.ndarray:
+    by_qubit = profile.set_index("n_qubits")
+    out = np.zeros(len(x_vals), dtype=float)
+    for i, nq in enumerate(x_vals):
+        if int(nq) in by_qubit.index:
+            out[i] = float(by_qubit.loc[int(nq), col])
+    return out
+
+
+def _draw_runtime_profile_grouped_aod_bars(
+    ax,
+    profiles_by_aod: dict[int, pd.DataFrame | None],
+    components: list[tuple[str, str, str]],
+    *,
+    aods: tuple[int, ...] = RUNTIME_PROFILE_AODS,
+    y_axis_thousands: bool = False,
+) -> None:
+    """Grouped stacked bars: AOD = 1 (solid) and AOD = 5 (diagonal hatch) per qubit count."""
+    available = {
+        int(aod): prof
+        for aod in aods
+        if (prof := profiles_by_aod.get(int(aod))) is not None and not prof.empty
+    }
+    if not available:
+        ax.axis("off")
+        return
+
+    x_vals = sorted(
+        {
+            int(nq)
+            for prof in available.values()
+            for nq in prof["n_qubits"].dropna().astype(int).unique()
+        }
+    )
+    x_centers = np.arange(len(x_vals), dtype=float)
+    n_aod = len(available)
+    bar_width = 0.8 / max(n_aod, 1)
+    aod_list = [int(a) for a in aods if int(a) in available]
+
+    for aod_idx, aod in enumerate(aod_list):
+        prof = available[aod]
+        offset = (aod_idx - (n_aod - 1) / 2.0) * bar_width
+        positions = x_centers + offset
+        bottom = np.zeros(len(x_vals), dtype=float)
+        hatch = RUNTIME_PROFILE_AOD_HATCH.get(int(aod))
+        label_components = aod_idx == 0
+        for col, label, color in components:
+            values = _profile_values_for_x(prof, x_vals, col)
+            ax.bar(
+                positions,
+                values,
+                width=bar_width,
+                bottom=bottom,
+                label=label if label_components else None,
+                color=color,
+                alpha=0.92,
+                hatch=hatch,
+                edgecolor="white",
+                linewidth=0.4,
+            )
+            bottom += values
+
+    ax.set_xticks(x_centers)
+    ax.set_xticklabels([str(int(v)) for v in x_vals], rotation=0)
+    ax.set_ylim(bottom=0.0)
+    ax.set_axisbelow(True)
+    ax.grid(True, axis="y", alpha=0.3)
+    if y_axis_thousands:
+        _apply_y_axis_thousands([ax])
+
+
+def _runtime_profile_aod_legend_handles() -> list:
+    handles: list = []
+    for aod in RUNTIME_PROFILE_AODS:
+        hatch = RUNTIME_PROFILE_AOD_HATCH.get(int(aod))
+        handles.append(
+            Patch(
+                facecolor="0.75",
+                edgecolor="0.35",
+                hatch=hatch,
+                label=f"AOD = {int(aod)}",
+            )
+        )
+    return handles
+
+
+def _plot_star_t_runtime_profile_figure(
+    dfs_dict_micro: dict[str, pd.DataFrame],
+    t_layers_ablation: dict[str, pd.DataFrame],
+    output_dir: str,
+    *,
+    code_distance: int = STAR_T_GRID_COMPARISON_CODE_DISTANCE,
+    aods: tuple[int, ...] = RUNTIME_PROFILE_AODS,
+    t_compile_idx: int = RUNTIME_PROFILE_T_COMPILE_IDX,
+    verbose: bool = True,
+) -> None:
+    """Stacked runtime bars: STAR (left) vs T-cultivation (right), AOD 1 vs 5 grouped."""
+    if SETTINGS[RUNTIME_PROFILE_STAR_SETTING_INDEX] != RUNTIME_PROFILE_STAR_SETTING:
+        raise ValueError(
+            "RUNTIME_PROFILE_STAR_SETTING_INDEX does not match "
+            "RUNTIME_PROFILE_STAR_SETTING; update SETTINGS in sync with "
+            "evaluation_fidelity_star.py."
+        )
+    os.makedirs(output_dir, exist_ok=True)
+    cd = int(code_distance)
+    round_name = "full_trotter"
+    star_profiles = {
+        int(aod): _star_runtime_profile_frame(
+            dfs_dict_micro, cd, int(aod), setting=RUNTIME_PROFILE_STAR_SETTING
+        )
+        for aod in aods
+    }
+    triple = _primary_t_triple_for_star_t_grid(cd)
+    t_profiles: dict[int, pd.DataFrame | None] = {int(aod): None for aod in aods}
+    if (
+        triple is not None
+        and round_name in t_layers_ablation
+        and t_compile_idx < len(_T_COMPILE_ABLATION_GRID)
+    ):
+        compile_tuple = _T_COMPILE_ABLATION_GRID[t_compile_idx]
+        for aod in aods:
+            t_profiles[int(aod)] = _t_runtime_profile_frame(
+                t_layers_ablation[round_name],
+                triple,
+                compile_tuple,
+                cd,
+                int(aod),
+            )
+
+    def _has_profile(profiles: dict[int, pd.DataFrame | None]) -> bool:
+        return any(prof is not None and not prof.empty for prof in profiles.values())
+
+    if not _has_profile(star_profiles) and not _has_profile(t_profiles):
+        if verbose:
+            print(f"Skipping runtime profile: no data at d={cd}, AOD in {aods}.")
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(13.0, 6.2), squeeze=False)
+    legend_fs = _FIG_FONT_SIZE - 4
+    panel_title_fs = _FIG_FONT_SIZE - 1
+
+    if _has_profile(star_profiles):
+        _draw_runtime_profile_grouped_aod_bars(
+            axes[0, 0], star_profiles, _RUNTIME_PROFILE_STAR_COMPONENTS, aods=aods
+        )
+        axes[0, 0].set_title("STAR", fontsize=panel_title_fs, pad=8)
+    else:
+        axes[0, 0].set_title("STAR\n(no data)", fontsize=panel_title_fs)
+        axes[0, 0].axis("off")
+
+    if _has_profile(t_profiles):
+        _draw_runtime_profile_grouped_aod_bars(
+            axes[0, 1],
+            t_profiles,
+            _RUNTIME_PROFILE_T_COMPONENTS,
+            aods=aods,
+            y_axis_thousands=True,
+        )
+        axes[0, 1].set_title("T-cultivation", fontsize=panel_title_fs, pad=8)
+    else:
+        axes[0, 1].set_title("T-cultivation\n(no data)", fontsize=panel_title_fs)
+        axes[0, 1].axis("off")
+
+    y_label_star = "Execution time"
+    y_label_t = "Execution time (×10³)"
+    axes[0, 0].set_ylabel(y_label_star, fontsize=_FIG_FONT_SIZE, labelpad=2)
+    axes[0, 1].set_ylabel(y_label_t, fontsize=_FIG_FONT_SIZE, labelpad=2)
+    for col in range(2):
+        axes[0, col].set_xlabel(
+            "Number of Qubits/Factories", fontsize=_FIG_FONT_SIZE, labelpad=0
+        )
+        axes[0, col].tick_params(axis="both", which="major", pad=1)
+
+    fig.suptitle(
+        "Runtime profile",
+        fontsize=_FIG_FONT_SIZE + 1,
+        y=0.96,
+    )
+    fig.tight_layout(rect=(0.06, 0.16, 0.98, 0.90), pad=0.10, w_pad=0.18)
+    fig.subplots_adjust(top=0.83, bottom=0.24, left=0.08, right=0.98, wspace=0.18)
+    seen_labels: set[str] = set()
+    legend_handles: list = []
+    for _components in (
+        _RUNTIME_PROFILE_STAR_COMPONENTS,
+        _RUNTIME_PROFILE_T_COMPONENTS,
+    ):
+        for _col, label, color in _components:
+            if label in seen_labels:
+                continue
+            seen_labels.add(label)
+            legend_handles.append(
+                Line2D([0], [0], color=color, linewidth=8, label=label)
+            )
+    legend_handles.extend(_runtime_profile_aod_legend_handles())
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.11),
+        ncol=4,
+        fontsize=legend_fs,
+        frameon=True,
+        columnspacing=0.8,
+        handletextpad=0.4,
+    )
+
+    out_path = os.path.join(
+        output_dir, f"runtime_profile_star_vs_t_cultivation_d{cd}.pdf"
+    )
+    fig.savefig(out_path, bbox_inches="tight", pad_inches=0.06)
+    plt.close(fig)
+    if verbose:
+        print(f"Saved: {out_path}")
+
+
 def _star_grouped_aod_col_based_at_distance(
     dfs_dict_aod: dict[str, pd.DataFrame],
     setting: tuple,
@@ -1116,6 +1632,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
             )
             x_pts.extend(sub["n_qubits"].dropna().astype(int).tolist())
         _finalize_panel(ax, x_pts, theory="star")
+        _apply_panel_y_ticks(ax, nbins=STAR_AOD_COMPARISON_Y_NBINS)
 
     def _draw_t_aod_panel(ax) -> None:
         x_pts: list[int] = []
@@ -1221,6 +1738,7 @@ def process_star_t_setting_and_aod_figure(
     star_df = pd.read_csv(star_csv_file, engine="python", on_bad_lines="skip")
     t_df = pd.read_csv(t_cultivation_csv_file, engine="python", on_bad_lines="skip")
     t_df = _dedupe_duplicate_columns(t_df)
+    _validate_t_profiling_csv_columns(t_df, t_cultivation_csv_file)
     star_df = _coerce_result_cols_numeric(star_df)
     star_df = _normalize_config_types(star_df)
     t_df = _coerce_result_cols_numeric(t_df)
@@ -1241,6 +1759,13 @@ def process_star_t_setting_and_aod_figure(
             dfs_star,
             dfs_star,
             t_layers,
+            t_layers_ablation,
+            output_dir,
+            code_distance=code_distance,
+            verbose=verbose,
+        )
+        _plot_star_t_runtime_profile_figure(
+            dfs_star,
             t_layers_ablation,
             output_dir,
             code_distance=code_distance,
