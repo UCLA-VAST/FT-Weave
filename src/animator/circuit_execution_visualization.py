@@ -38,6 +38,7 @@ color_map = {
     "S": "#a98546",
     "CNOT": "#e74c3c",
     "Rz": "#e7ab3c",
+    "TMR": "#3CA8E7",
     "move": "#b64abe",
     "return_move": "#9edc6f",
     "Barrier": "#000000",
@@ -74,7 +75,7 @@ _AXIS_LABEL_FONT_SIZE = 24
 _TITLE_FONT_SIZE = 28
 _LEGEND_FONT_SIZE = 20
 # STAR stacked subfigures: same size for suptitle, per-panel title, and x-axis label.
-_STAR_SUBFIG_HEADING_FONT_SIZE = 18
+_STAR_SUBFIG_HEADING_FONT_SIZE = 18  # 24  # 16
 # Inches scaling for total figure height (larger => taller lanes / taller boxes on screen).
 _STAR_SUBFIG_DEFAULT_VERTICAL_STRETCH = 1.8
 
@@ -132,7 +133,83 @@ def _canonical_tcult_operation(operation: str) -> str:
     return _TCULT_OP_ALIASES.get(operation, operation)
 
 
+def _save_path_for_box_text_variant(save_path: str, *, show_box_text: bool) -> str:
+    """With-text uses *save_path*; without-text appends ``_no_text`` before the extension."""
+    if show_box_text:
+        return save_path
+    root, ext = os.path.splitext(save_path)
+    if root.endswith("_no_text"):
+        return save_path
+    return f"{root}_no_text{ext}"
+
+
+def _factories_key(entry: dict) -> tuple[int, ...]:
+    return tuple(sorted(normalize_factories(entry.get("factories"))))
+
+
+def _collapse_star_tmr_blocks(execution_log: list) -> list:
+    """Merge consecutive factory SE/Rz blocks into single ``TMR`` boxes for plotting."""
+    merged: list[dict] = []
+    i = 0
+    n = len(execution_log)
+    while i < n:
+        entry = execution_log[i]
+        op = entry.get("operation")
+        if op == "Barrier":
+            merged.append(entry)
+            i += 1
+            continue
+        if op not in ("SE", "Rz") or not _factories_key(entry):
+            merged.append(entry)
+            i += 1
+            continue
+
+        fkey = _factories_key(entry)
+        block = [entry]
+        i += 1
+        while i < n:
+            nxt = execution_log[i]
+            nxt_op = nxt.get("operation")
+            if nxt_op == "Barrier":
+                break
+            if nxt_op in ("SE", "Rz") and _factories_key(nxt) == fkey:
+                block.append(nxt)
+                i += 1
+            else:
+                break
+
+        rz_entries = [e for e in block if e.get("operation") == "Rz"]
+        if not any(e.get("operation") == "SE" for e in block):
+            merged.extend(block)
+            continue
+
+        theta = None
+        if rz_entries:
+            targets = rz_entries[0].get("targets")
+            if isinstance(targets, list) and len(targets) == 1:
+                theta = targets[0]
+            else:
+                theta = targets
+
+        merged.append(
+            {
+                "start_time": entry_start(block[0]),
+                "end_time": entry_end(block[-1]),
+                "factories": list(fkey),
+                "operation": "TMR",
+                "aod_assignment": block[0].get("aod_assignment"),
+                "targets": theta,
+                "move_vecs": None,
+            }
+        )
+    return merged
+
+
 def _star_box_label(operation: str, value=None, move_vecs=None) -> str:
+    if operation == "TMR":
+        if value is not None:
+            return f"TMR\nθ:{value}"
+        return "TMR"
     if operation == "Rz":
         return f"RZ\nθ:{value}"
     if operation == "S":
@@ -190,6 +267,7 @@ def _resolve_star_row_layout(
 
 def _star_execution_legend_handles():
     return [
+        mpatches.Patch(facecolor=color_map["TMR"], edgecolor="black", label="TMR"),
         mpatches.Patch(facecolor=color_map["SE"], edgecolor="black", label="SE"),
         mpatches.Patch(facecolor=color_map["CNOT"], edgecolor="black", label="CNOT"),
         mpatches.Patch(facecolor=color_map["S"], edgecolor="black", label="S gate"),
@@ -231,14 +309,18 @@ def _plot_circuit_execution_on_ax(
     unified_heading_fontsize: float | None = None,
     title_pad: float | None = None,
     suppress_box_text_ops: frozenset[str] | None = None,
+    collapse_tmr: bool = True,
 ) -> float:
     """Draw horizontal STAR execution on *ax*; returns max end time in the log."""
+    plot_log = (
+        _collapse_star_tmr_blocks(execution_log) if collapse_tmr else execution_log
+    )
     _, row_names, y_pos, n_rows = _resolve_star_row_layout(
-        execution_log, n_factories, n_logical_qubits, show_logical_qubits
+        plot_log, n_factories, n_logical_qubits, show_logical_qubits
     )
 
     max_time = 0.0
-    for entry in execution_log:
+    for entry in plot_log:
         start_time = entry_start(entry)
         end_time = entry_end(entry)
         factories = normalize_factories(entry.get("factories"))
@@ -429,16 +511,17 @@ def plot_star_execution_subfigures(
     row_plots,
     *,
     show_logical_qubits: bool = True,
-    show_box_text: bool = True,
     figure_width: float = 50.0,
     figure_vertical_stretch: float = _STAR_SUBFIG_DEFAULT_VERTICAL_STRETCH,
     suptitle: str | None = None,
     save_path: str = "output/circuit_execution/star_execution_subfigures.pdf",
+    collapse_tmr: bool = True,
 ):
     """Plot multiple horizontal STAR timelines as stacked subfigures (shared time axis).
 
     row_plots: list of (row_title, execution_log, n_factories, n_logical_qubits)
     figure_vertical_stretch: multiplies default height so each lane/box is taller on screen.
+    Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
     """
     if not row_plots:
         print("No row plots to render")
@@ -453,12 +536,17 @@ def plot_star_execution_subfigures(
         lane_counts.append(n_rows)
     row_height_ratios = [max(0.8, lanes / 3.0) for lanes in lane_counts]
 
+    def _logs_for_xmax():
+        for _, execution_log, _, _ in row_plots:
+            log = (
+                _collapse_star_tmr_blocks(execution_log)
+                if collapse_tmr
+                else execution_log
+            )
+            yield log
+
     global_xmax = (
-        max(
-            max(entry_end(entry) for entry in execution_log)
-            for _, execution_log, _, _ in row_plots
-        )
-        * 1.01
+        max(max(entry_end(entry) for entry in log) for log in _logs_for_xmax()) * 1.01
     )
 
     fig_width = max(
@@ -469,70 +557,77 @@ def plot_star_execution_subfigures(
         for _, execution_log, _, _ in row_plots
     )
     fig_height = 0.9 + 0.90 * float(figure_vertical_stretch) * sum(row_height_ratios)
-    fig, axes = plt.subplots(
-        row_count,
-        1,
-        figsize=(fig_width, fig_height),
-        sharex=True,
-        gridspec_kw={"height_ratios": row_height_ratios},
-    )
     heading_fs = _STAR_SUBFIG_HEADING_FONT_SIZE
-    if row_count == 1:
-        axes = [axes]
-
-    for ax, (row_title, execution_log, n_factories, n_logical_qubits) in zip(
-        axes, row_plots
-    ):
-        _plot_circuit_execution_on_ax(
-            ax,
-            execution_log,
-            n_factories,
-            n_logical_qubits,
-            show_box_text=show_box_text,
-            show_logical_qubits=show_logical_qubits,
-            title=row_title,
-            shared_xmax=global_xmax,
-            show_legend=False,
-            unified_heading_fontsize=heading_fs,
-            title_pad=4.0,
-        )
-
-    for ax in axes[:-1]:
-        ax.set_xlabel("")
-        ax.tick_params(axis="x", labelbottom=False)
-
     output_dir = os.path.dirname(save_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    # Let panels use most of the figure height; suptitle is placed after draw (below).
-    fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.98 if suptitle else 0.96))
+    for show_box_text in (True, False):
+        fig, axes = plt.subplots(
+            row_count,
+            1,
+            figsize=(fig_width, fig_height),
+            sharex=True,
+            gridspec_kw={"height_ratios": row_height_ratios},
+        )
+        if row_count == 1:
+            axes = [axes]
 
-    if suptitle:
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
-        bb0 = axes[0].get_tightbbox(renderer).transformed(fig.transFigure.inverted())
-        # Main title baseline just above the first row (including its subplot title).
-        fig.suptitle(
-            suptitle,
-            fontsize=heading_fs,
-            fontweight="bold",
-            y=float(min(0.998, bb0.y1 + 0.008)),
-            va="bottom",
+        for ax, (row_title, execution_log, n_factories, n_logical_qubits) in zip(
+            axes, row_plots
+        ):
+            _plot_circuit_execution_on_ax(
+                ax,
+                execution_log,
+                n_factories,
+                n_logical_qubits,
+                show_box_text=show_box_text,
+                show_logical_qubits=show_logical_qubits,
+                title=row_title,
+                shared_xmax=global_xmax,
+                show_legend=False,
+                unified_heading_fontsize=heading_fs,
+                title_pad=4.0,
+                collapse_tmr=collapse_tmr,
+            )
+
+        for ax in axes[:-1]:
+            ax.set_xlabel("")
+            ax.tick_params(axis="x", labelbottom=False)
+
+        fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.98 if suptitle else 0.96))
+
+        if suptitle:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            bb0 = (
+                axes[0].get_tightbbox(renderer).transformed(fig.transFigure.inverted())
+            )
+            fig.suptitle(
+                suptitle,
+                fontsize=heading_fs,
+                fontweight="bold",
+                y=float(min(0.998, bb0.y1 + 0.008)),
+                va="bottom",
+            )
+
+        legend_ax = axes[1] if row_count > 1 else axes[0]
+        legend_ax.legend(
+            handles=_star_execution_legend_handles(),
+            loc="upper right",
+            bbox_to_anchor=(1.0, 1.0),
+            ncol=2,
+            fontsize=max(10, heading_fs - 2),
+            frameon=True,
+            framealpha=0.95,
         )
 
-    axes[0].legend(
-        handles=_star_execution_legend_handles(),
-        loc="upper right",
-        bbox_to_anchor=(1.0, 1.0),
-        ncol=2,
-        fontsize=max(10, heading_fs - 2),
-        frameon=True,
-        framealpha=0.95,
-    )
-
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"\nSTAR execution subfigure plot saved to: {save_path}")
+        out_path = _save_path_for_box_text_variant(
+            save_path, show_box_text=show_box_text
+        )
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"\nSTAR execution subfigure plot saved to: {out_path}")
 
 
 # ============================================================================
@@ -544,17 +639,13 @@ def plot_circuit_execution(
     n_logical_qubits: int | None = None,
     save_path="output/circuit_execution.pdf",
     figure_width=16,
-    show_box_text=True,
     show_logical_qubits: bool = False,
+    collapse_tmr: bool = True,
 ):
     """
     Plot circuit execution timeline showing operations on each factory.
 
-    Args:
-        execution_log: List of (start_time, end_time, factory_id, operation, qubit)
-        n_factories: Number of factories
-        save_path: Path to save the figure
-        show_box_text: Whether to render text labels inside operation boxes
+    Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
     """
     if not execution_log:
         print("No execution log to plot")
@@ -564,25 +655,31 @@ def plot_circuit_execution(
     _, _, _, n_rows = _resolve_star_row_layout(
         execution_log, n_factories, n_logical_qubits, show_logical_qubits
     )
-    fig, ax = plt.subplots(figsize=(fig_width, max(10, n_rows)))
-    _plot_circuit_execution_on_ax(
-        ax,
-        execution_log,
-        n_factories,
-        n_logical_qubits,
-        show_box_text=show_box_text,
-        show_logical_qubits=show_logical_qubits,
-        title="STAR Execution Timeline",
-        shared_xmax=None,
-        show_legend=True,
-    )
-    plt.tight_layout(rect=(0, 0.12, 1, 1))
     base_path = save_path.split(".")[0]
     output_dir = os.path.dirname(base_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"\nCircuit execution plot saved to: {save_path}")
+    for show_box_text in (True, False):
+        fig, ax = plt.subplots(figsize=(fig_width, max(10, n_rows)))
+        _plot_circuit_execution_on_ax(
+            ax,
+            execution_log,
+            n_factories,
+            n_logical_qubits,
+            show_box_text=show_box_text,
+            show_logical_qubits=show_logical_qubits,
+            title="STAR Execution Timeline",
+            shared_xmax=None,
+            show_legend=True,
+            collapse_tmr=collapse_tmr,
+        )
+        plt.tight_layout(rect=(0, 0.12, 1, 1))
+        out_path = _save_path_for_box_text_variant(
+            save_path, show_box_text=show_box_text
+        )
+        plt.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"\nCircuit execution plot saved to: {out_path}")
 
 
 def plot_circuit_execution_vertical(
@@ -591,80 +688,79 @@ def plot_circuit_execution_vertical(
     n_logical_qubits: int | None = None,
     save_path="output/circuit_execution_vertical.pdf",
     figure_height=16,
-    show_box_text=True,
     show_logical_qubits: bool = False,
+    collapse_tmr: bool = True,
 ):
     """
     Plot circuit execution timeline with vertical time axis (top to bottom).
     Factories are arranged horizontally (left to right).
 
-    Args:
-        execution_log: List of (start_time, end_time, factory_id, operation, qubit)
-        n_factories: Number of factories
-        save_path: Path to save the figure
-        figure_height: Height of the figure in inches
-        show_box_text: Whether to render text labels inside operation boxes
+    Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
     """
     if not execution_log:
         print("No execution log to plot")
         return
 
+    plot_log = (
+        _collapse_star_tmr_blocks(execution_log) if collapse_tmr else execution_log
+    )
     circuit_length = len(execution_log)
-    if show_logical_qubits:
-        if n_logical_qubits is None:
-            max_qubit = -1
-            for entry in execution_log:
-                value = entry.get("targets")
-                qubits = _extract_qubits_from_value(value)
-                if qubits:
-                    max_qubit = max(max_qubit, max(qubits))
-            n_logical_qubits = max_qubit + 1 if max_qubit >= 0 else 0
-        row_names = [f"q{i}" for i in range(n_logical_qubits)] + [
-            f"f{i}" for i in range(n_factories)
-        ]
-        y_pos = {name: idx for idx, name in enumerate(row_names)}
-        fig, ax = plt.subplots(
-            figsize=(max(6, len(row_names) * 0.8), circuit_length / 5)
-        )
-    else:
-        fig, ax = plt.subplots(figsize=(max(8, n_factories * 0.8), circuit_length / 5))
+    base_path = save_path.split(".")[0]
+    output_dir = os.path.dirname(base_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
-    # Plot each operation as a rectangle
-    for entry in execution_log:
-        start_time = entry_start(entry)
-        end_time = entry_end(entry)
-        factories = normalize_factories(entry.get("factories"))
-        operation = entry.get("operation")
-        aod_assignment = entry.get("aod_assignment")
-        value = entry.get("targets")
-        move_vecs = entry.get("move_vecs")
+    nl = n_logical_qubits
+    if show_logical_qubits and nl is None:
+        max_qubit = -1
+        for entry in execution_log:
+            value = entry.get("targets")
+            qubits = _extract_qubits_from_value(value)
+            if qubits:
+                max_qubit = max(max_qubit, max(qubits))
+        nl = max_qubit + 1 if max_qubit >= 0 else 0
 
-        duration = end_time - start_time
-        if duration == 0:
-            duration = 0.1
-        color = color_map.get(operation, "#95a5a6")
-
-        # Determine border color: use AOD color for move operations, else black
-        alpha = _BOX_ALPHA
-        if operation in ["move", "return_move"]:
-            border_color = "black"
-            border_width = _BOX_BORDER_WIDTH
-        else:
-            border_color = "black"
-            border_width = _BOX_BORDER_WIDTH
-
-        if operation == "Barrier":
-            continue
-            ax.axhline(
-                y=start_time,
-                color=color,
-                linestyle="--",
-                linewidth=3,
-                alpha=1,
-                zorder=10,
+    for show_box_text in (True, False):
+        if show_logical_qubits:
+            row_names = [f"q{i}" for i in range(nl)] + [
+                f"f{i}" for i in range(n_factories)
+            ]
+            y_pos = {name: idx for idx, name in enumerate(row_names)}
+            fig, ax = plt.subplots(
+                figsize=(max(6, len(row_names) * 0.8), circuit_length / 5)
             )
         else:
-            # Annotate with operation and qubit
+            row_names = None
+            y_pos = None
+            fig, ax = plt.subplots(
+                figsize=(max(8, n_factories * 0.8), circuit_length / 5)
+            )
+
+        for entry in plot_log:
+            start_time = entry_start(entry)
+            end_time = entry_end(entry)
+            factories = normalize_factories(entry.get("factories"))
+            operation = entry.get("operation")
+            aod_assignment = entry.get("aod_assignment")
+            value = entry.get("targets")
+            move_vecs = entry.get("move_vecs")
+
+            duration = end_time - start_time
+            if duration == 0:
+                duration = 0.1
+            color = color_map.get(operation, "#95a5a6")
+
+            alpha = _BOX_ALPHA
+            if operation in ["move", "return_move"]:
+                border_color = "black"
+                border_width = _BOX_BORDER_WIDTH
+            else:
+                border_color = "black"
+                border_width = _BOX_BORDER_WIDTH
+
+            if operation == "Barrier":
+                continue
+
             no_text_operations = {
                 "RUS_success",
                 "RUS_fail",
@@ -691,15 +787,13 @@ def plot_circuit_execution_vertical(
                 if operation in ["move", "return_move"]:
                     box_color = _movement_color_for_aod(operation, factory_aod)
 
-                # Swap coordinates: factory_id on x-axis, time on y-axis
-                # Rectangle: (x, y), width (horizontal = factory dimension), height (vertical = time dimension)
                 rect = mpatches.Rectangle(
                     (x_coord - _BOX_Y_OFFSET, start_time),
                     _BOX_HEIGHT,
                     duration,
                     facecolor=box_color,
                     edgecolor=border_color,
-                    alpha=alpha,  # Lighter for early moves, darker for later
+                    alpha=alpha,
                     linewidth=border_width,
                     zorder=zorder,
                 )
@@ -707,7 +801,6 @@ def plot_circuit_execution_vertical(
 
                 if show_box_text and operation not in no_text_operations:
                     text = _star_box_label(operation, factory_value, factory_move_vecs)
-
                     ax.text(
                         x_coord,
                         start_time + duration / 2,
@@ -739,7 +832,6 @@ def plot_circuit_execution_vertical(
                     )
                     ax.add_patch(rect)
 
-            # Logical-qubit SE entries (no factories): render directly on q-rows.
             if show_logical_qubits and operation == "SE_q":
                 qubit_targets = _extract_qubits_from_value(value)
                 for qubit_id in qubit_targets:
@@ -771,90 +863,57 @@ def plot_circuit_execution_vertical(
                             clip_on=True,
                         )
 
-    # Configure axes
-    # Invert y-axis so time goes from top to bottom
-    ax.set_ylim(
-        max(entry_end(e) for e in execution_log) * 1.01,
-        0,
-    )
-    if show_logical_qubits:
-        ax.set_xlim(-0.5, len(row_names) - 0.5)
-    else:
-        ax.set_xlim(-0.5, n_factories - 0.5)
-    ax.set_ylabel("")
-    if show_logical_qubits:
-        ax.set_xlabel(
-            "Qubits and Magic State Factories",
-            fontsize=_AXIS_LABEL_FONT_SIZE,
-            fontweight="bold",
+        ax.set_ylim(max(entry_end(e) for e in plot_log) * 1.01, 0)
+        if show_logical_qubits:
+            ax.set_xlim(-0.5, len(row_names) - 0.5)
+        else:
+            ax.set_xlim(-0.5, n_factories - 0.5)
+        ax.set_ylabel("")
+        if show_logical_qubits:
+            ax.set_xlabel(
+                "Qubits and Magic State Factories",
+                fontsize=_AXIS_LABEL_FONT_SIZE,
+                fontweight="bold",
+            )
+            ax.set_xticks(range(len(row_names)))
+            ax.set_xticklabels(row_names)
+            ax.set_title(
+                "STAR Execution Timeline (Vertical Time)",
+                fontsize=_TITLE_FONT_SIZE,
+                fontweight="bold",
+            )
+        else:
+            ax.set_xlabel(
+                "Magic State Factory ID",
+                fontsize=_AXIS_LABEL_FONT_SIZE,
+                fontweight="bold",
+            )
+            ax.set_xticks(range(n_factories))
+            ax.set_title(
+                "STAR Execution Timeline (Vertical Time)",
+                fontsize=_TITLE_FONT_SIZE,
+                fontweight="bold",
+            )
+        ax.tick_params(axis="x", labelsize=_FIG_FONT_SIZE)
+        ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
+        ax.grid(axis="y", alpha=0.3, linestyle="--")
+        leg = ax.legend(
+            handles=_star_execution_legend_handles(),
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.14),
+            ncol=len(_star_execution_legend_handles()),
+            fontsize=_LEGEND_FONT_SIZE,
+            columnspacing=1.2,
+            handletextpad=0.5,
         )
-        ax.set_xticks(range(len(row_names)))
-        ax.set_xticklabels(row_names)
-        ax.set_title(
-            "STAR Execution Timeline (Vertical Time)",
-            fontsize=_TITLE_FONT_SIZE,
-            fontweight="bold",
+        leg.set_zorder(20)
+        plt.tight_layout(rect=(0, 0.12, 1, 1))
+        out_path = _save_path_for_box_text_variant(
+            save_path, show_box_text=show_box_text
         )
-    else:
-        ax.set_xlabel(
-            "Magic State Factory ID",
-            fontsize=_AXIS_LABEL_FONT_SIZE,
-            fontweight="bold",
-        )
-        ax.set_xticks(range(n_factories))
-        ax.set_title(
-            "STAR Execution Timeline (Vertical Time)",
-            fontsize=_TITLE_FONT_SIZE,
-            fontweight="bold",
-        )
-    ax.tick_params(axis="x", labelsize=_FIG_FONT_SIZE)
-    ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
-    ax.grid(axis="y", alpha=0.3, linestyle="--")
-
-    # Legend
-    legend_elements = [
-        mpatches.Patch(facecolor=color_map["SE"], edgecolor="black", label="SE"),
-        mpatches.Patch(facecolor=color_map["CNOT"], edgecolor="black", label="CNOT"),
-        mpatches.Patch(facecolor=color_map["S"], edgecolor="black", label="S gate"),
-        mpatches.Patch(facecolor=color_map["move"], edgecolor="black", label="Move"),
-        mpatches.Patch(
-            facecolor=color_map["return_move"],
-            edgecolor="black",
-            label="Return Move",
-        ),
-        mpatches.Patch(
-            facecolor=color_map["RUS_success"],
-            edgecolor="black",
-            label="RUS:success",
-        ),
-        mpatches.Patch(
-            facecolor=color_map["RUS_fail"],
-            edgecolor="black",
-            label="RUS:fail",
-        ),
-        mpatches.Patch(
-            facecolor=color_map["TMR_fail"],
-            edgecolor="black",
-            label="TMR:fail",
-        ),
-    ]
-    leg = ax.legend(
-        handles=legend_elements,
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.14),
-        ncol=len(legend_elements),
-        fontsize=_LEGEND_FONT_SIZE,
-        columnspacing=1.2,
-        handletextpad=0.5,
-    )
-    leg.set_zorder(20)
-    plt.tight_layout(rect=(0, 0.12, 1, 1))
-    base_path = save_path.split(".")[0]
-    output_dir = os.path.dirname(base_path)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"\nCircuit execution plot (vertical) saved to: {save_path}")
+        plt.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"\nCircuit execution plot (vertical) saved to: {out_path}")
 
 
 def plot_t_cultivation_execution(
@@ -863,28 +922,36 @@ def plot_t_cultivation_execution(
     n_factories: int,
     save_path="output/circuit_execution/t_cultivation_execution.pdf",
 ):
-    """Plot a single T-cultivation timeline with qubit and factory lanes."""
+    """Plot a single T-cultivation timeline with qubit and factory lanes.
+
+    Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
+    """
     if not execution_log:
         print("No execution log to plot")
         return
 
     rows = [f"q{i}" for i in range(n_qubits)] + [f"f{i}" for i in range(n_factories)]
-    fig, ax = plt.subplots(figsize=(10.0, max(4, 0.72 * len(rows))))
-    _plot_t_cultivation_execution_on_ax(
-        ax,
-        execution_log,
-        n_qubits=n_qubits,
-        n_factories=n_factories,
-        title="T-Cultivation Execution Timeline",
-        show_legend=True,
-    )
-
     output_dir = os.path.dirname(save_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"\nT-cultivation plot saved to: {save_path}")
+    for show_box_text in (True, False):
+        fig, ax = plt.subplots(figsize=(10.0, max(4, 0.72 * len(rows))))
+        _plot_t_cultivation_execution_on_ax(
+            ax,
+            execution_log,
+            n_qubits=n_qubits,
+            n_factories=n_factories,
+            title="T-Cultivation Execution Timeline",
+            show_legend=True,
+            show_box_text=show_box_text,
+        )
+        plt.tight_layout()
+        out_path = _save_path_for_box_text_variant(
+            save_path, show_box_text=show_box_text
+        )
+        plt.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"\nT-cultivation plot saved to: {out_path}")
 
 
 def _t_cultivation_legend_handles():
@@ -916,7 +983,7 @@ def _plot_t_cultivation_execution_on_ax(
     shared_xmax: float | None = None,
     unified_heading_fontsize: float | None = None,
     title_pad: float | None = None,
-    show_move_box_text: bool = False,
+    show_box_text: bool = True,
 ) -> None:
     rows = [f"q{i}" for i in range(n_qubits)] + [f"f{i}" for i in range(n_factories)]
     y_pos = {name: idx for idx, name in enumerate(rows)}
@@ -955,7 +1022,7 @@ def _plot_t_cultivation_execution_on_ax(
                 alpha=_BOX_ALPHA,
             )
             ax.add_patch(rect)
-            if show_move_box_text and operation in {"move", "return_move"}:
+            if show_box_text and operation in {"move", "return_move"}:
                 factory_move_vecs = _resolve_factory_move_vecs(move_vecs, idx)
                 text = _star_box_label(operation, None, factory_move_vecs)
                 if text:
@@ -971,7 +1038,6 @@ def _plot_t_cultivation_execution_on_ax(
                         linespacing=0.9,
                         clip_on=True,
                     )
-
         qubits = _extract_qubits_from_targets(value)
         if not factories and qubits:
             for qubit in qubits:
@@ -1049,6 +1115,7 @@ def plot_t_cultivation_execution_subfigures(
     """Plot multiple T-cultivation timelines as row-wise subfigures.
 
     row_plots: list of (row_title, execution_log, n_qubits, n_factories)
+    Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
     """
     if not row_plots:
         print("No row plots to render")
@@ -1066,51 +1133,58 @@ def plot_t_cultivation_execution_subfigures(
     )
 
     fig_height = 0.9 + 0.90 * sum(row_height_ratios)
-    fig, axes = plt.subplots(
-        row_count,
-        1,
-        figsize=(10.0, fig_height),
-        sharex=True,
-        gridspec_kw={"height_ratios": row_height_ratios},
-    )
     heading_fs = _STAR_SUBFIG_HEADING_FONT_SIZE
-    if row_count == 1:
-        axes = [axes]
-
-    for ax, (row_title, execution_log, n_qubits, n_factories) in zip(axes, row_plots):
-        _plot_t_cultivation_execution_on_ax(
-            ax,
-            execution_log,
-            n_qubits=n_qubits,
-            n_factories=n_factories,
-            title=row_title,
-            show_legend=False,
-            shared_xmax=global_xmax,
-            unified_heading_fontsize=heading_fs,
-            title_pad=4.0,
-        )
-
-    # Only keep the x-axis label/tick labels on the last row.
-    for ax in axes[:-1]:
-        ax.set_xlabel("")
-        ax.tick_params(axis="x", labelbottom=False)
-
-    fig.legend(
-        handles=_t_cultivation_legend_handles(),
-        loc="center right",
-        ncol=1,
-        bbox_to_anchor=(0.97, 0.5),
-        fontsize=max(10, _FIG_FONT_SIZE - 4),
-        frameon=True,
-    )
-
     output_dir = os.path.dirname(save_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    fig.tight_layout(rect=(0, 0.0, 1, 0.98))
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"\nT-cultivation subfigure plot saved to: {save_path}")
+    for show_box_text in (True, False):
+        fig, axes = plt.subplots(
+            row_count,
+            1,
+            figsize=(10.0, fig_height),
+            sharex=True,
+            gridspec_kw={"height_ratios": row_height_ratios},
+        )
+        if row_count == 1:
+            axes = [axes]
+
+        for ax, (row_title, execution_log, n_qubits, n_factories) in zip(
+            axes, row_plots
+        ):
+            _plot_t_cultivation_execution_on_ax(
+                ax,
+                execution_log,
+                n_qubits=n_qubits,
+                n_factories=n_factories,
+                title=row_title,
+                show_legend=False,
+                shared_xmax=global_xmax,
+                unified_heading_fontsize=heading_fs,
+                title_pad=4.0,
+                show_box_text=show_box_text,
+            )
+
+        for ax in axes[:-1]:
+            ax.set_xlabel("")
+            ax.tick_params(axis="x", labelbottom=False)
+
+        fig.legend(
+            handles=_t_cultivation_legend_handles(),
+            loc="center right",
+            ncol=1,
+            bbox_to_anchor=(0.97, 0.5),
+            fontsize=max(10, _FIG_FONT_SIZE - 4),
+            frameon=True,
+        )
+
+        fig.tight_layout(rect=(0, 0.0, 1, 0.98))
+        out_path = _save_path_for_box_text_variant(
+            save_path, show_box_text=show_box_text
+        )
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"\nT-cultivation subfigure plot saved to: {out_path}")
 
 
 def _legend_patch(color_key: str, label: str) -> mpatches.Patch:
@@ -1124,9 +1198,10 @@ def _legend_patch(color_key: str, label: str) -> mpatches.Patch:
 def _combined_star_t_legend_handles():
     """Merged legend for STAR + T-cultivation subfigures (one entry per operation)."""
     merged: list[tuple[str, str]] = [
+        ("TMR", "TMR"),
         ("S", "S gate"),
         ("CNOT", "CNOT"),
-        ("SE", "SE"),
+        # ("SE", "SE"),
         ("SE_stage_1", "Check Stage"),
         ("SE_stage_2", "Escape Stage"),
         ("move", "Move"),
@@ -1152,11 +1227,12 @@ def plot_star_t_cultivation_execution_subfigures(
     suptitle: str | None = None,
     figure_width: float = 16.0,
     figure_vertical_stretch: float = 1.8,
-    show_box_text: bool = True,
+    collapse_tmr: bool = True,
 ) -> None:
     """Stacked STAR (top) and T-cultivation (bottom) timelines on a shared time axis.
 
     Both rows use ``n_logical_qubits`` logical lanes and ``n_factories`` factory lanes.
+    Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
     """
     if not star_log or not t_log:
         print("STAR and T-cultivation execution logs are required")
@@ -1183,75 +1259,82 @@ def plot_star_t_cultivation_execution_subfigures(
     fig_width = max(float(figure_width) * 0.45, circuit_length / 10 + 4.5)
     fig_height = 0.9 + 0.90 * float(figure_vertical_stretch) * sum(row_height_ratios)
 
-    fig, axes = plt.subplots(
-        2,
-        1,
-        figsize=(fig_width, fig_height),
-        sharex=True,
-        gridspec_kw={"height_ratios": row_height_ratios},
-    )
     heading_fs = _STAR_SUBFIG_HEADING_FONT_SIZE
-
-    _plot_circuit_execution_on_ax(
-        axes[0],
-        star_log,
-        n_f,
-        n_qubits,
-        show_box_text=show_box_text,
-        show_logical_qubits=True,
-        title=star_row_title,
-        shared_xmax=global_xmax,
-        show_legend=False,
-        unified_heading_fontsize=heading_fs,
-        title_pad=4.0,
-        suppress_box_text_ops=frozenset({"SE", "SE_q", "CNOT"}),
-    )
-    _plot_t_cultivation_execution_on_ax(
-        axes[1],
-        t_log,
-        n_qubits=n_qubits,
-        n_factories=n_f,
-        title=t_row_title,
-        show_legend=False,
-        shared_xmax=global_xmax,
-        unified_heading_fontsize=heading_fs,
-        title_pad=4.0,
-        show_move_box_text=True,
-    )
-
-    axes[0].set_xlabel("")
-    axes[0].tick_params(axis="x", labelbottom=False)
-
     output_dir = os.path.dirname(save_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.98 if suptitle else 0.96))
-
-    if suptitle:
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
-        bb0 = axes[0].get_tightbbox(renderer).transformed(fig.transFigure.inverted())
-        fig.suptitle(
-            suptitle,
-            fontsize=heading_fs,
-            fontweight="bold",
-            y=float(min(0.998, bb0.y1 + 0.008)),
-            va="bottom",
+    for show_box_text in (True, False):
+        fig, axes = plt.subplots(
+            2,
+            1,
+            figsize=(fig_width, fig_height),
+            sharex=True,
+            gridspec_kw={"height_ratios": row_height_ratios},
         )
 
-    axes[0].legend(
-        handles=_combined_star_t_legend_handles(),
-        loc="upper right",
-        bbox_to_anchor=(1.06, 1.0),
-        ncol=2,
-        fontsize=max(10, heading_fs - 2),
-        frameon=True,
-        framealpha=0.95,
-        columnspacing=0.4,
-        handletextpad=0.2,
-    )
+        _plot_circuit_execution_on_ax(
+            axes[0],
+            star_log,
+            n_f,
+            n_qubits,
+            show_box_text=show_box_text,
+            show_logical_qubits=True,
+            title=star_row_title,
+            shared_xmax=global_xmax,
+            show_legend=False,
+            unified_heading_fontsize=heading_fs,
+            title_pad=4.0,
+            suppress_box_text_ops=frozenset({"SE", "SE_q", "CNOT"}),
+            collapse_tmr=collapse_tmr,
+        )
+        _plot_t_cultivation_execution_on_ax(
+            axes[1],
+            t_log,
+            n_qubits=n_qubits,
+            n_factories=n_f,
+            title=t_row_title,
+            show_legend=False,
+            shared_xmax=global_xmax,
+            unified_heading_fontsize=heading_fs,
+            title_pad=4.0,
+            show_box_text=show_box_text,
+        )
 
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\nSTAR vs T-cultivation subfigure plot saved to: {save_path}")
+        axes[0].set_xlabel("")
+        axes[0].tick_params(axis="x", labelbottom=False)
+
+        fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.98 if suptitle else 0.96))
+
+        if suptitle:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            bb0 = (
+                axes[0].get_tightbbox(renderer).transformed(fig.transFigure.inverted())
+            )
+            fig.suptitle(
+                suptitle,
+                fontsize=heading_fs,
+                fontweight="bold",
+                y=float(min(0.998, bb0.y1 + 0.008)),
+                va="bottom",
+            )
+
+        axes[0].legend(
+            handles=_combined_star_t_legend_handles(),
+            loc="upper right",
+            bbox_to_anchor=(1.06, 1.0),
+            ncol=2,
+            fontsize=max(10, heading_fs - 2),
+            frameon=True,
+            framealpha=0.95,
+            columnspacing=0.4,
+            handletextpad=0.2,
+        )
+
+        out_path = _save_path_for_box_text_variant(
+            save_path, show_box_text=show_box_text
+        )
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"\nSTAR vs T-cultivation subfigure plot saved to: {out_path}")
