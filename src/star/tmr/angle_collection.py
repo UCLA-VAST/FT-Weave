@@ -14,10 +14,14 @@ def get_angles_for_preparation(
     code_distance: int,
     *,
     prepare_lookahead_angles: bool = True,
+    allocation_level_range: range | None = None,
 ) -> dict[int, dict[int, int]]:
-    # Demand uses levels 0–1; factory allocation can use level 2 when lookahead is on.
+    # Demand uses levels 0–1; factory allocation can use deeper levels when lookahead is on.
     demand_level_range = range(0, 2) if prepare_lookahead_angles else range(0, 1)
-    allocation_level_range = range(0, 3) if prepare_lookahead_angles else range(0, 1)
+    if allocation_level_range is None:
+        allocation_level_range = (
+            range(0, 2) if prepare_lookahead_angles else range(0, 1)
+        )
 
     #  compute demand for qubits
     qubit_demands = defaultdict(int)
