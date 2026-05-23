@@ -960,8 +960,8 @@ def _t_cultivation_legend_handles():
         ("CNOT", "CNOT"),
         ("S", "S"),
         ("T", "T"),
-        ("SE_stage_1", "Prep. Stage 1"),
-        ("SE_stage_2", "Prep. Stage 2"),
+        ("SE_stage_1", "Check Stage"),
+        ("SE_stage_2", "Escape Stage"),
         ("move", "Move"),
         ("return_move", "Return Move"),
     ]

@@ -57,7 +57,7 @@ def check_teleportation_worthiness(
     """
     Check if performing injection is worth it based on movement time and qubit counts.
     """
-    THRESHOLD_HIGH_TMR = np.sqrt(total_qubits)
+    THRESHOLD_HIGH_TMR = 0.1 * total_qubits
     THRESHOLD_HIGH_RUS = THRESHOLD_HIGH_TMR
 
     def _has_better_idle_factory_for_batch(batch) -> bool:

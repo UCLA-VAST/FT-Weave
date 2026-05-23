@@ -494,7 +494,7 @@ if __name__ == "__main__":
         "placement_methods": ["col_based"],
         "n_aods": [1, 5],
         "settings": t_settings,
-        "trials_per_config": 5,
+        "trials_per_config": 10,
         "compile_settings": COMPILE_SETTINGS,
     }
     run_evaluation_t_cultivation(
@@ -508,7 +508,7 @@ if __name__ == "__main__":
         "placement_methods": ["seperate_region_row"],
         "n_aods": [1, 5],
         "settings": t_settings,
-        "trials_per_config": 5,
+        "trials_per_config": 10,
         "compile_settings": [COMPILE_SETTINGS[0]],
     }
     run_evaluation_t_cultivation(
@@ -522,7 +522,7 @@ if __name__ == "__main__":
         "placement_methods": ["col_based"],
         "n_aods": [2, 3, 4],
         "settings": t_settings,
-        "trials_per_config": 5,
+        "trials_per_config": 10,
         "compile_settings": [MAIN_COMPILE_SETTING],
     }
     run_evaluation_t_cultivation(

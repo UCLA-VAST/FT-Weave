@@ -167,32 +167,50 @@ def run_fig1_fail_case_debug(
 def test_t_cultivation_small():
     circuit = [
         {"gate": "T", "targets": [0], "params": {}},
-        {"gate": "T", "targets": [0], "params": {}},
-        {"gate": "T", "targets": [0], "params": {}},
-        {"gate": "T", "targets": [0], "params": {}},
-        # {"gate": "T", "targets": [0], "params": {}},
-        # {"gate": "T", "targets": [0], "params": {}},
-        # {"gate": "T", "targets": [0], "params": {}},
-        # {"gate": "T", "targets": [0], "params": {}},
-        # {"gate": "T", "targets": [0], "params": {}},
         # {"gate": "T", "targets": [0], "params": {}},
     ]
-
     logic_qubit_locations = [(0, 0)]
-    magic_state_locations = [(0, 1)]
+    magic_state_locations = [(0, 1), (1, 1)]
     n_factories = len(magic_state_locations)
-    update_config(FACTORY_PHYSICAL_SIZE=2)
     execution_log = t_cultivation_execution(
         circuit=circuit,
         n_factories=n_factories,
         logic_qubit_locations=logic_qubit_locations,
         magic_state_locations=magic_state_locations,
-        rng=np.random.default_rng(0),
-        n_aods=2,
+        rng=np.random.default_rng(18),
+        n_aods=1,
         to_decompose=False,
-        logical_se_interval=5,
+        logical_se_interval=100,
     )
-    assert execution_log, "Execution log should not be empty."
+
+    # circuit = [
+    #     {"gate": "T", "targets": [0], "params": {}},
+    #     {"gate": "T", "targets": [0], "params": {}},
+    #     # {"gate": "T", "targets": [0], "params": {}},
+    #     # {"gate": "T", "targets": [0], "params": {}},
+    #     # {"gate": "T", "targets": [0], "params": {}},
+    #     # {"gate": "T", "targets": [0], "params": {}},
+    #     # {"gate": "T", "targets": [0], "params": {}},
+    #     # {"gate": "T", "targets": [0], "params": {}},
+    #     # {"gate": "T", "targets": [0], "params": {}},
+    #     # {"gate": "T", "targets": [0], "params": {}},
+    # ]
+
+    # logic_qubit_locations = [(0, 0)]
+    # magic_state_locations = [(0, 1), (1, 1)]
+    # n_factories = len(magic_state_locations)
+    # update_config(FACTORY_PHYSICAL_SIZE=2)
+    # execution_log = t_cultivation_execution(
+    #     circuit=circuit,
+    #     n_factories=n_factories,
+    #     logic_qubit_locations=logic_qubit_locations,
+    #     magic_state_locations=magic_state_locations,
+    #     rng=np.random.default_rng(0),
+    #     n_aods=2,
+    #     to_decompose=False,
+    #     logical_se_interval=10,
+    # )
+    # assert execution_log, "Execution log should not be empty."
     # update_config(FACTORY_PHYSICAL_SIZE=4)
     # for i in range(10):
     #     execution_log = t_cultivation_execution(

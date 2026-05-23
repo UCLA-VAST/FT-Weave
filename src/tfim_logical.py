@@ -216,23 +216,20 @@ def generate_one_layer_2d_tfim_circuit_cz(
 
     if order == 2:
         # Second-order Trotter: symmetric decomposition
-        # exp(-i*dt*H) ≈ exp(-i*dt/2*H_zz) exp(-i*dt*H_x) exp(-i*dt/2*H_zz)
-        theta_zz_half = theta_zz / 2
+        # exp(-i*dt*H) ≈ exp(-i*dt/2*H_x) exp(-i*dt*H_zz) exp(-i*dt/2*H_x)
+        theta_x_half = theta_x / 2
 
-        # First half of ZZ layers
-        add_zz_layer(qc, horizontal_even, theta_zz_half, logical)
-        add_zz_layer(qc, horizontal_odd, theta_zz_half, logical)
-        add_zz_layer(qc, vertical_even, theta_zz_half, logical)
-        add_zz_layer(qc, vertical_odd, theta_zz_half, logical)
+        # First half of transverse field layer
+        add_transverse_field_layer(qc, n_qubits, theta_x_half, logical)
 
-        # Full transverse field layer
-        add_transverse_field_layer(qc, n_qubits, theta_x, logical)
+        # Full ZZ layers
+        add_zz_layer(qc, horizontal_even, theta_zz, logical)
+        add_zz_layer(qc, horizontal_odd, theta_zz, logical)
+        add_zz_layer(qc, vertical_even, theta_zz, logical)
+        add_zz_layer(qc, vertical_odd, theta_zz, logical)
 
-        # Second half of ZZ layers
-        add_zz_layer(qc, horizontal_even, theta_zz_half, logical)
-        add_zz_layer(qc, horizontal_odd, theta_zz_half, logical)
-        add_zz_layer(qc, vertical_even, theta_zz_half, logical)
-        add_zz_layer(qc, vertical_odd, theta_zz_half, logical)
+        # Second half of transverse field layer
+        add_transverse_field_layer(qc, n_qubits, theta_x_half, logical)
 
     else:
         # First-order Trotter (default)

@@ -17,12 +17,71 @@ import csv
 # (placement, prepare_lookahead_angles, trivial_return, consider_skip_rus,
 #  decompose_move, parallel_execution)
 SETTINGS = [
-    ("seperate_region_row", False, True, 0, False, False),
-    ("col_based", False, True, 0, False, False),
-    ("col_based", True, True, 0, False, False),
-    ("col_based", True, False, 0, True, False),
+    ("seperate_region_row", False, True, 0, False, False),  # vanilla
+    ("seperate_region_row", False, False, 0, True, False),  # optimized return
+    (
+        "seperate_region_row",
+        False,
+        False,
+        2,
+        True,
+        False,
+    ),  # optimized return + skip whole RUS
+    ("seperate_region_row", True, True, 0, False, False),  # lookahead angles
+    (
+        "seperate_region_row",
+        True,
+        False,
+        0,
+        True,
+        False,
+    ),  # lookahead angles + optimized return
+    (
+        "seperate_region_row",
+        True,
+        False,
+        2,
+        True,
+        False,
+    ),  # lookahead angles + optimized return + skip whole RUS
+    ("col_based", False, True, 0, False, False),  # vanilla
+    ("col_based", True, True, 0, False, False),  # optimized return
+    ("col_based", True, False, 0, True, False),  # optimized return + skip whole RUS
+    ("col_based", True, False, 2, True, False),  # lookahead angles
+    ("col_based", False, False, 0, True, False),  # lookahead angles + optimized return
+    (
+        "col_based",
+        False,
+        False,
+        2,
+        True,
+        False,
+    ),  # lookahead angles + optimized return + skip whole RUS
+    (
+        "col_based",
+        True,
+        False,
+        2,
+        False,
+        True,
+    ),  # optimized return + skip whole RUS + asynchronous RUS
+    (
+        "col_based",
+        False,
+        False,
+        2,
+        False,
+        True,
+    ),  # lookahead angles + optimized return + skip whole RUS + asynchronous RUS
+]
+MAIN_SETTINGS = [
     ("col_based", True, False, 2, True, False),
-    ("col_based", True, False, 2, False, True),
+    ("col_based", False, False, 2, True, False),
+]
+
+TEMP_SETTINGS = [
+    ("seperate_region_row", False, False, 2, False, True),
+    ("checkerboard", False, False, 2, False, True),
 ]
 
 
@@ -208,7 +267,16 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                                     analyze_result=analyze_result,
                                     # result_path=log_dir + f"/trial_{trial}.pickle",
                                 )
+                                # print circuit execution diagram
+                                # from src.animator import plot_circuit_execution
 
+                                # for i, log in enumerate(full_logs):
+                                #     plot_circuit_execution(
+                                #         log,
+                                #         n_cols * n_rows,
+                                #         save_path=f"output/evaluation/circuit_execution/star_circuit_execution_{placement}_{trial}_{i}.pdf",
+                                #     )
+                                # assert False
                                 if analyze_result:
                                     if (
                                         profiling_writer is None
@@ -311,6 +379,8 @@ if __name__ == "__main__":
         "qubit_layout": qubit_layout,
         "tfim": tfim,
     }
+    # evaluate raw fidelity
+    run_evaluation_raw(params=params, physical_error_model=physical_error_model)
 
     logical_error_models = [
         LogicalErrorModel(physical_model=physical_error_model, code_distance=7),
@@ -318,26 +388,35 @@ if __name__ == "__main__":
         LogicalErrorModel(physical_model=physical_error_model, code_distance=13),
     ]
 
+    # star_params = {
+    #     "qubit_layout": qubit_layout,
+    #     "tfim": tfim,
+    #     "n_aods": [1, 5],
+    #     "settings": SETTINGS,
+    #     "trials_per_config": 10,
+    #     "logical_se_interval": 10,
+    # }
+
+    # run_evaluation_star(
+    #     params=star_params,
+    #     logical_error_models=logical_error_models,
+    #     analyze_result=True,
+    # )
+
+    # star_params = {
+    #     "qubit_layout": qubit_layout,
+    #     "tfim": tfim,
+    #     "n_aods": [2, 3, 4],
+    #     "settings": MAIN_SETTINGS,
+    #     "trials_per_config": 5,
+    #     "logical_se_interval": 10,
+    # }
+
     star_params = {
         "qubit_layout": qubit_layout,
         "tfim": tfim,
-        "n_aods": [1, 5],
-        "settings": SETTINGS,
-        "trials_per_config": 5,
-        "logical_se_interval": 10,
-    }
-
-    run_evaluation_star(
-        params=star_params,
-        logical_error_models=logical_error_models,
-        analyze_result=True,
-    )
-
-    star_params = {
-        "qubit_layout": qubit_layout,
-        "tfim": tfim,
-        "n_aods": [2, 3, 4],
-        "settings": [SETTINGS[4]],
+        "n_aods": [1, 2, 3, 4, 5],
+        "settings": TEMP_SETTINGS,
         "trials_per_config": 5,
         "logical_se_interval": 10,
     }
