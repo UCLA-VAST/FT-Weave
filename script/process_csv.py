@@ -9,7 +9,7 @@ from matplotlib.lines import Line2D
 import math
 import os
 from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
-
+from src.t_cultivation.config import STAGE_1_SUCCESS_RATE
 
 _FIG_FONT_SIZE = 18
 
@@ -28,51 +28,85 @@ plt.rcParams.update(
 )
 
 
+# (placement, prepare_lookahead_angles, trivial_return, consider_skip_rus,
+#  decompose_move, parallel_execution) — keep in sync with evaluation_fidelity_star.py
 SETTINGS = [
-    (True, "matching", 0, False, False),  # vanilla
-    (False, "matching", 0, False, False),  # optimized return
-    (
-        False,
-        "matching",
-        1,
-        False,
-        False,
-    ),  # optimized return + skip partial RUS
-    (
-        False,
-        "matching",
-        2,
-        False,
-        False,
-    ),  # optimized return + skip whole RUS
-    (
-        False,
-        "matching",
-        2,
-        True,
-        False,
-    ),  # optimized decompose return + skip whole RUS
-    (
-        False,
-        "matching",
-        0,
-        False,
-        True,
-    ),  # optimized return  + decompose move + asynchronous RUS
+    # ("seperate_region_row", False, True, 0, False, False),  # vanilla
+    # ("seperate_region_row", False, False, 0, True, False),  # optimized return
     # (
+    #     "seperate_region_row",
     #     False,
-    #     "matching",
-    #     1,
     #     False,
+    #     2,
     #     True,
-    # ),  # optimized return+ skip partial RUS + decompose move + asynchronous RUS
+    #     False,
+    # ),  # optimized return + skip whole RUS
+    # ("seperate_region_row", True, True, 0, False, False),  # lookahead angles
+    # (
+    #     "seperate_region_row",
+    #     True,
+    #     False,
+    #     0,
+    #     True,
+    #     False,
+    # ),  # lookahead + optimized return
+    # (
+    #     "seperate_region_row",
+    #     True,
+    #     False,
+    #     2,
+    #     True,
+    #     False,
+    # ),  # lookahead + optimized return + skip whole RUS
+    ("col_based", False, True, 0, False, False),  # vanilla
+    # ("col_based", True, True, 0, False, False),  # lookahead angles
+    # ("col_based", True, False, 0, True, False),  # lookahead + opt. move
+    # (
+    #     "col_based",
+    #     True,
+    #     False,
+    #     2,
+    #     True,
+    #     False,
+    # ),  # lookahead + opt. move + skip RUS
+    ("col_based", False, False, 0, True, False),  # opt. move
+    ("col_based", False, False, 2, True, False),  # opt. move + skip RUS
     (
+        "col_based",
+        True,
         False,
-        "matching",
+        2,
+        True,
+        False,
+    ),  # lookahead + opt. move + skip RUS
+    (
+        "col_based",
+        False,
+        False,
         2,
         False,
         True,
-    ),  # optimized return+ skip whole RUS + decompose move + asynchronous RUS
+    ),  # opt. return + skip whole RUS + async. RUS
+]
+
+MAIN_SETTING: tuple = ("col_based", False, False, 2, True, False)
+
+# ``MAIN_SETTINGS`` in evaluation_fidelity_star.py (col_based, sync. execution).
+STAR_VS_T_RUNTIME_SETTING: tuple = ("col_based", True, False, 2, True, False)
+STAR_COL_BASED_VANILLA_SETTING: tuple = ("col_based", False, True, 0, False, False)
+
+STAR_SETTING_LABELS: list[str] = [
+    # "Vanilla (sep. region)",
+    # "Opt. return (sep. region)",
+    # "Opt. return + skip whole RUS (sep. region)",
+    # "Lookahead (sep. region)",
+    # "Lookahead + opt. return (sep. region)",
+    # "Lookahead + opt. return + skip whole RUS (sep. region)",
+    "Vanilla",
+    "Opt. move",
+    "Opt. move + skip RUS",
+    "Opt. move + skip RUS + lookahead angles",
+    "Opt. move + skip RUS + async. exec.",
 ]
 
 # Configuration columns (experimental settings)
@@ -84,6 +118,7 @@ CONFIG_COLS = [
     "n_aods",
     "consider_skip_rus",
     "tmr_assignment_method",
+    "prepare_lookahead_angles",
     "trivial_return",
     "decompose_move",
     "parallel_execution",
@@ -116,7 +151,7 @@ STAR_PROFILING_CODE_DISTANCES: tuple[int, ...] = (7, 9, 13)
 # STAR curves on STAR vs T-cultivation combined runtime PDFs (omit d=13 for readability).
 STAR_VS_T_RUNTIME_STAR_DISTANCES: tuple[int, ...] = (7, 9)
 # Console runtime summary: one readable block (full_trotter, col_based for cross-arch).
-RUNTIME_SUMMARY_OVERALL_AODS: tuple[int, ...] = (2, 5)
+RUNTIME_SUMMARY_OVERALL_AODS: tuple[int, ...] = (1, 5)
 RUNTIME_SUMMARY_STAR_CODE_DISTANCES: tuple[int, ...] = (7, 9)
 RUNTIME_SUMMARY_T_CODE_DISTANCES: tuple[int, ...] = (9, 13)
 RUNTIME_SUMMARY_T_LER = 1e-8
@@ -132,19 +167,40 @@ T_CULTIVATION_MAIN_COMPILE_SETTING: tuple[bool, bool, bool] = (False, True, True
 
 
 def _setting_filter(df: pd.DataFrame, setting: tuple) -> pd.Series:
-    return (
-        (df["trivial_return"] == setting[0])
-        & (df["tmr_assignment_method"] == setting[1])
-        & (df["consider_skip_rus"] == setting[2])
-        & (df["decompose_move"] == setting[3])
-        & (df["parallel_execution"] == setting[4])
+    placement, prepare_lookahead, trivial_return, skip_rus, decompose_move, parallel = (
+        setting
     )
+    mask = (df["placement"].astype(str).str.strip() == str(placement).strip()) & (
+        df["trivial_return"] == trivial_return
+    )
+    mask &= df["consider_skip_rus"] == skip_rus
+    mask &= df["decompose_move"] == decompose_move
+    mask &= df["parallel_execution"] == parallel
+    if "prepare_lookahead_angles" in df.columns:
+        mask &= df["prepare_lookahead_angles"] == prepare_lookahead
+    else:
+        mask &= prepare_lookahead is True
+    return mask
 
 
 def _filter_col_based(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or "placement" not in df.columns:
         return df
     return df[df["placement"] == "col_based"].copy()
+
+
+def _get_available_settings(df: pd.DataFrame, max_settings: int = 2) -> list[tuple]:
+    """Return the first ``max_settings`` SETTINGS tuples that have rows in ``df``."""
+    available: list[tuple] = []
+    for setting in SETTINGS:
+        if df.empty:
+            break
+        if df.loc[_setting_filter(df, setting)].empty:
+            continue
+        available.append(setting)
+        if len(available) >= max_settings:
+            break
+    return available
 
 
 def _build_aod_color_map(aod_values: list[int]) -> dict[int, tuple]:
@@ -178,7 +234,9 @@ def _get_theoretical_lower_bound(
     zz_layer_bounds = [
         constant_tmr_half_overhead * int(math.log2(float(n / 2)) + 1) for n in n_values
     ]
-    full_trotter_bounds = [x + zz * 8 for x, zz in zip(x_layer_bounds, zz_layer_bounds)]
+    full_trotter_bounds = [
+        2 * x + zz * 4 for x, zz in zip(x_layer_bounds, zz_layer_bounds)
+    ]
 
     return {
         "x_layer": x_layer_bounds,
@@ -207,28 +265,43 @@ def _get_theoretical_lower_bound_t_cultivation(
     n_t_per_qubit = 40
 
     # Stage-1: success-rate-dependent expected attempts.
+    stage_1_parallelization = 4
     if code_distance is not None and int(code_distance) < 13:
-        stage1_factor = 12.5 * 1 / (1 - 0.7 * 0.7)
-    else:
-        stage1_factor = 12.5
+        stage_1_parallelization = 2
+
+    effective_stage_1_success_rate = (
+        1 - (1 - STAGE_1_SUCCESS_RATE) ** stage_1_parallelization
+    )
+
+    # stage1_factor = 12.5 * effective_stage_1_success_rate / (1 - effective_stage_1_success_rate ** 2)
 
     # Stage-2: depends on LER target used by T-cultivation setting.
     if code_distance is not None and int(code_distance) <= 13:
-        stage2_factor = (1 / 0.4) * (6 + stage1_factor)
+        expected_attempt = 1 / (effective_stage_1_success_rate * 0.66)
+        overhead = 12.5 + 0.5 * effective_stage_1_success_rate
     else:
-        stage2_factor = (1 / 0.66) * (0.5 + stage1_factor)
+        expected_attempt = 1 / (effective_stage_1_success_rate * 0.66)
+        overhead = 12.5 + 6 * effective_stage_1_success_rate
 
     rus_factor = 2.0 + 1.0
     s_gate_overhead = 1.0
-    t_cultivation_scale = stage2_factor + rus_factor + s_gate_overhead
-
+    expected_time_for_one_resource = (
+        (overhead) * expected_attempt + rus_factor + s_gate_overhead
+    )
+    # print(f"expected_time_for_one_resource: {expected_time_for_one_resource}")
+    # input()
     # for x layer bound, we can assume some parallelization and only count half the T gates per qubit
-    x_layer_bounds = [t_cultivation_scale * n_t_per_qubit for _ in n_values]
+    x_layer_bounds = [expected_time_for_one_resource * n_t_per_qubit for _ in n_values]
 
+    expected_time_for_one_resource = (
+        (overhead) * expected_attempt / 2 + rus_factor + s_gate_overhead
+    )
     # for zz layer bound, we can assume more parallelization and only count a quarter of the T gates per qubit
-    zz_layer_bounds = [t_cultivation_scale * (n_t_per_qubit / 2) for _ in n_values]
+    zz_layer_bounds = [expected_time_for_one_resource * n_t_per_qubit for _ in n_values]
 
-    full_trotter_bounds = [x + 8 * zz for x, zz in zip(x_layer_bounds, zz_layer_bounds)]
+    full_trotter_bounds = [
+        2 * x + 4 * zz for x, zz in zip(x_layer_bounds, zz_layer_bounds)
+    ]
     return {
         "x_layer": x_layer_bounds,
         "zz_layer": zz_layer_bounds,
@@ -449,15 +522,27 @@ def _format_setting_title(setting_label: str | None, setting_idx: int) -> str:
     """Convert internal setting tags to presentation labels for figure titles."""
     if setting_label is not None:
         label = str(setting_label).strip().lower().replace(" ", "_")
-        if label in {"setting_4", "sync", "sync_exec", "sync._exec."}:
+        if label in {
+            "setting_4",
+            "setting_9",
+            "sync",
+            "sync_exec",
+            "sync._exec.",
+        }:
             return "Sync. Execution"
-        if label in {"setting_6", "async", "async_exec", "async._exec."}:
+        if label in {
+            "setting_6",
+            "setting_12",
+            "async",
+            "async_exec",
+            "async._exec.",
+        }:
             return "Async. Execution"
         return str(setting_label)
 
-    if setting_idx == 4:
+    if setting_idx in {4, 9}:
         return "Sync. Execution"
-    if setting_idx == 6:
+    if setting_idx in {6, 12}:
         return "Async. Execution"
     return "Execution"
 
@@ -637,15 +722,8 @@ def plot_nAOD_placement_lines(
     sweep_col: x-axis
     """
     os.makedirs(output_dir, exist_ok=True)
-    # Filter the setting
     setting = SETTINGS[setting_idx]
-    df_col = df[
-        (df["trivial_return"] == setting[0])
-        & (df["tmr_assignment_method"] == setting[1])
-        & (df["consider_skip_rus"] == setting[2])
-        & (df["decompose_move"] == setting[3])
-        & (df["parallel_execution"] == setting[4])
-    ].copy()
+    df_col = df.loc[_setting_filter(df, setting)].copy()
 
     # Normalize n_aods to int
     df_col["n_aods"] = df_col["n_aods"].astype(int)
@@ -741,13 +819,7 @@ def plot_microarch_comp_average_all(df, output_dir):
 def plot_microarch_comp_setting(df, output_dir, setting_idx=1, tag=""):
     os.makedirs(output_dir, exist_ok=True)
     setting = SETTINGS[setting_idx]
-    df_ctrl = df[
-        (df["trivial_return"] == setting[0])
-        & (df["tmr_assignment_method"] == setting[1])
-        & (df["consider_skip_rus"] == setting[2])
-        & (df["decompose_move"] == setting[3])
-        & (df["parallel_execution"] == setting[4])
-    ]
+    df_ctrl = df.loc[_setting_filter(df, setting)]
 
     if df_ctrl.empty:
         print(f"No data for microarch setting_idx={setting_idx} (tag={tag}), skipping.")
@@ -797,15 +869,7 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
         print(f"No data for ablation ({placement}), skipping.")
         return
 
-    ablation_labels = [
-        "Vanilla",
-        "Opt. return",
-        "Opt. return + part. RUS",
-        "Opt. return + skip whole RUS",
-        "Opt. decomp. return + skip whole RUS",
-        "Opt. return + async. RUS",
-        "Opt. return + skip whole RUS + async. RUS",
-    ]
+    ablation_labels = STAR_SETTING_LABELS
 
     # Slightly larger typography for ablation figures only.
     ablation_font_size = _FIG_FONT_SIZE + 2
@@ -835,13 +899,7 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
 
         agg_data = {}
         for label_idx, (label, setting) in enumerate(zip(ablation_labels, SETTINGS)):
-            subdf = df_distance[
-                (df_distance["trivial_return"] == setting[0])
-                & (df_distance["tmr_assignment_method"] == setting[1])
-                & (df_distance["consider_skip_rus"] == setting[2])
-                & (df_distance["decompose_move"] == setting[3])
-                & (df_distance["parallel_execution"] == setting[4])
-            ]
+            subdf = df_distance.loc[_setting_filter(df_distance, setting)]
             if subdf.empty:
                 continue
 
@@ -856,13 +914,7 @@ def plot_ablation_combined(dfs_dict, output_dir, placement, round_angle_lookup=N
                         sub_round = sub_round[
                             sub_round["code_distance"] == distance
                         ].copy()
-                    sub_round = sub_round[
-                        (sub_round["trivial_return"] == setting[0])
-                        & (sub_round["tmr_assignment_method"] == setting[1])
-                        & (sub_round["consider_skip_rus"] == setting[2])
-                        & (sub_round["decompose_move"] == setting[3])
-                        & (sub_round["parallel_execution"] == setting[4])
-                    ]
+                    sub_round = sub_round.loc[_setting_filter(sub_round, setting)]
                 else:
                     continue
 
@@ -1181,6 +1233,7 @@ def aggregate_full_trotter(df: pd.DataFrame) -> pd.DataFrame:
         "n_aods",
         "consider_skip_rus",
         "tmr_assignment_method",
+        "prepare_lookahead_angles",
         "trivial_return",
         "decompose_move",
         "parallel_execution",
@@ -1905,10 +1958,10 @@ def process_full_trotter_csv(
         )
         round_angle_lookup = _build_round_angle_lookup(dfs_dict_micro)
 
-        preferred_indices = [4, 6]
+        preferred_indices = [9, 12]
         settings_to_plot: list[tuple[str, tuple]] = []
         for idx in preferred_indices:
-            setting = SETTINGS[idx]
+            setting = MAIN_SETTING
             if not df_distance[_setting_filter(df_distance, setting)].empty:
                 settings_to_plot.append((f"setting_{idx}", setting))
 
@@ -1978,6 +2031,7 @@ def _normalize_config_types(df: pd.DataFrame) -> pd.DataFrame:
         "decompose_move",
         "parallel_execution",
         "redistribute_stage1_success",
+        "prepare_lookahead_angles",
     ]
     for col in bool_cols:
         if col in df.columns:
@@ -2059,6 +2113,7 @@ def _build_layer_frames(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     default_cols = {
         "consider_skip_rus": 0,
         "tmr_assignment_method": "unknown",
+        "prepare_lookahead_angles": False,
         "trivial_return": False,
         "decompose_move": False,
         "parallel_execution": False,
@@ -2220,19 +2275,17 @@ def _print_runtime_star_vs_t_all_in_one_improvements(
         f"runtime_star_vs_t_cultivation_all_in_one_aod_"
         f"{'-'.join(str(a) for a in target_aods)}{filename_suffix}.pdf"
     )
-    print(
-        "\n  [STAR vs T cultivation all-in-one figure — execution, matched n_qubits]"
-    )
+    print("\n  [STAR vs T cultivation all-in-one figure — execution, matched n_qubits]")
     print(
         f"      figure: {pdf_tail} · AODs={list(target_aods)}, "
-        f"T placement={effective_t_placement}, STAR=setting_4 · "
+        f"T placement={effective_t_placement}, STAR=main compile setting · "
         "avg_improvement_vs_STAR = mean((STAR-T)/STAR)*100 (positive => T faster)"
     )
 
     # STAR: same compile/setting, compare code distances (same curve families as the figure).
     sds_sorted = sorted(int(d) for d in star_distances)
     if len(sds_sorted) >= 2:
-        print("    [STAR — distance ratio at matched n_qubits, setting_4]")
+        print("    [STAR — distance ratio at matched n_qubits, main compile setting]")
         for layer_name in layer_order:
             star_filtered = star_layers[layer_name][
                 _setting_filter(star_layers[layer_name], setting_4)
@@ -2241,13 +2294,15 @@ def _print_runtime_star_vs_t_all_in_one_improvements(
             for aod in target_aods:
                 for d_lo, d_hi in zip(sds_sorted, sds_sorted[1:]):
                     star_lo = star_filtered[
-                        pd.to_numeric(star_filtered["code_distance"], errors="coerce")
-                        .astype(int)
+                        pd.to_numeric(
+                            star_filtered["code_distance"], errors="coerce"
+                        ).astype(int)
                         == int(d_lo)
                     ].copy()
                     star_hi = star_filtered[
-                        pd.to_numeric(star_filtered["code_distance"], errors="coerce")
-                        .astype(int)
+                        pd.to_numeric(
+                            star_filtered["code_distance"], errors="coerce"
+                        ).astype(int)
                         == int(d_hi)
                     ].copy()
                     sum_lo = _summarize_execution_by_qubits(star_lo, method="STAR")
@@ -2277,27 +2332,31 @@ def _print_runtime_star_vs_t_all_in_one_improvements(
             "    [T cultivation — distance ratio at matched n_qubits, "
             f"placement={effective_t_placement}]"
         )
+
         def _t_triple_aod_subdf(
             work: pd.DataFrame, cd: int, ft: float, fps: int, aod_val: int
         ) -> pd.DataFrame:
             sub = work[work["n_aods"] == int(aod_val)].copy()
             mask = (
-                pd.to_numeric(sub["code_distance"], errors="coerce").astype(int)
-                == int(cd)
-            ) & np.isclose(
-                pd.to_numeric(sub["fidelity_target"], errors="coerce"),
-                float(ft),
-                rtol=0.0,
-                atol=0.0,
-            ) & (sub["factory_physical_size"] == fps)
+                (
+                    pd.to_numeric(sub["code_distance"], errors="coerce").astype(int)
+                    == int(cd)
+                )
+                & np.isclose(
+                    pd.to_numeric(sub["fidelity_target"], errors="coerce"),
+                    float(ft),
+                    rtol=0.0,
+                    atol=0.0,
+                )
+                & (sub["factory_physical_size"] == fps)
+            )
             return sub.loc[mask].copy()
 
         for layer_name in layer_order:
             t_work = t_layers[layer_name]
             if "placement" in t_work.columns:
                 t_work = t_work[
-                    t_work["placement"].astype(str).str.strip()
-                    == effective_t_placement
+                    t_work["placement"].astype(str).str.strip() == effective_t_placement
                 ].copy()
             if not all(
                 c in t_work.columns
@@ -2311,8 +2370,12 @@ def _print_runtime_star_vs_t_all_in_one_improvements(
                 ):
                     t_lo = _t_triple_aod_subdf(t_work, cd_lo, ft_lo, fps_lo, aod)
                     t_hi = _t_triple_aod_subdf(t_work, cd_hi, ft_hi, fps_hi, aod)
-                    sum_lo = _summarize_execution_by_qubits(t_lo, method="T cultivation")
-                    sum_hi = _summarize_execution_by_qubits(t_hi, method="T cultivation")
+                    sum_lo = _summarize_execution_by_qubits(
+                        t_lo, method="T cultivation"
+                    )
+                    sum_hi = _summarize_execution_by_qubits(
+                        t_hi, method="T cultivation"
+                    )
                     row_lo = sum_lo[["n_qubits", "execution_time_mean"]].rename(
                         columns={"execution_time_mean": "rt_lo"}
                     )
@@ -2357,8 +2420,9 @@ def _print_runtime_star_vs_t_all_in_one_improvements(
                 if sd is None:
                     continue
                 star_d = star_filtered[
-                    pd.to_numeric(star_filtered["code_distance"], errors="coerce")
-                    .astype(int)
+                    pd.to_numeric(
+                        star_filtered["code_distance"], errors="coerce"
+                    ).astype(int)
                     == int(sd)
                 ].copy()
                 star_summary = _summarize_execution_by_qubits(star_d, method="STAR")
@@ -2366,19 +2430,17 @@ def _print_runtime_star_vs_t_all_in_one_improvements(
                 if star_a.empty:
                     continue
                 t_candidates = t_work[t_work["n_aods"] == int(aod)].copy()
-                cd_match = (
-                    pd.to_numeric(t_candidates["code_distance"], errors="coerce")
-                    .astype(int)
-                    == int(cd)
-                )
+                cd_match = pd.to_numeric(
+                    t_candidates["code_distance"], errors="coerce"
+                ).astype(int) == int(cd)
                 ft_match = np.isclose(
                     pd.to_numeric(t_candidates["fidelity_target"], errors="coerce"),
                     float(ft),
                     rtol=0.0,
                     atol=0.0,
                 )
-                mask = cd_match & ft_match & (
-                    t_candidates["factory_physical_size"] == fps
+                mask = (
+                    cd_match & ft_match & (t_candidates["factory_physical_size"] == fps)
                 )
                 t_setting = t_candidates[mask]
                 t_summary = _summarize_execution_by_qubits(
@@ -2432,7 +2494,7 @@ def _plot_star_vs_t_cultivation_best(
     CSV does not merge distinct architectures.
     """
     if target_aods is None:
-        target_aods = [2, 5]
+        target_aods = [1, 5]
 
     effective_t_placement = t_placement if t_placement is not None else "col_based"
     placement_title = _format_microarch_placement_label(effective_t_placement)
@@ -2454,13 +2516,12 @@ def _plot_star_vs_t_cultivation_best(
     if len(layer_order) == 0:
         return
 
-    # Use setting 4 (index 4)
-    setting_4 = SETTINGS[4]
+    star_runtime_setting = STAR_VS_T_RUNTIME_SETTING
 
     star_dist_all: set[int] = set()
     for layer_name in layer_order:
         star_filtered = star_layers[layer_name][
-            _setting_filter(star_layers[layer_name], setting_4)
+            _setting_filter(star_layers[layer_name], star_runtime_setting)
         ].copy()
         if not star_filtered.empty and "code_distance" in star_filtered.columns:
             star_dist_all.update(
@@ -2491,7 +2552,7 @@ def _plot_star_vs_t_cultivation_best(
         for col_idx, layer_name in enumerate(layer_order):
             ax = axes[row_idx][col_idx]
             star_filtered = star_layers[layer_name][
-                _setting_filter(star_layers[layer_name], setting_4)
+                _setting_filter(star_layers[layer_name], star_runtime_setting)
             ].copy()
             t_work = t_layers[layer_name]
             if "placement" in t_work.columns:
@@ -2672,14 +2733,14 @@ def _plot_star_vs_t_cultivation_best(
             star_distances,
             target_aods,
             effective_t_placement,
-            setting_4,
+            star_runtime_setting,
             filename_suffix,
         )
 
     fig.suptitle(
         "STAR vs T cultivation runtime · "
         "Columns: Full Trotter | ZZ layers | X layer · "
-        f"Rows: AOD 2 (top), AOD 5 (bottom) · T: {placement_title}",
+        f"Rows: AOD 1 (top), AOD 5 (bottom) · T: {placement_title}",
         fontsize=_FIG_FONT_SIZE,
         y=0.99,
     )
@@ -3517,10 +3578,9 @@ def _print_runtime_speedup_by_setting(
     - T-cultivation setting (code_distance, fidelity_target, factory_physical_size)
     """
     if target_aods is None:
-        target_aods = [2, 5]
+        target_aods = [1, 5]
 
-    # Align with plotting comparison setting.
-    setting_4 = SETTINGS[4]
+    star_runtime_setting = STAR_VS_T_RUNTIME_SETTING
     layer_order = [
         k
         for k in ["full_trotter", "zz_layers", "x_layer"]
@@ -3536,7 +3596,7 @@ def _print_runtime_speedup_by_setting(
 
     for layer_name in layer_order:
         star_filtered = star_layers[layer_name][
-            _setting_filter(star_layers[layer_name], setting_4)
+            _setting_filter(star_layers[layer_name], star_runtime_setting)
         ].copy()
         t_work = t_layers[layer_name].copy()
 
@@ -3638,10 +3698,14 @@ def _print_requested_runtime_improvements(
     star_full = _build_layer_frames(star_df).get("full_trotter", pd.DataFrame()).copy()
     t_df_d13 = _filter_t_cultivation_d13_for_plots(t_df)
     t_for_summary = _filter_t_cultivation_main_compile_setting(t_df_d13)
-    t_full = _build_layer_frames(t_for_summary).get("full_trotter", pd.DataFrame()).copy()
-    t_full_ablation = _build_layer_frames(t_df_d13).get("full_trotter", pd.DataFrame()).copy()
+    t_full = (
+        _build_layer_frames(t_for_summary).get("full_trotter", pd.DataFrame()).copy()
+    )
+    t_full_ablation = (
+        _build_layer_frames(t_df_d13).get("full_trotter", pd.DataFrame()).copy()
+    )
 
-    star_setting = SETTINGS[4]
+    star_setting = STAR_VS_T_RUNTIME_SETTING
     star_ref = star_full[_setting_filter(star_full, star_setting)].copy()
     star_ref_col = _filter_col_based(star_ref)
     t_full_col = _filter_col_based(t_full)
@@ -3720,7 +3784,7 @@ def _print_requested_runtime_improvements(
     def _ln(msg: str) -> None:
         print(f"  {msg}")
 
-    star_setting_desc = "STAR setting_4 (sync. execution)"
+    star_setting_desc = "STAR main compile (col_based, sync. execution)"
     summary_triples = _runtime_summary_t_triples()
     t_triple_note = (
         "T-cultivation lines: "
@@ -3752,8 +3816,7 @@ def _print_requested_runtime_improvements(
     aods_str = ", ".join(str(int(a)) for a in RUNTIME_SUMMARY_OVERALL_AODS)
     _banner(
         "(1) OVERALL TIME COMPARISON",
-        "full_trotter · col_based · "
-        f"AOD ∈ {{{aods_str}}} · {star_setting_desc}",
+        "full_trotter · col_based · " f"AOD ∈ {{{aods_str}}} · {star_setting_desc}",
         "STAR code distances: 7, 9 · T-cultivation: d = 9, 13 at LER = 1e-8 "
         "(subset shown if d=13 omitted in this run)",
     )
@@ -3836,9 +3899,7 @@ def _print_requested_runtime_improvements(
                 _ln(f"STAR d=9 vs d=7: geomean ratio = {g:.4f}x (AOD={aod_i})")
 
         if has_t_d9 and has_t_d13 and not t9.empty and not t13.empty:
-            _pair_ratio_one_aod(
-                t9, t13, "T-cultivation d=9 vs d=13 (LER=1e-8)", aod_i
-            )
+            _pair_ratio_one_aod(t9, t13, "T-cultivation d=9 vs d=13 (LER=1e-8)", aod_i)
 
         if not star_col_agg.empty:
             s9 = star_col_agg[star_col_agg["code_distance"] == 9][
@@ -3889,8 +3950,12 @@ def _print_requested_runtime_improvements(
                 )
                 s1 = sd[sd["n_aods"] == a1]
                 s2 = sd[sd["n_aods"] == a2]
-                g1 = _geomean_actual_over_expected_star_ft(s1["n_qubits"], s1["runtime"])
-                g2 = _geomean_actual_over_expected_star_ft(s2["n_qubits"], s2["runtime"])
+                g1 = _geomean_actual_over_expected_star_ft(
+                    s1["n_qubits"], s1["runtime"]
+                )
+                g2 = _geomean_actual_over_expected_star_ft(
+                    s2["n_qubits"], s2["runtime"]
+                )
                 if g1 is not None:
                     _ln(
                         f"        AOD={int(a1)}: geomean(actual / expected full_trotter) "
@@ -4102,24 +4167,21 @@ def _print_requested_runtime_improvements(
         "STAR d ∈ {7, 9} · T-cultivation compile ablation: " + t_triple_note,
     )
 
-    ablation_labels = [
-        "Vanilla",
-        "Opt. return",
-        "Opt. return + part. RUS",
-        "Opt. return + skip whole RUS",
-        "Opt. decomp. return + skip whole RUS",
-        "Opt. return + async. RUS",
-        "Opt. return + skip whole RUS + async. RUS",
-    ]
+    ablation_labels = STAR_SETTING_LABELS
     if not star_full.empty:
         star_ablation = star_full.copy()
-        base = star_ablation[_setting_filter(star_ablation, SETTINGS[0])].copy()
+        base = star_ablation[
+            _setting_filter(star_ablation, STAR_COL_BASED_VANILLA_SETTING)
+        ].copy()
         bg = base.groupby(
             ["placement", "code_distance", "n_aods", "n_qubits"],
             as_index=False,
         ).agg(rt_base=("total_time", "mean"))
-        for idx in range(1, min(len(SETTINGS), len(ablation_labels))):
-            s = star_ablation[_setting_filter(star_ablation, SETTINGS[idx])].copy()
+        for idx in range(len(SETTINGS)):
+            setting = SETTINGS[idx]
+            if setting[0] != "col_based" or setting == STAR_COL_BASED_VANILLA_SETTING:
+                continue
+            s = star_ablation[_setting_filter(star_ablation, setting)].copy()
             if s.empty:
                 continue
             sg_ab = s.groupby(
@@ -4190,7 +4252,9 @@ def _print_requested_runtime_improvements(
         "decompose_move",
         "redistribute_stage1_success",
     )
-    if t_full_ablation.empty or not all(c in t_full_ablation.columns for c in t_cab_cols):
+    if t_full_ablation.empty or not all(
+        c in t_full_ablation.columns for c in t_cab_cols
+    ):
         _ln("  (skipped: missing placement/compile columns or empty full_trotter)")
     else:
         t_work = t_full_ablation.copy()
@@ -4215,18 +4279,18 @@ def _print_requested_runtime_improvements(
                     base_sub = t_work.loc[base_mask].copy()
                     if base_sub.empty:
                         continue
-                    bg = base_sub.groupby(
-                        ["n_aods", "n_qubits"], as_index=False
-                    ).agg(rt_base=("total_time", "mean"))
+                    bg = base_sub.groupby(["n_aods", "n_qubits"], as_index=False).agg(
+                        rt_base=("total_time", "mean")
+                    )
                     s_mask = _mask_t_cultivation_triple(
                         t_work, cd, ft, fps
                     ) & _mask_t_cultivation_compile(t_work, trs, dms, rss)
                     s_sub = t_work.loc[s_mask].copy()
                     if s_sub.empty:
                         continue
-                    sg_cab = s_sub.groupby(
-                        ["n_aods", "n_qubits"], as_index=False
-                    ).agg(rt_set=("total_time", "mean"))
+                    sg_cab = s_sub.groupby(["n_aods", "n_qubits"], as_index=False).agg(
+                        rt_set=("total_time", "mean")
+                    )
                     m = bg.merge(sg_cab, on=["n_aods", "n_qubits"], how="inner")
                     if m.empty:
                         continue
@@ -4236,9 +4300,7 @@ def _print_requested_runtime_improvements(
                     aod_values = sorted(
                         set(
                             int(v)
-                            for v in pd.to_numeric(
-                                m["n_aods"], errors="coerce"
-                            )
+                            for v in pd.to_numeric(m["n_aods"], errors="coerce")
                             .dropna()
                             .astype(int)
                             .unique()
@@ -4253,9 +4315,7 @@ def _print_requested_runtime_improvements(
                             continue
                         base_vals = np.clip(m_da["rt_base"].to_numpy(), eps, None)
                         set_vals = np.clip(m_da["rt_set"].to_numpy(), eps, None)
-                        pct = float(
-                            np.mean((base_vals - set_vals) / base_vals) * 100.0
-                        )
+                        pct = float(np.mean((base_vals - set_vals) / base_vals) * 100.0)
                         _ln(
                             f"    d={int(cd)}, AOD={int(aod)}, "
                             f"nf={int(fps)}, LER={ft:.0e}: "
@@ -4409,11 +4469,13 @@ def process_t_cultivation_runtime_comparison(
             star_layers,
             t_layers,
             output_dir,
-            target_aods=[2, 5],
+            target_aods=[1, 5],
             t_placement="col_based",
             log_console=verbose_runtime_plots,
         )
-        _plot_t_cultivation_multi_aod(t_layers, output_dir, verbose=verbose_runtime_plots)
+        _plot_t_cultivation_multi_aod(
+            t_layers, output_dir, verbose=verbose_runtime_plots
+        )
         _plot_t_cultivation_compile_ablation(
             t_layers_ablation,
             os.path.join(output_dir, "ablation"),
