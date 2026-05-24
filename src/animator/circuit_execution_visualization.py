@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import os
+from collections import defaultdict
+
 from src.animator.log_view_helpers import (
     normalize_factories,
     resolve_indexed,
@@ -147,61 +149,100 @@ def _factories_key(entry: dict) -> tuple[int, ...]:
     return tuple(sorted(normalize_factories(entry.get("factories"))))
 
 
-def _collapse_star_tmr_blocks(execution_log: list) -> list:
-    """Merge consecutive factory SE/Rz blocks into single ``TMR`` boxes for plotting."""
-    merged: list[dict] = []
+def _tmr_block_from_se_rz_entries(block: list[dict], fkey: tuple[int, ...]) -> dict:
+    """Build one collapsed ``TMR`` event from same-factory SE/Rz entries."""
+    rz_entries = [e for e in block if e.get("operation") == "Rz"]
+    theta = None
+    if rz_entries:
+        targets = rz_entries[0].get("targets")
+        if isinstance(targets, list) and len(targets) == 1:
+            theta = targets[0]
+        else:
+            theta = targets
+    ordered = sorted(block, key=lambda e: (entry_start(e), entry_end(e)))
+    return {
+        "start_time": entry_start(ordered[0]),
+        "end_time": entry_end(ordered[-1]),
+        "factories": list(fkey),
+        "operation": "TMR",
+        "aod_assignment": ordered[0].get("aod_assignment"),
+        "targets": theta,
+        "move_vecs": None,
+    }
+
+
+def _partition_fkey_tmr_rounds(
+    entries: list[dict],
+) -> tuple[list[list[dict]], list[dict]]:
+    """Split one factory's SE/Rz timeline into complete TMR rounds and leftovers."""
+    from src.star.config import TMR_P, TMR_Q
+
+    ordered = sorted(entries, key=lambda e: (entry_start(e), entry_end(e)))
+    complete: list[list[dict]] = []
+    orphans: list[dict] = []
     i = 0
-    n = len(execution_log)
+    n = len(ordered)
     while i < n:
-        entry = execution_log[i]
-        op = entry.get("operation")
-        if op == "Barrier":
-            merged.append(entry)
+        block: list[dict] = []
+        pre = 0
+        while i < n and ordered[i].get("operation") == "SE" and pre < TMR_P:
+            block.append(ordered[i])
+            pre += 1
             i += 1
+        if pre != TMR_P:
+            orphans.extend(block)
             continue
-        if op not in ("SE", "Rz") or not _factories_key(entry):
-            merged.append(entry)
-            i += 1
+        if i >= n or ordered[i].get("operation") != "Rz":
+            orphans.extend(block)
             continue
-
-        fkey = _factories_key(entry)
-        block = [entry]
+        block.append(ordered[i])
         i += 1
-        while i < n:
-            nxt = execution_log[i]
-            nxt_op = nxt.get("operation")
-            if nxt_op == "Barrier":
-                break
-            if nxt_op in ("SE", "Rz") and _factories_key(nxt) == fkey:
-                block.append(nxt)
-                i += 1
-            else:
-                break
+        post = 0
+        while i < n and ordered[i].get("operation") == "SE" and post < TMR_Q:
+            block.append(ordered[i])
+            post += 1
+            i += 1
+        if post == TMR_Q:
+            complete.append(block)
+        else:
+            orphans.extend(block)
+    return complete, orphans
 
-        rz_entries = [e for e in block if e.get("operation") == "Rz"]
-        if not any(e.get("operation") == "SE" for e in block):
-            merged.extend(block)
+
+def _collapse_star_tmr_blocks(execution_log: list) -> list:
+    """Merge factory SE/Rz into single ``TMR`` boxes for plotting.
+
+    Parallel logs are sorted by time, so SE/Rz from concurrent TMR rounds interleave.
+    Each AOD also emits its own ``Barrier`` at slightly different times, which can
+    split one logical TMR across barrier segments. Recognize the fixed
+    TMR_P + Rz + TMR_Q pattern per factory set instead.
+    """
+    by_fkey: dict[tuple[int, ...], list[dict]] = defaultdict(list)
+    for entry in execution_log:
+        op = entry.get("operation")
+        if op not in ("SE", "Rz"):
             continue
+        fkey = _factories_key(entry)
+        if fkey:
+            by_fkey[fkey].append(entry)
 
-        theta = None
-        if rz_entries:
-            targets = rz_entries[0].get("targets")
-            if isinstance(targets, list) and len(targets) == 1:
-                theta = targets[0]
-            else:
-                theta = targets
-
-        merged.append(
-            {
-                "start_time": entry_start(block[0]),
-                "end_time": entry_end(block[-1]),
-                "factories": list(fkey),
-                "operation": "TMR",
-                "aod_assignment": block[0].get("aod_assignment"),
-                "targets": theta,
-                "move_vecs": None,
-            }
-        )
+    tmr_at_first_id: dict[int, dict] = {}
+    skip_ids: set[int] = set()
+    for fkey, entries in by_fkey.items():
+        complete, orphans = _partition_fkey_tmr_rounds(entries)
+        for block in complete:
+            tmr_at_first_id[id(block[0])] = _tmr_block_from_se_rz_entries(block, fkey)
+            for entry in block[1:]:
+                skip_ids.add(id(entry))
+    merged: list[dict] = []
+    for entry in execution_log:
+        eid = id(entry)
+        if eid in skip_ids:
+            continue
+        if eid in tmr_at_first_id:
+            merged.append(tmr_at_first_id[eid])
+            continue
+        merged.append(entry)
     return merged
 
 
