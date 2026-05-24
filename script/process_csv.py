@@ -91,6 +91,17 @@ SETTINGS = [
 
 MAIN_SETTING: tuple = ("col_based", False, False, 2, True, False)
 
+# Cross-placement microarch figures: compile tuple from ``TEMP_SETTINGS`` in
+# ``evaluation_fidelity_star.py``; the placement field is ignored when plotting.
+MICROARCH_COMPARE_SETTING: tuple = (
+    "col_based",
+    False,
+    False,
+    2,
+    False,
+    True,
+)
+
 # ``MAIN_SETTINGS`` in evaluation_fidelity_star.py (col_based, sync. execution).
 STAR_VS_T_RUNTIME_SETTING: tuple = ("col_based", True, False, 2, True, False)
 STAR_COL_BASED_VANILLA_SETTING: tuple = ("col_based", False, True, 0, False, False)
@@ -166,13 +177,15 @@ T_CULTIVATION_ARCHITECTURE_PLACEMENTS: tuple[str, ...] = (
 T_CULTIVATION_MAIN_COMPILE_SETTING: tuple[bool, bool, bool] = (False, True, True)
 
 
-def _setting_filter(df: pd.DataFrame, setting: tuple) -> pd.Series:
+def _setting_filter(
+    df: pd.DataFrame, setting: tuple, *, match_placement: bool = True
+) -> pd.Series:
     placement, prepare_lookahead, trivial_return, skip_rus, decompose_move, parallel = (
         setting
     )
-    mask = (df["placement"].astype(str).str.strip() == str(placement).strip()) & (
-        df["trivial_return"] == trivial_return
-    )
+    mask = df["trivial_return"] == trivial_return
+    if match_placement:
+        mask &= df["placement"].astype(str).str.strip() == str(placement).strip()
     mask &= df["consider_skip_rus"] == skip_rus
     mask &= df["decompose_move"] == decompose_move
     mask &= df["parallel_execution"] == parallel
@@ -536,6 +549,7 @@ def _format_setting_title(setting_label: str | None, setting_idx: int) -> str:
             "async",
             "async_exec",
             "async._exec.",
+            "microarch_compare",
         }:
             return "Async. Execution"
         return str(setting_label)
@@ -553,6 +567,8 @@ def _format_microarch_placement_label(placement: str) -> str:
         return "Column-Based"
     if normalized in {"seperate_region_row", "separate_region_row"}:
         return "Seperate Row Region"
+    if normalized == "checkerboard":
+        return "Checkerboard"
     return str(placement).replace("_", " ").title()
 
 
@@ -819,7 +835,7 @@ def plot_microarch_comp_average_all(df, output_dir):
 def plot_microarch_comp_setting(df, output_dir, setting_idx=1, tag=""):
     os.makedirs(output_dir, exist_ok=True)
     setting = SETTINGS[setting_idx]
-    df_ctrl = df.loc[_setting_filter(df, setting)]
+    df_ctrl = df.loc[_setting_filter(df, setting, match_placement=False)]
 
     if df_ctrl.empty:
         print(f"No data for microarch setting_idx={setting_idx} (tag={tag}), skipping.")
@@ -1294,7 +1310,7 @@ def plot_microarch_comp_setting_combined(
 
     agg_data = {}
     for round_name, df in dfs_dict.items():
-        df_ctrl = df[_setting_filter(df, setting)]
+        df_ctrl = df.loc[_setting_filter(df, setting, match_placement=False)]
         if df_ctrl.empty:
             continue
         agg_data[round_name] = _aggregate_microarch_trials(df_ctrl)
@@ -1328,12 +1344,14 @@ def plot_microarch_comp_setting_combined(
         )
         return
 
-    placements = sorted(
-        {
-            str(placement_name)
-            for grouped in agg_data.values()
-            for placement_name in grouped["placement"].dropna().unique()
-        }
+    placement_order = ("seperate_region_row", "col_based", "checkerboard")
+    found_placements = {
+        str(placement_name)
+        for grouped in agg_data.values()
+        for placement_name in grouped["placement"].dropna().unique()
+    }
+    placements = [p for p in placement_order if p in found_placements] + sorted(
+        found_placements - set(placement_order)
     )
     if not placements:
         print(
@@ -1972,13 +1990,20 @@ def process_full_trotter_csv(
             ]
 
         micro_dir = os.path.join(distance_output_dir, "microarch_setting")
-        for setting_label, setting in settings_to_plot:
+        if not df_distance.loc[
+            _setting_filter(df_distance, MICROARCH_COMPARE_SETTING, match_placement=False)
+        ].empty:
             plot_microarch_comp_setting_combined(
                 dfs_dict_micro,
                 micro_dir,
                 round_angle_lookup=round_angle_lookup,
-                setting_override=setting,
-                setting_label=setting_label,
+                setting_override=MICROARCH_COMPARE_SETTING,
+                setting_label="microarch_compare",
+            )
+        else:
+            print(
+                "No cross-placement microarch data for MICROARCH_COMPARE_SETTING; "
+                "skipping microarch_setting figures."
             )
 
         ablation_dir = os.path.join(distance_output_dir, "ablation")
