@@ -65,10 +65,7 @@ STAR_SETTING_STUDY_VANILLA_IDX: int = 0
 STAR_SETTING_STUDY_Y_BREAK: float = 1200.0
 STAR_SETTING_STUDY_Y_CROP_GAP_RATIO: float = 1.25
 STAR_SETTING_STUDY_Y_CROP_PAD_FRAC: float = 0.1
-T_SETTING_STUDY_VANILLA_PLACEMENT: str = "seperate_region_row"
-# T setting-study: vanilla on separate region (grid[0]); other compile tuples on col_based.
-T_SETTING_STUDY_VANILLA_COMPILE: tuple[bool, bool, bool] = (True, False, False)
-T_SETTING_STUDY_COL_BASED_COMPILE_IDXS: tuple[int, ...] = (1, 2, 3)
+# T setting-study: configure placement per ablation entry (like STAR `SETTINGS`).
 
 T_CULTIVATION_MAIN_COMPILE_SETTING: tuple[bool, bool, bool] = (False, True, True)
 
@@ -84,7 +81,7 @@ RUNTIME_PROFILE_STAR_SETTING: tuple = (
     True,
     False,
 )
-RUNTIME_PROFILE_T_COMPILE_IDX: int = 3  # "(c) + Opt. patch redist."
+RUNTIME_PROFILE_T_SETTING_IDX: int = 4  # "(d) + Opt. patch redist." (col_based)
 _RUNTIME_PROFILE_MOVE_COMPONENTS: list[tuple[str, str, str]] = [
     ("forward_move_mean", "Forward move", "#4C78A8"),
     ("return_move_mean", "Return move", "#9ECAE9"),
@@ -119,16 +116,19 @@ T_CULTIVATION_RUNTIME_LINE_SETTINGS: list[tuple[int, float, int]] = [
     (13, 1e-8, 4),
 ]
 
-_T_COMPILE_ABLATION_GRID: list[tuple[bool, bool, bool]] = [
-    (True, False, False),
-    (False, True, False),
-    (False, True, True),
+_T_SETTING_ABLATION_GRID: list[tuple[str, bool, bool, bool]] = [
+    # (placement, trivial_return, decompose_move, redistribute_stage1_success)
+    ("seperate_region_row", True, False, False),  # Vanilla (separate-region)
+    ("seperate_region_row", False, True, False),  # + Opt. move (same placement)
+    # ("col_based", True, False, False),  # Opt. microarch. (microarchitecture comparison)
+    ("col_based", False, True, False),  # + Opt. move
+    ("col_based", False, True, True),  # + Opt. patch redist.
 ]
 _T_COMPILE_ABLATION_LABELS: list[str] = [
-    "Vanilla",
-    "(a) Opt. microarch.",
-    "(b) + Opt. move",
-    "(c) + Opt. patch redist.",
+    "Sync. execution",
+    " + Routing opt.",
+    " + Microarch. opt.",
+    " + Check-stage patch redist.",
 ]
 
 # _STAR_ABLATION_LABELS = [
@@ -159,24 +159,10 @@ def _star_setting_study_entries() -> list[tuple[int, str]]:
     return [(i, _STAR_ABLATION_LABELS[i]) for i in range(n)]
 
 
-def _t_setting_study_entries() -> list[tuple[str, int, str]]:
-    """(placement, compile-grid index, legend label) for the T setting-study panel."""
-    entries: list[tuple[str, int, str]] = [
-        (
-            T_SETTING_STUDY_VANILLA_PLACEMENT,
-            0,
-            _T_COMPILE_ABLATION_LABELS[0],
-        ),
-    ]
-    for compile_idx in T_SETTING_STUDY_COL_BASED_COMPILE_IDXS:
-        if compile_idx >= len(_T_COMPILE_ABLATION_GRID) or compile_idx >= len(
-            _T_COMPILE_ABLATION_LABELS
-        ):
-            continue
-        entries.append(
-            ("col_based", compile_idx, _T_COMPILE_ABLATION_LABELS[compile_idx])
-        )
-    return entries
+def _t_setting_study_entries() -> list[tuple[int, str]]:
+    """(``_T_SETTING_ABLATION_GRID`` index, legend label) for the T setting-study panel."""
+    n = min(len(_T_SETTING_ABLATION_GRID), len(_T_COMPILE_ABLATION_LABELS))
+    return [(i, _T_COMPILE_ABLATION_LABELS[i]) for i in range(n)]
 
 
 def _setting_filter(df: pd.DataFrame, setting: tuple) -> pd.Series:
@@ -815,8 +801,7 @@ def _aggregate_star_setting_study(
 def _aggregate_t_setting_study(
     layer_df: pd.DataFrame,
     triple: tuple[int, float, int],
-    compile_tuple: tuple[bool, bool, bool],
-    placement: str,
+    setting: tuple[str, bool, bool, bool],
     code_distance: int,
     aod: int,
     *,
@@ -824,9 +809,9 @@ def _aggregate_t_setting_study(
 ) -> pd.DataFrame | None:
     work = layer_df.copy()
     work["placement"] = work["placement"].astype(str).map(_normalize_placement_name)
+    placement, tr, dm, rs = setting
     work = work[work["placement"] == _normalize_placement_name(placement)].copy()
     cd_t, ft, fps = triple
-    tr, dm, rs = compile_tuple
     mask = _mask_t_cultivation_triple(
         work, cd_t, ft, fps
     ) & _mask_t_cultivation_compile(work, tr, dm, rs)
@@ -1022,28 +1007,28 @@ def _pick_best_t_setting_key(
     t_setting_layer: pd.DataFrame,
     triple: tuple[int, float, int] | None,
     code_distance: int,
-    entries: list[tuple[str, int, str]],
+    entries: list[tuple[int, str]],
     *,
     aods: tuple[int, ...] = (1, 2, 3, 4, 5),
-) -> tuple[str, int]:
-    """Return (placement, compile_idx) with lowest mean execution time for the AOD panel."""
+) -> int:
+    """Return `_T_SETTING_ABLATION_GRID` index with lowest mean execution time for AOD panel."""
     if triple is None or t_setting_layer.empty:
-        return ("col_based", RUNTIME_PROFILE_T_COMPILE_IDX)
+        return int(RUNTIME_PROFILE_T_SETTING_IDX)
 
-    best_key: tuple[str, int] | None = None
+    best_idx: int | None = None
     best_mean = math.inf
-    for placement, compile_idx, _label in entries:
-        if str(placement).strip() != "col_based":
+    for setting_idx, _label in entries:
+        if setting_idx >= len(_T_SETTING_ABLATION_GRID):
             continue
-        if compile_idx >= len(_T_COMPILE_ABLATION_GRID):
+        placement, _tr, _dm, _rs = _T_SETTING_ABLATION_GRID[setting_idx]
+        if str(placement).strip() != "col_based":
             continue
         sample_means: list[float] = []
         for aod in aods:
             grouped = _aggregate_t_setting_study(
                 t_setting_layer,
                 triple,
-                _T_COMPILE_ABLATION_GRID[compile_idx],
-                placement,
+                _T_SETTING_ABLATION_GRID[setting_idx],
                 code_distance,
                 int(aod),
             )
@@ -1055,10 +1040,10 @@ def _pick_best_t_setting_key(
         avg = float(np.mean(sample_means))
         if avg < best_mean:
             best_mean = avg
-            best_key = (placement, int(compile_idx))
-    if best_key is None:
-        return ("col_based", RUNTIME_PROFILE_T_COMPILE_IDX)
-    return best_key
+            best_idx = int(setting_idx)
+    if best_idx is None:
+        return int(RUNTIME_PROFILE_T_SETTING_IDX)
+    return best_idx
 
 
 def _build_t_aod_base_df(
@@ -1086,24 +1071,23 @@ def _build_t_aod_base_df(
 
 
 def _t_aod_panel_base_rgb(
-    t_setting_colors: dict[tuple[str, int], tuple],
-    *,
-    t_setting_key: tuple[str, int] | None = None,
+    t_setting_colors: dict[int, tuple],
 ) -> tuple[float, float, float]:
-    """Match AOD = 1 to the compile setting used in the T AOD sweep panel."""
-    if t_setting_key is not None and t_setting_key in t_setting_colors:
-        return mcolors.to_rgb(t_setting_colors[t_setting_key])
+    """Match AOD = 1 to the compile/placement setting used in the T AOD sweep panel."""
     tr_m, dm_m, rs_m = T_CULTIVATION_MAIN_COMPILE_SETTING
-    for placement, compile_idx, _label in _t_setting_study_entries():
-        if compile_idx >= len(_T_COMPILE_ABLATION_GRID):
+    for setting_idx, _label in _t_setting_study_entries():
+        if setting_idx >= len(_T_SETTING_ABLATION_GRID):
             continue
-        if placement == "col_based" and _T_COMPILE_ABLATION_GRID[compile_idx] == (
-            tr_m,
-            dm_m,
-            rs_m,
-        ):
-            return mcolors.to_rgb(t_setting_colors[(placement, compile_idx)])
-    return mcolors.to_rgb(t_setting_colors[("col_based", 3)])
+        placement, tr, dm, rs = _T_SETTING_ABLATION_GRID[setting_idx]
+        if str(placement).strip() != "col_based":
+            continue
+        if (tr, dm, rs) == (tr_m, dm_m, rs_m):
+            if setting_idx in t_setting_colors:
+                return mcolors.to_rgb(t_setting_colors[setting_idx])
+    # Fallback: last entry's color (typically best col_based setting).
+    if t_setting_colors:
+        return mcolors.to_rgb(t_setting_colors[max(t_setting_colors.keys())])
+    return (0.2, 0.2, 0.2)
 
 
 def _draw_setting_study_grouped_bars(
@@ -1659,7 +1643,7 @@ def _plot_star_t_runtime_profile_figure(
     *,
     code_distance: int = STAR_T_GRID_COMPARISON_CODE_DISTANCE,
     aods: tuple[int, ...] = RUNTIME_PROFILE_AODS,
-    t_compile_idx: int = RUNTIME_PROFILE_T_COMPILE_IDX,
+    t_setting_idx: int = RUNTIME_PROFILE_T_SETTING_IDX,
     verbose: bool = True,
 ) -> None:
     """Stacked runtime bars: STAR (top) vs T-cultivation (bottom), AOD 1 vs 5 grouped."""
@@ -1674,20 +1658,19 @@ def _plot_star_t_runtime_profile_figure(
     }
     triple = _primary_t_triple_for_star_t_grid(cd)
     t_profiles: dict[int, pd.DataFrame | None] = {int(aod): None for aod in aods}
-    if (
-        triple is not None
-        and round_name in t_layers_ablation
-        and t_compile_idx < len(_T_COMPILE_ABLATION_GRID)
-    ):
-        compile_tuple = _T_COMPILE_ABLATION_GRID[t_compile_idx]
-        for aod in aods:
-            t_profiles[int(aod)] = _t_runtime_profile_frame(
-                t_layers_ablation[round_name],
-                triple,
-                compile_tuple,
-                cd,
-                int(aod),
-            )
+    if triple is not None and round_name in t_layers_ablation:
+        if 0 <= int(t_setting_idx) < len(_T_SETTING_ABLATION_GRID):
+            placement, tr, dm, rs = _T_SETTING_ABLATION_GRID[int(t_setting_idx)]
+            if str(placement).strip() == "col_based":
+                compile_tuple = (tr, dm, rs)
+                for aod in aods:
+                    t_profiles[int(aod)] = _t_runtime_profile_frame(
+                        t_layers_ablation[round_name],
+                        triple,
+                        compile_tuple,
+                        cd,
+                        int(aod),
+                    )
 
     def _has_profile(profiles: dict[int, pd.DataFrame | None]) -> bool:
         return any(prof is not None and not prof.empty for prof in profiles.values())
@@ -1858,8 +1841,8 @@ def _plot_star_t_setting_and_aod_combined_grid(
         for i, (setting_idx, _label) in enumerate(star_study_entries)
     }
     t_setting_colors = {
-        (placement, compile_idx): setting_cmap(i % 10)
-        for i, (placement, compile_idx, _label) in enumerate(t_study_entries)
+        setting_idx: setting_cmap(i % 10)
+        for i, (setting_idx, _label) in enumerate(t_study_entries)
     }
 
     star_aod_setting_idx = _pick_best_star_setting_index(
@@ -1879,7 +1862,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
     cd_t, ft, fps = (0, 0.0, 0)
     t_setting_layer = pd.DataFrame()
     t_base = pd.DataFrame()
-    t_aod_setting_key: tuple[str, int] = ("col_based", RUNTIME_PROFILE_T_COMPILE_IDX)
+    t_aod_setting_idx: int = int(RUNTIME_PROFILE_T_SETTING_IDX)
     t_aod_setting_label = ""
     compile_cols = {
         "trivial_return",
@@ -1899,17 +1882,18 @@ def _plot_star_t_setting_and_aod_combined_grid(
         if compile_cols.issubset(t_aod_layer.columns) and compile_cols.issubset(
             t_setting_layer.columns
         ):
-            t_aod_setting_key = _pick_best_t_setting_key(
+            t_aod_setting_idx = _pick_best_t_setting_key(
                 t_setting_layer, triple, cd, t_study_entries
             )
-            t_aod_compile = _T_COMPILE_ABLATION_GRID[t_aod_setting_key[1]]
+            placement, tr, dm, rs = _T_SETTING_ABLATION_GRID[t_aod_setting_idx]
+            t_aod_compile = (tr, dm, rs)
             t_aod_setting_label = next(
                 (
                     lbl
-                    for pl, cidx, lbl in t_study_entries
-                    if (pl, cidx) == t_aod_setting_key
+                    for idx, lbl in t_study_entries
+                    if int(idx) == int(t_aod_setting_idx)
                 ),
-                str(t_aod_setting_key),
+                str(t_aod_setting_idx),
             )
             t_base = _build_t_aod_base_df(t_aod_layer, triple, cd, t_aod_compile)
 
@@ -1945,9 +1929,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
     # For STAR this uses the selected best STAR setting (e.g., Dropout case).
     star_best_rgb = mcolors.to_rgb(star_setting_colors[star_aod_setting_idx])
     star_aod_colors = _build_aod_color_map_from_base(star_best_rgb, star_plot_aods)
-    t_best_rgb = _t_aod_panel_base_rgb(
-        t_setting_colors, t_setting_key=t_aod_setting_key
-    )
+    t_best_rgb = _t_aod_panel_base_rgb(t_setting_colors)
     t_aod_colors = _build_aod_color_map_from_base(t_best_rgb, t_plot_aods)
     star_aod_default = star_aod_colors.get(_AOD_COLORBAR_MIN, star_best_rgb)
     t_aod_default = t_aod_colors.get(_AOD_COLORBAR_MIN, t_best_rgb)
@@ -2110,54 +2092,54 @@ def _plot_star_t_setting_and_aod_combined_grid(
     def _draw_t_setting_panel(ax, *, setting_chart: str) -> None:
         prepared: list[tuple[tuple[str, int], str, pd.DataFrame]] = []
         trim_bars = bool(bar_trim_extremes and setting_chart == "bar")
-        for placement, compile_idx, label in t_study_entries:
-            if compile_idx >= len(_T_COMPILE_ABLATION_GRID):
+        for setting_idx, label in t_study_entries:
+            if setting_idx >= len(_T_SETTING_ABLATION_GRID):
                 continue
+            placement, tr, dm, rs = _T_SETTING_ABLATION_GRID[setting_idx]
             grouped = _aggregate_t_setting_study(
                 t_setting_layer,
                 triple,
-                _T_COMPILE_ABLATION_GRID[compile_idx],
-                placement,
+                (placement, tr, dm, rs),
                 cd,
                 aod_setting,
                 trim_extremes=trim_bars,
             )
             if grouped is None:
                 continue
-            prepared.append(((placement, compile_idx), label, grouped))
+            prepared.append(((placement, setting_idx), label, grouped))
 
         if setting_chart == "bar_dual_aod":
             aod_back, aod_front = SETTING_STUDY_DUAL_AODS[0], SETTING_STUDY_DUAL_AODS[1]
             dual_series = []
             x_pts = []
-            for placement, compile_idx, label in t_study_entries:
-                if compile_idx >= len(_T_COMPILE_ABLATION_GRID):
+            for setting_idx, label in t_study_entries:
+                if setting_idx >= len(_T_SETTING_ABLATION_GRID):
                     continue
+                placement, tr, dm, rs = _T_SETTING_ABLATION_GRID[setting_idx]
                 g_back = _aggregate_t_setting_study(
                     t_setting_layer,
                     triple,
-                    _T_COMPILE_ABLATION_GRID[compile_idx],
-                    placement,
+                    (placement, tr, dm, rs),
                     cd,
                     int(aod_back),
                 )
                 g_front = _aggregate_t_setting_study(
                     t_setting_layer,
                     triple,
-                    _T_COMPILE_ABLATION_GRID[compile_idx],
-                    placement,
+                    (placement, tr, dm, rs),
                     cd,
                     int(aod_front),
                 )
                 if g_back is None and g_front is None:
                     continue
-                key = (placement, compile_idx)
-                dual_series.append((t_setting_colors[key], label, g_back, g_front))
+                dual_series.append(
+                    (t_setting_colors[setting_idx], label, g_back, g_front)
+                )
             x_pts = _draw_setting_study_dual_aod_bars(ax, dual_series)
             x_pos = {int(nq): float(i) for i, nq in enumerate(x_pts)}
         elif setting_chart == "bar":
             bar_series = [
-                (t_setting_colors[key], label, grouped)
+                (t_setting_colors[key[1]], label, grouped)
                 for key, label, grouped in prepared
             ]
             x_pts = _draw_setting_study_grouped_bars(ax, bar_series)
@@ -2251,12 +2233,12 @@ def _plot_star_t_setting_and_aod_combined_grid(
         ]
         t_setting_legend_handles = [
             _setting_study_legend_handle(
-                color=t_setting_colors[(placement, compile_idx)],
+                color=t_setting_colors[setting_idx],
                 label=label,
                 setting_chart=setting_chart,
             )
-            for placement, compile_idx, label in t_study_entries
-            if (placement, compile_idx) in t_setting_colors
+            for setting_idx, label in t_study_entries
+            if setting_idx in t_setting_colors
         ]
         aod_legend_handles = None
         if setting_chart == "bar_dual_aod":
