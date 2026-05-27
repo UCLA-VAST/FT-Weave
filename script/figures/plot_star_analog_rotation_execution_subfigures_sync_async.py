@@ -36,6 +36,12 @@ def _entry_start(entry: dict) -> float:
     return float(entry.get("start", 0.0))
 
 
+def _entry_end(entry: dict) -> float:
+    if "end_time" in entry:
+        return float(entry["end_time"])
+    return float(entry.get("end", _entry_start(entry)))
+
+
 def _normalize_factories(value) -> list[int]:
     if value is None:
         return []
@@ -51,34 +57,50 @@ def _unique_sorted(values: list[float]) -> list[float]:
 
 
 def _sync_realtime_control_markers(execution_log: list[dict]) -> list[float]:
-    """First move after TMR/return_move for each factory."""
+    """Sync markers:
+    1) one line at the start of each TMR,
+    2) one line right after each TMR (TMR end time),
+    3) one line at the end of each consecutive return_move section that is
+       immediately followed by a move section.
+    """
     plot_log = _collapse_star_tmr_blocks(execution_log)
+    events = sorted(plot_log, key=_entry_start)
     markers: list[float] = []
-    last_op_by_factory: dict[int, str] = {}
-    for entry in sorted(plot_log, key=_entry_start):
-        op = entry.get("operation")
-        factories = _normalize_factories(entry.get("factories"))
-        t0 = _entry_start(entry)
-        for factory_id in factories:
-            last_op = last_op_by_factory.get(factory_id)
-            if op == "move" and last_op in {"TMR", "return_move"}:
-                markers.append(t0)
-            if isinstance(op, str):
-                last_op_by_factory[factory_id] = op
+    for entry in events:
+        if entry.get("operation") == "TMR":
+            markers.append(_entry_start(entry))
+            markers.append(_entry_end(entry))
+
+    n = len(events)
+    i = 0
+    while i < n:
+        if events[i].get("operation") != "return_move":
+            i += 1
+            continue
+        # Consume one consecutive return_move section.
+        section_end = _entry_end(events[i])
+        i += 1
+        while i < n and events[i].get("operation") == "return_move":
+            section_end = max(section_end, _entry_end(events[i]))
+            i += 1
+        # Keep this marker only when next section starts with move.
+        if i < n and events[i].get("operation") == "move":
+            markers.append(section_end)
     return _unique_sorted(markers)
 
 
 def _async_realtime_control_markers(execution_log: list[dict]) -> list[float]:
-    """Every TMR start except the first one."""
+    """Async markers: TMR start; before and after every move."""
     plot_log = _collapse_star_tmr_blocks(execution_log)
-    tmr_starts = _unique_sorted(
-        [
-            _entry_start(entry)
-            for entry in plot_log
-            if entry.get("operation") == "TMR"
-        ]
-    )
-    return tmr_starts[1:] if len(tmr_starts) > 1 else []
+    markers: list[float] = []
+    for entry in plot_log:
+        op = entry.get("operation")
+        if op == "TMR":
+            markers.append(_entry_start(entry))
+        elif op == "move":
+            markers.append(_entry_start(entry))  # before move
+            markers.append(_entry_end(entry))  # after move
+    return _unique_sorted(markers)
 
 
 def _run_star_log(*, parallel_execution: bool):
@@ -175,10 +197,11 @@ def main(
             _async_realtime_control_markers(async_log),
         ]
         marker_line_kwargs = {
-            "color": "#C62828",
-            "linestyle": "--",
-            "linewidth": 1.2,
-            "alpha": 0.95,
+            "color": "#D81B60",
+            "linestyle": "-.",
+            "linewidth": 1.8,
+            "alpha": 1.0,
+            "zorder": 80,
         }
 
     out_dir = os.path.dirname(output_pdf)
