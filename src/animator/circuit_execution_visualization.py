@@ -14,7 +14,13 @@ from src.animator.log_view_helpers import (
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
 _FIG_FONT_SIZE = 18
-_TCULT_EXEC_FIGURE_WIDTH = 7
+# Full two-column paper width (PRX/APS ~6.75–7 in); used for *_no_text* timeline PDFs.
+_TCULT_EXEC_FIGURE_WIDTH = 7.0
+# No-text PDFs: axis titles and legends scaled relative to with-text sizes.
+_NO_TEXT_FONT_SCALE = 0.5
+# No-text PDFs: x/y tick labels can be tuned independently.
+_NO_TEXT_X_TICK_FONT_SCALE = 0.5
+_NO_TEXT_Y_TICK_FONT_SCALE = 0.37
 _BOX_HEIGHT = 0.7
 _BOX_Y_OFFSET = _BOX_HEIGHT / 2
 _BOX_ALPHA = 0.9
@@ -72,7 +78,8 @@ aod_colors = [
     "#4825E8CC",
 ]
 ylim = 93
-_BOX_BORDER_WIDTH = 1
+_BOX_BORDER_WIDTH = 1.0
+_NO_TEXT_BOX_BORDER_WIDTH = 0.4
 _AXIS_LABEL_FONT_SIZE = 24
 _TITLE_FONT_SIZE = 28
 _LEGEND_FONT_SIZE = 20
@@ -135,6 +142,78 @@ def _canonical_tcult_operation(operation: str) -> str:
     return _TCULT_OP_ALIASES.get(operation, operation)
 
 
+def _execution_timeline_fig_width(
+    figure_width: float,
+    circuit_length: int,
+    *,
+    show_box_text: bool,
+) -> float:
+    """Figure width in inches for horizontal execution timelines.
+
+    No-text PDFs use ``_TCULT_EXEC_FIGURE_WIDTH`` so they can be included at
+    full two-column width without downscaling axis labels and legends.
+    """
+    if not show_box_text:
+        return float(_TCULT_EXEC_FIGURE_WIDTH)
+    return max(float(figure_width) * 0.45, circuit_length / 10 + 4.5)
+
+
+def _execution_timeline_font_scale(*, show_box_text: bool) -> float:
+    """Font scale for axis labels, ticks, titles, and legends."""
+    return 1.0 if show_box_text else _NO_TEXT_FONT_SCALE
+
+
+def _scaled_font_size(base: float, font_scale: float) -> float:
+    return base * font_scale
+
+
+def _execution_timeline_tick_font_sizes(
+    *,
+    show_box_text: bool,
+    x_tick_base: float | None = None,
+    y_tick_base: float | None = None,
+) -> tuple[float, float]:
+    """Return ``(x_tick_labelsize, y_tick_labelsize)`` in points."""
+    x_base = _FIG_FONT_SIZE if x_tick_base is None else x_tick_base
+    y_base = _FIG_FONT_SIZE if y_tick_base is None else y_tick_base
+    if show_box_text:
+        return (x_base, y_base)
+    return (
+        x_base * _NO_TEXT_X_TICK_FONT_SCALE,
+        y_base * _NO_TEXT_Y_TICK_FONT_SCALE,
+    )
+
+
+def _execution_timeline_box_border_width(
+    *,
+    show_box_text: bool,
+    box_border_width: float | None = None,
+    no_text_box_border_width: float | None = None,
+) -> float:
+    """Return operation-box edge linewidth in points."""
+    if show_box_text:
+        return (
+            _BOX_BORDER_WIDTH
+            if box_border_width is None
+            else float(box_border_width)
+        )
+    return (
+        _NO_TEXT_BOX_BORDER_WIDTH
+        if no_text_box_border_width is None
+        else float(no_text_box_border_width)
+    )
+
+
+def _subplot_index_with_most_timeline_whitespace(row_end_times: list[float]) -> int:
+    """Pick the stacked row whose trace ends earliest (most empty span on a shared x-axis).
+
+    Tie-break: prefer the top row (smallest index).
+    """
+    if not row_end_times:
+        return 0
+    return min(range(len(row_end_times)), key=lambda i: (row_end_times[i], i))
+
+
 def _save_path_for_box_text_variant(save_path: str, *, show_box_text: bool) -> str:
     """With-text uses *save_path*; without-text appends ``_no_text`` before the extension."""
     if show_box_text:
@@ -174,7 +253,15 @@ def _tmr_block_from_se_rz_entries(block: list[dict], fkey: tuple[int, ...]) -> d
 def _partition_fkey_tmr_rounds(
     entries: list[dict],
 ) -> tuple[list[list[dict]], list[dict]]:
-    """Split one factory's SE/Rz timeline into complete TMR rounds and leftovers."""
+    """Split one factory's SE/Rz timeline into TMR-like rounds and leftovers.
+
+    We primarily recognize the canonical STAR TMR schedule:
+        TMR_P × SE  →  Rz  →  TMR_Q × SE
+
+    In asynchronous logs, the trace can end mid-round (or scheduling can leave an
+    unfinished tail). For plotting, we still collapse such tails into a single
+    ``TMR`` box rather than leaving dangling ``SE`` boxes at the end.
+    """
     from src.star.config import TMR_P, TMR_Q
 
     ordered = sorted(entries, key=lambda e: (entry_start(e), entry_end(e)))
@@ -189,11 +276,15 @@ def _partition_fkey_tmr_rounds(
             block.append(ordered[i])
             pre += 1
             i += 1
+        # If we don't even have a full pre-Rz preparation, keep it as a collapsed
+        # tail (TMR-without-angle) for nicer plots.
         if pre != TMR_P:
-            orphans.extend(block)
+            if block:
+                complete.append(block)
             continue
+        # Missing Rz (e.g. trace ends right after preparation): still collapse.
         if i >= n or ordered[i].get("operation") != "Rz":
-            orphans.extend(block)
+            complete.append(block)
             continue
         block.append(ordered[i])
         i += 1
@@ -202,10 +293,8 @@ def _partition_fkey_tmr_rounds(
             block.append(ordered[i])
             post += 1
             i += 1
-        if post == TMR_Q:
-            complete.append(block)
-        else:
-            orphans.extend(block)
+        # If post-Rz SE is truncated, still collapse what we have.
+        complete.append(block)
     return complete, orphans
 
 
@@ -351,6 +440,8 @@ def _plot_circuit_execution_on_ax(
     title_pad: float | None = None,
     suppress_box_text_ops: frozenset[str] | None = None,
     collapse_tmr: bool = True,
+    font_scale: float = 1.0,
+    box_border_width: float | None = None,
 ) -> float:
     """Draw horizontal STAR execution on *ax*; returns max end time in the log."""
     plot_log = (
@@ -358,6 +449,11 @@ def _plot_circuit_execution_on_ax(
     )
     _, row_names, y_pos, n_rows = _resolve_star_row_layout(
         plot_log, n_factories, n_logical_qubits, show_logical_qubits
+    )
+    resolved_border_width = (
+        box_border_width
+        if box_border_width is not None
+        else _execution_timeline_box_border_width(show_box_text=show_box_text)
     )
 
     max_time = 0.0
@@ -376,12 +472,8 @@ def _plot_circuit_execution_on_ax(
         color = color_map.get(operation, "#95a5a6")
 
         alpha = _BOX_ALPHA
-        if operation in ["move", "return_move"]:
-            border_color = "black"
-            border_width = _BOX_BORDER_WIDTH
-        else:
-            border_color = "black"
-            border_width = _BOX_BORDER_WIDTH
+        border_color = "black"
+        border_width = resolved_border_width
 
         if operation == "Barrier":
             continue
@@ -505,15 +597,24 @@ def _plot_circuit_execution_on_ax(
         ax.set_ylim(-0.5, len(row_names) - 0.5)
     else:
         ax.set_ylim(-0.5, n_factories - 0.5)
-    title_fs = (
-        unified_heading_fontsize
-        if unified_heading_fontsize is not None
-        else _TITLE_FONT_SIZE
+    title_fs = _scaled_font_size(
+        (
+            unified_heading_fontsize
+            if unified_heading_fontsize is not None
+            else _TITLE_FONT_SIZE
+        ),
+        font_scale,
     )
-    xlabel_fs = (
-        unified_heading_fontsize
-        if unified_heading_fontsize is not None
-        else _AXIS_LABEL_FONT_SIZE
+    xlabel_fs = _scaled_font_size(
+        (
+            unified_heading_fontsize
+            if unified_heading_fontsize is not None
+            else _AXIS_LABEL_FONT_SIZE
+        ),
+        font_scale,
+    )
+    x_tick_fs, y_tick_fs = _execution_timeline_tick_font_sizes(
+        show_box_text=show_box_text
     )
     ax.set_xlabel(
         "Time (circuit moments)",
@@ -529,8 +630,8 @@ def _plot_circuit_execution_on_ax(
         ax.set_yticks(range(n_factories))
     _tpad = 6 if title_pad is None else title_pad
     ax.set_title(title, fontsize=title_fs, fontweight="bold", pad=_tpad)
-    ax.tick_params(axis="x", labelsize=_FIG_FONT_SIZE)
-    ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
+    ax.tick_params(axis="x", labelsize=x_tick_fs)
+    ax.tick_params(axis="y", labelsize=y_tick_fs)
     ax.grid(axis="x", alpha=0.3, linestyle="--")
 
     if show_legend:
@@ -540,7 +641,7 @@ def _plot_circuit_execution_on_ax(
             loc="upper center",
             bbox_to_anchor=(0.5, -0.14),
             ncol=len(legend_handles),
-            fontsize=_LEGEND_FONT_SIZE,
+            fontsize=_scaled_font_size(_LEGEND_FONT_SIZE, font_scale),
             columnspacing=1.2,
             handletextpad=0.5,
         )
@@ -557,16 +658,25 @@ def plot_star_execution_subfigures(
     suptitle: str | None = None,
     save_path: str = "output/circuit_execution/star_execution_subfigures.pdf",
     collapse_tmr: bool = True,
+    box_border_width: float | None = None,
+    no_text_box_border_width: float | None = None,
+    row_time_markers: list[list[float]] | None = None,
+    marker_line_kwargs: dict | None = None,
 ):
     """Plot multiple horizontal STAR timelines as stacked subfigures (shared time axis).
 
     row_plots: list of (row_title, execution_log, n_factories, n_logical_qubits)
     figure_vertical_stretch: multiplies default height so each lane/box is taller on screen.
+    row_time_markers: optional per-row x positions for marker lines (same order as row_plots)
     Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
     """
     if not row_plots:
         print("No row plots to render")
         return
+    if row_time_markers is not None and len(row_time_markers) != len(row_plots):
+        raise ValueError(
+            "row_time_markers must have the same length as row_plots"
+        )
 
     row_count = len(row_plots)
     lane_counts = []
@@ -590,12 +700,19 @@ def plot_star_execution_subfigures(
         max(max(entry_end(entry) for entry in log) for log in _logs_for_xmax()) * 1.01
     )
 
-    fig_width = max(
-        max(
-            float(figure_width) * 0.45,
-            len(execution_log) / 10 + 4.5,
+    row_max_end_times: list[float] = []
+    for _, execution_log, _, _ in row_plots:
+        log = (
+            _collapse_star_tmr_blocks(execution_log)
+            if collapse_tmr
+            else execution_log
         )
-        for _, execution_log, _, _ in row_plots
+        row_max_end_times.append(max(entry_end(entry) for entry in log))
+    legend_row_index = _subplot_index_with_most_timeline_whitespace(row_max_end_times)
+
+    max_circuit_length = max(len(execution_log) for _, execution_log, _, _ in row_plots)
+    with_text_fig_width = _execution_timeline_fig_width(
+        figure_width, max_circuit_length, show_box_text=True
     )
     fig_height = 0.9 + 0.90 * float(figure_vertical_stretch) * sum(row_height_ratios)
     heading_fs = _STAR_SUBFIG_HEADING_FONT_SIZE
@@ -604,18 +721,32 @@ def plot_star_execution_subfigures(
         os.makedirs(output_dir, exist_ok=True)
 
     for show_box_text in (True, False):
+        font_scale = _execution_timeline_font_scale(show_box_text=show_box_text)
+        resolved_border_width = _execution_timeline_box_border_width(
+            show_box_text=show_box_text,
+            box_border_width=box_border_width,
+            no_text_box_border_width=no_text_box_border_width,
+        )
+        fig_width = _execution_timeline_fig_width(
+            figure_width, max_circuit_length, show_box_text=show_box_text
+        )
+        fig_height_plot = (
+            fig_height
+            if show_box_text
+            else fig_height * (fig_width / with_text_fig_width)
+        )
         fig, axes = plt.subplots(
             row_count,
             1,
-            figsize=(fig_width, fig_height),
+            figsize=(fig_width, fig_height_plot),
             sharex=True,
             gridspec_kw={"height_ratios": row_height_ratios},
         )
         if row_count == 1:
             axes = [axes]
 
-        for ax, (row_title, execution_log, n_factories, n_logical_qubits) in zip(
-            axes, row_plots
+        for row_idx, (ax, (row_title, execution_log, n_factories, n_logical_qubits)) in enumerate(
+            zip(axes, row_plots)
         ):
             _plot_circuit_execution_on_ax(
                 ax,
@@ -630,7 +761,21 @@ def plot_star_execution_subfigures(
                 unified_heading_fontsize=heading_fs,
                 title_pad=4.0,
                 collapse_tmr=collapse_tmr,
+                font_scale=font_scale,
+                box_border_width=resolved_border_width,
             )
+            if row_time_markers is not None:
+                line_kwargs = {
+                    "color": "black",
+                    "linestyle": "-",
+                    "linewidth": 0.8,
+                    "alpha": 0.35,
+                    "zorder": 25,
+                }
+                if marker_line_kwargs:
+                    line_kwargs.update(marker_line_kwargs)
+                for marker_t in row_time_markers[row_idx]:
+                    ax.axvline(float(marker_t), **line_kwargs)
 
         for ax in axes[:-1]:
             ax.set_xlabel("")
@@ -646,19 +791,19 @@ def plot_star_execution_subfigures(
             )
             fig.suptitle(
                 suptitle,
-                fontsize=heading_fs,
+                fontsize=_scaled_font_size(heading_fs, font_scale),
                 fontweight="bold",
                 y=float(min(0.998, bb0.y1 + 0.008)),
                 va="bottom",
             )
 
-        legend_ax = axes[1] if row_count > 1 else axes[0]
+        legend_ax = axes[legend_row_index]
         legend_ax.legend(
             handles=_star_execution_legend_handles(),
             loc="upper right",
             bbox_to_anchor=(1.0, 1.0),
             ncol=2,
-            fontsize=max(10, heading_fs - 2),
+            fontsize=_scaled_font_size(max(10, heading_fs - 2), font_scale),
             frameon=True,
             framealpha=0.95,
         )
@@ -682,6 +827,8 @@ def plot_circuit_execution(
     figure_width=16,
     show_logical_qubits: bool = False,
     collapse_tmr: bool = True,
+    box_border_width: float | None = None,
+    no_text_box_border_width: float | None = None,
 ):
     """
     Plot circuit execution timeline showing operations on each factory.
@@ -692,16 +839,29 @@ def plot_circuit_execution(
         print("No execution log to plot")
         return
     circuit_length = len(execution_log)
-    fig_width = max(float(figure_width) * 0.45, circuit_length / 10 + 4.5)
+    with_text_fig_width = _execution_timeline_fig_width(
+        figure_width, circuit_length, show_box_text=True
+    )
     _, _, _, n_rows = _resolve_star_row_layout(
         execution_log, n_factories, n_logical_qubits, show_logical_qubits
     )
+    base_height = max(10, n_rows)
     base_path = save_path.split(".")[0]
     output_dir = os.path.dirname(base_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     for show_box_text in (True, False):
-        fig, ax = plt.subplots(figsize=(fig_width, max(10, n_rows)))
+        font_scale = _execution_timeline_font_scale(show_box_text=show_box_text)
+        resolved_border_width = _execution_timeline_box_border_width(
+            show_box_text=show_box_text,
+            box_border_width=box_border_width,
+            no_text_box_border_width=no_text_box_border_width,
+        )
+        fig_width = _execution_timeline_fig_width(
+            figure_width, circuit_length, show_box_text=show_box_text
+        )
+        height_scale = fig_width / with_text_fig_width
+        fig, ax = plt.subplots(figsize=(fig_width, base_height * height_scale))
         _plot_circuit_execution_on_ax(
             ax,
             execution_log,
@@ -713,6 +873,8 @@ def plot_circuit_execution(
             shared_xmax=None,
             show_legend=True,
             collapse_tmr=collapse_tmr,
+            font_scale=font_scale,
+            box_border_width=resolved_border_width,
         )
         plt.tight_layout(rect=(0, 0.12, 1, 1))
         out_path = _save_path_for_box_text_variant(
@@ -731,6 +893,8 @@ def plot_circuit_execution_vertical(
     figure_height=16,
     show_logical_qubits: bool = False,
     collapse_tmr: bool = True,
+    box_border_width: float | None = None,
+    no_text_box_border_width: float | None = None,
 ):
     """
     Plot circuit execution timeline with vertical time axis (top to bottom).
@@ -761,20 +925,48 @@ def plot_circuit_execution_vertical(
                 max_qubit = max(max_qubit, max(qubits))
         nl = max_qubit + 1 if max_qubit >= 0 else 0
 
+    if show_logical_qubits:
+        with_text_fig_width = max(6, nl * 0.8 + n_factories * 0.8)
+    else:
+        with_text_fig_width = max(8, n_factories * 0.8)
+    base_fig_height = circuit_length / 5
+
     for show_box_text in (True, False):
+        font_scale = _execution_timeline_font_scale(show_box_text=show_box_text)
+        resolved_border_width = _execution_timeline_box_border_width(
+            show_box_text=show_box_text,
+            box_border_width=box_border_width,
+            no_text_box_border_width=no_text_box_border_width,
+        )
         if show_logical_qubits:
             row_names = [f"q{i}" for i in range(nl)] + [
                 f"f{i}" for i in range(n_factories)
             ]
             y_pos = {name: idx for idx, name in enumerate(row_names)}
+            fig_width = (
+                with_text_fig_width
+                if show_box_text
+                else float(_TCULT_EXEC_FIGURE_WIDTH)
+            )
             fig, ax = plt.subplots(
-                figsize=(max(6, len(row_names) * 0.8), circuit_length / 5)
+                figsize=(
+                    fig_width,
+                    base_fig_height * (fig_width / with_text_fig_width),
+                )
             )
         else:
             row_names = None
             y_pos = None
+            fig_width = (
+                with_text_fig_width
+                if show_box_text
+                else float(_TCULT_EXEC_FIGURE_WIDTH)
+            )
             fig, ax = plt.subplots(
-                figsize=(max(8, n_factories * 0.8), circuit_length / 5)
+                figsize=(
+                    fig_width,
+                    base_fig_height * (fig_width / with_text_fig_width),
+                )
             )
 
         for entry in plot_log:
@@ -792,12 +984,8 @@ def plot_circuit_execution_vertical(
             color = color_map.get(operation, "#95a5a6")
 
             alpha = _BOX_ALPHA
-            if operation in ["move", "return_move"]:
-                border_color = "black"
-                border_width = _BOX_BORDER_WIDTH
-            else:
-                border_color = "black"
-                border_width = _BOX_BORDER_WIDTH
+            border_color = "black"
+            border_width = resolved_border_width
 
             if operation == "Barrier":
                 continue
@@ -913,37 +1101,40 @@ def plot_circuit_execution_vertical(
         if show_logical_qubits:
             ax.set_xlabel(
                 "Qubits and Magic State Factories",
-                fontsize=_AXIS_LABEL_FONT_SIZE,
+                fontsize=_scaled_font_size(_AXIS_LABEL_FONT_SIZE, font_scale),
                 fontweight="bold",
             )
             ax.set_xticks(range(len(row_names)))
             ax.set_xticklabels(row_names)
             ax.set_title(
                 "STAR Execution Timeline (Vertical Time)",
-                fontsize=_TITLE_FONT_SIZE,
+                fontsize=_scaled_font_size(_TITLE_FONT_SIZE, font_scale),
                 fontweight="bold",
             )
         else:
             ax.set_xlabel(
                 "Magic State Factory ID",
-                fontsize=_AXIS_LABEL_FONT_SIZE,
+                fontsize=_scaled_font_size(_AXIS_LABEL_FONT_SIZE, font_scale),
                 fontweight="bold",
             )
             ax.set_xticks(range(n_factories))
             ax.set_title(
                 "STAR Execution Timeline (Vertical Time)",
-                fontsize=_TITLE_FONT_SIZE,
+                fontsize=_scaled_font_size(_TITLE_FONT_SIZE, font_scale),
                 fontweight="bold",
             )
-        ax.tick_params(axis="x", labelsize=_FIG_FONT_SIZE)
-        ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE)
+        x_tick_fs, y_tick_fs = _execution_timeline_tick_font_sizes(
+            show_box_text=show_box_text
+        )
+        ax.tick_params(axis="x", labelsize=x_tick_fs)
+        ax.tick_params(axis="y", labelsize=y_tick_fs)
         ax.grid(axis="y", alpha=0.3, linestyle="--")
         leg = ax.legend(
             handles=_star_execution_legend_handles(),
             loc="upper center",
             bbox_to_anchor=(0.5, -0.14),
             ncol=len(_star_execution_legend_handles()),
-            fontsize=_LEGEND_FONT_SIZE,
+            fontsize=_scaled_font_size(_LEGEND_FONT_SIZE, font_scale),
             columnspacing=1.2,
             handletextpad=0.5,
         )
@@ -962,6 +1153,8 @@ def plot_t_cultivation_execution(
     n_qubits: int,
     n_factories: int,
     save_path="output/circuit_execution/t_cultivation_execution.pdf",
+    box_border_width: float | None = None,
+    no_text_box_border_width: float | None = None,
 ):
     """Plot a single T-cultivation timeline with qubit and factory lanes.
 
@@ -972,11 +1165,27 @@ def plot_t_cultivation_execution(
         return
 
     rows = [f"q{i}" for i in range(n_qubits)] + [f"f{i}" for i in range(n_factories)]
+    with_text_fig_width = 10.0
+    base_fig_height = max(4, 0.72 * len(rows))
     output_dir = os.path.dirname(save_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     for show_box_text in (True, False):
-        fig, ax = plt.subplots(figsize=(10.0, max(4, 0.72 * len(rows))))
+        font_scale = _execution_timeline_font_scale(show_box_text=show_box_text)
+        resolved_border_width = _execution_timeline_box_border_width(
+            show_box_text=show_box_text,
+            box_border_width=box_border_width,
+            no_text_box_border_width=no_text_box_border_width,
+        )
+        fig_width = (
+            with_text_fig_width if show_box_text else float(_TCULT_EXEC_FIGURE_WIDTH)
+        )
+        fig, ax = plt.subplots(
+            figsize=(
+                fig_width,
+                base_fig_height * (fig_width / with_text_fig_width),
+            )
+        )
         _plot_t_cultivation_execution_on_ax(
             ax,
             execution_log,
@@ -985,6 +1194,8 @@ def plot_t_cultivation_execution(
             title="T-Cultivation Execution Timeline",
             show_legend=True,
             show_box_text=show_box_text,
+            font_scale=font_scale,
+            box_border_width=resolved_border_width,
         )
         plt.tight_layout()
         out_path = _save_path_for_box_text_variant(
@@ -1025,10 +1236,17 @@ def _plot_t_cultivation_execution_on_ax(
     unified_heading_fontsize: float | None = None,
     title_pad: float | None = None,
     show_box_text: bool = True,
+    font_scale: float = 1.0,
+    box_border_width: float | None = None,
 ) -> None:
     rows = [f"q{i}" for i in range(n_qubits)] + [f"f{i}" for i in range(n_factories)]
     y_pos = {name: idx for idx, name in enumerate(rows)}
     max_time = max(entry_end(entry) for entry in execution_log)
+    resolved_border_width = (
+        box_border_width
+        if box_border_width is not None
+        else _execution_timeline_box_border_width(show_box_text=show_box_text)
+    )
 
     for entry in execution_log:
         start_time = entry_start(entry)
@@ -1059,7 +1277,7 @@ def _plot_t_cultivation_execution_on_ax(
                 _BOX_HEIGHT,
                 facecolor=box_color,
                 edgecolor="black",
-                linewidth=_BOX_BORDER_WIDTH,
+                linewidth=resolved_border_width,
                 alpha=_BOX_ALPHA,
             )
             ax.add_patch(rect)
@@ -1091,7 +1309,7 @@ def _plot_t_cultivation_execution_on_ax(
                     _BOX_HEIGHT,
                     facecolor=color,
                     edgecolor="black",
-                    linewidth=_BOX_BORDER_WIDTH,
+                    linewidth=resolved_border_width,
                     alpha=_BOX_ALPHA,
                 )
                 ax.add_patch(rect)
@@ -1108,22 +1326,32 @@ def _plot_t_cultivation_execution_on_ax(
                     _BOX_HEIGHT,
                     facecolor=t_color,
                     edgecolor="black",
-                    linewidth=_BOX_BORDER_WIDTH,
+                    linewidth=resolved_border_width,
                     alpha=_BOX_ALPHA,
                 )
                 ax.add_patch(rect)
 
     ax.set_xlim(0, shared_xmax if shared_xmax is not None else max_time * 1.03)
     ax.set_ylim(-0.7, len(rows) - 0.3)
-    title_fs = (
-        unified_heading_fontsize
-        if unified_heading_fontsize is not None
-        else _TITLE_FONT_SIZE
+    title_fs = _scaled_font_size(
+        (
+            unified_heading_fontsize
+            if unified_heading_fontsize is not None
+            else _TITLE_FONT_SIZE
+        ),
+        font_scale,
     )
-    xlabel_fs = (
-        unified_heading_fontsize
-        if unified_heading_fontsize is not None
-        else _AXIS_LABEL_FONT_SIZE
+    xlabel_fs = _scaled_font_size(
+        (
+            unified_heading_fontsize
+            if unified_heading_fontsize is not None
+            else _AXIS_LABEL_FONT_SIZE
+        ),
+        font_scale,
+    )
+    x_tick_fs, y_tick_fs = _execution_timeline_tick_font_sizes(
+        show_box_text=show_box_text,
+        y_tick_base=_FIG_FONT_SIZE - 1,
     )
     ax.set_xlabel(
         "Time (circuit moments)",
@@ -1133,8 +1361,8 @@ def _plot_t_cultivation_execution_on_ax(
     ax.set_ylabel("")
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels(rows)
-    ax.tick_params(axis="x", labelsize=_FIG_FONT_SIZE)
-    ax.tick_params(axis="y", labelsize=_FIG_FONT_SIZE - 1)
+    ax.tick_params(axis="x", labelsize=x_tick_fs)
+    ax.tick_params(axis="y", labelsize=y_tick_fs)
     _tpad = 6 if title_pad is None else title_pad
     ax.set_title(title, fontsize=title_fs, fontweight="bold", pad=_tpad)
     ax.grid(axis="x", linestyle="--", alpha=0.35)
@@ -1144,7 +1372,7 @@ def _plot_t_cultivation_execution_on_ax(
             handles=_t_cultivation_legend_handles(),
             loc="center left",
             bbox_to_anchor=(1.0, 0.5),
-            fontsize=_FIG_FONT_SIZE,
+            fontsize=_scaled_font_size(_FIG_FONT_SIZE, font_scale),
             frameon=True,
         )
 
@@ -1152,6 +1380,8 @@ def _plot_t_cultivation_execution_on_ax(
 def plot_t_cultivation_execution_subfigures(
     row_plots,
     save_path="output/circuit_execution/t_cultivation_execution_subfigures.pdf",
+    box_border_width: float | None = None,
+    no_text_box_border_width: float | None = None,
 ):
     """Plot multiple T-cultivation timelines as row-wise subfigures.
 
@@ -1173,6 +1403,13 @@ def plot_t_cultivation_execution_subfigures(
         * 1.03
     )
 
+    row_max_end_times = [
+        max(entry_end(entry) for entry in execution_log)
+        for _, execution_log, _, _ in row_plots
+    ]
+    legend_row_index = _subplot_index_with_most_timeline_whitespace(row_max_end_times)
+
+    with_text_fig_width = 10.0
     fig_height = 0.9 + 0.90 * sum(row_height_ratios)
     heading_fs = _STAR_SUBFIG_HEADING_FONT_SIZE
     output_dir = os.path.dirname(save_path)
@@ -1180,10 +1417,20 @@ def plot_t_cultivation_execution_subfigures(
         os.makedirs(output_dir, exist_ok=True)
 
     for show_box_text in (True, False):
+        font_scale = _execution_timeline_font_scale(show_box_text=show_box_text)
+        resolved_border_width = _execution_timeline_box_border_width(
+            show_box_text=show_box_text,
+            box_border_width=box_border_width,
+            no_text_box_border_width=no_text_box_border_width,
+        )
+        fig_width = (
+            with_text_fig_width if show_box_text else float(_TCULT_EXEC_FIGURE_WIDTH)
+        )
+        fig_height_plot = fig_height * (fig_width / with_text_fig_width)
         fig, axes = plt.subplots(
             row_count,
             1,
-            figsize=(10.0, fig_height),
+            figsize=(fig_width, fig_height_plot),
             sharex=True,
             gridspec_kw={"height_ratios": row_height_ratios},
         )
@@ -1204,22 +1451,25 @@ def plot_t_cultivation_execution_subfigures(
                 unified_heading_fontsize=heading_fs,
                 title_pad=4.0,
                 show_box_text=show_box_text,
+                font_scale=font_scale,
+                box_border_width=resolved_border_width,
             )
 
         for ax in axes[:-1]:
             ax.set_xlabel("")
             ax.tick_params(axis="x", labelbottom=False)
 
-        fig.legend(
+        fig.tight_layout(rect=(0, 0.0, 1, 0.98))
+
+        legend_ax = axes[legend_row_index]
+        legend_ax.legend(
             handles=_t_cultivation_legend_handles(),
-            loc="center right",
+            loc="upper right",
+            bbox_to_anchor=(1.02, 1.0),
             ncol=1,
-            bbox_to_anchor=(0.97, 0.5),
-            fontsize=max(10, _FIG_FONT_SIZE - 4),
+            fontsize=_scaled_font_size(max(10, _FIG_FONT_SIZE - 4), font_scale),
             frameon=True,
         )
-
-        fig.tight_layout(rect=(0, 0.0, 1, 0.98))
         out_path = _save_path_for_box_text_variant(
             save_path, show_box_text=show_box_text
         )
@@ -1269,6 +1519,8 @@ def plot_star_t_cultivation_execution_subfigures(
     figure_width: float = 16.0,
     figure_vertical_stretch: float = 1.8,
     collapse_tmr: bool = True,
+    box_border_width: float | None = None,
+    no_text_box_border_width: float | None = None,
 ) -> None:
     """Stacked STAR (top) and T-cultivation (bottom) timelines on a shared time axis.
 
@@ -1296,8 +1548,18 @@ def plot_star_t_cultivation_execution_subfigures(
         )
         * 1.03
     )
+    star_plot_log = (
+        _collapse_star_tmr_blocks(star_log) if collapse_tmr else star_log
+    )
+    star_row_max = max(entry_end(entry) for entry in star_plot_log)
+    t_row_max = max(entry_end(entry) for entry in t_log)
+    legend_row_index = _subplot_index_with_most_timeline_whitespace(
+        [star_row_max, t_row_max]
+    )
     circuit_length = max(len(star_log), len(t_log))
-    fig_width = max(float(figure_width) * 0.45, circuit_length / 10 + 4.5)
+    with_text_fig_width = _execution_timeline_fig_width(
+        figure_width, circuit_length, show_box_text=True
+    )
     fig_height = 0.9 + 0.90 * float(figure_vertical_stretch) * sum(row_height_ratios)
 
     heading_fs = _STAR_SUBFIG_HEADING_FONT_SIZE
@@ -1306,10 +1568,24 @@ def plot_star_t_cultivation_execution_subfigures(
         os.makedirs(output_dir, exist_ok=True)
 
     for show_box_text in (True, False):
+        font_scale = _execution_timeline_font_scale(show_box_text=show_box_text)
+        resolved_border_width = _execution_timeline_box_border_width(
+            show_box_text=show_box_text,
+            box_border_width=box_border_width,
+            no_text_box_border_width=no_text_box_border_width,
+        )
+        fig_width = _execution_timeline_fig_width(
+            figure_width, circuit_length, show_box_text=show_box_text
+        )
+        fig_height_plot = (
+            fig_height
+            if show_box_text
+            else fig_height * (fig_width / with_text_fig_width)
+        )
         fig, axes = plt.subplots(
             2,
             1,
-            figsize=(fig_width, fig_height),
+            figsize=(fig_width, fig_height_plot),
             sharex=True,
             gridspec_kw={"height_ratios": row_height_ratios},
         )
@@ -1328,6 +1604,8 @@ def plot_star_t_cultivation_execution_subfigures(
             title_pad=4.0,
             suppress_box_text_ops=frozenset({"SE", "SE_q", "CNOT"}),
             collapse_tmr=collapse_tmr,
+            font_scale=font_scale,
+            box_border_width=resolved_border_width,
         )
         _plot_t_cultivation_execution_on_ax(
             axes[1],
@@ -1340,6 +1618,8 @@ def plot_star_t_cultivation_execution_subfigures(
             unified_heading_fontsize=heading_fs,
             title_pad=4.0,
             show_box_text=show_box_text,
+            font_scale=font_scale,
+            box_border_width=resolved_border_width,
         )
 
         axes[0].set_xlabel("")
@@ -1355,18 +1635,18 @@ def plot_star_t_cultivation_execution_subfigures(
             )
             fig.suptitle(
                 suptitle,
-                fontsize=heading_fs,
+                fontsize=_scaled_font_size(heading_fs, font_scale),
                 fontweight="bold",
                 y=float(min(0.998, bb0.y1 + 0.008)),
                 va="bottom",
             )
 
-        axes[0].legend(
+        axes[legend_row_index].legend(
             handles=_combined_star_t_legend_handles(),
             loc="upper right",
             bbox_to_anchor=(1.06, 1.0),
             ncol=2,
-            fontsize=max(10, heading_fs - 2),
+            fontsize=_scaled_font_size(max(10, heading_fs - 2), font_scale),
             frameon=True,
             framealpha=0.95,
             columnspacing=0.4,
