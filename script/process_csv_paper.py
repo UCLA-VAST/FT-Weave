@@ -57,8 +57,9 @@ STAR_T_SETTING_STUDY_AOD: int = 5
 # Setting-study dual-AOD bar chart: back = first AOD (full color), front = second (lighter).
 SETTING_STUDY_DUAL_AODS: tuple[int, ...] = (1, 5)
 SETTING_STUDY_DUAL_AOD_FRONT_BLEND: float = 0.52
-# Right-hand STAR figure panel: denser y-axis ticks on the AOD sweep.
+# Denser y-axis ticks on AOD / execution-time panels.
 STAR_AOD_COMPARISON_Y_NBINS: int = 8
+T_CULTIVATION_Y_NBINS: int = 10
 # Setting-study left panel: crop y-axis when Vanilla (index 0) dominates the scale.
 STAR_SETTING_STUDY_VANILLA_IDX: int = 0
 # Broken-axis split: bottom panel [0, break], top panel [break, Vanilla max].
@@ -67,7 +68,12 @@ STAR_SETTING_STUDY_Y_CROP_GAP_RATIO: float = 1.25
 STAR_SETTING_STUDY_Y_CROP_PAD_FRAC: float = 0.1
 # T setting-study: configure placement per ablation entry (like STAR `SETTINGS`).
 
-T_CULTIVATION_MAIN_COMPILE_SETTING: tuple[bool, bool, bool] = (False, True, True)
+T_CULTIVATION_MAIN_COMPILE_SETTING: tuple[str, bool, bool, bool] = (
+    "col_based",
+    False,
+    True,
+    True,
+)
 
 # Runtime stacked-bar profile: col_based, compare AOD = 1 vs 5 at best compile setting.
 RUNTIME_PROFILE_AODS: tuple[int, ...] = (1, 5)
@@ -81,7 +87,7 @@ RUNTIME_PROFILE_STAR_SETTING: tuple = (
     True,
     False,
 )
-RUNTIME_PROFILE_T_SETTING_IDX: int = 4  # "(d) + Opt. patch redist." (col_based)
+RUNTIME_PROFILE_T_SETTING_IDX: int = 3  # col_based + Opt. patch redist.
 _RUNTIME_PROFILE_MOVE_COMPONENTS: list[tuple[str, str, str]] = [
     ("forward_move_mean", "Forward move", "#4C78A8"),
     ("return_move_mean", "Return move", "#9ECAE9"),
@@ -556,11 +562,33 @@ def _mask_t_cultivation_compile(
 
 
 def _filter_t_cultivation_main_compile_setting(df: pd.DataFrame) -> pd.DataFrame:
-    cols = ("trivial_return", "decompose_move", "redistribute_stage1_success")
+    cols = ("placement", "trivial_return", "decompose_move", "redistribute_stage1_success")
     if df.empty or not all(c in df.columns for c in cols):
         return df
-    tr, dm, rs = T_CULTIVATION_MAIN_COMPILE_SETTING
-    return df.loc[_mask_t_cultivation_compile(df, tr, dm, rs)].copy()
+    placement, tr, dm, rs = T_CULTIVATION_MAIN_COMPILE_SETTING
+    work = df.copy()
+    work["placement"] = work["placement"].astype(str).map(_normalize_placement_name)
+    mask = (work["placement"] == _normalize_placement_name(placement)) & _mask_t_cultivation_compile(
+        work, tr, dm, rs
+    )
+    return work.loc[mask].copy()
+
+
+def _t_setting_ablation_index(setting: tuple[str, bool, bool, bool]) -> int | None:
+    """Return index in ``_T_SETTING_ABLATION_GRID`` for *setting*, or None."""
+    for idx, entry in enumerate(_T_SETTING_ABLATION_GRID):
+        if entry == setting:
+            return int(idx)
+    return None
+
+
+def _runtime_profile_t_setting() -> tuple[str, bool, bool, bool]:
+    """Setting used for the T-cultivation runtime-profile panel."""
+    idx = _t_setting_ablation_index(T_CULTIVATION_MAIN_COMPILE_SETTING)
+    if idx is not None:
+        return _T_SETTING_ABLATION_GRID[idx]
+    placement, tr, dm, rs = T_CULTIVATION_MAIN_COMPILE_SETTING
+    return (str(placement).strip(), tr, dm, rs)
 
 
 def _primary_t_triple_for_star_t_grid(
@@ -613,6 +641,8 @@ def _save_setting_aod_architecture_figure(
     axes[1, 0].set_ylabel(y_label, fontsize=_FIG_FONT_SIZE, labelpad=2)
     if y_axis_thousands:
         _apply_y_axis_thousands([ax_setting_bot, axes[1, 0]])
+        for _ax in (ax_setting_top, ax_setting_bot, axes[1, 0]):
+            _apply_panel_y_ticks(_ax, nbins=T_CULTIVATION_Y_NBINS)
     for row in range(2):
         if row == 0:
             ax_setting_top.tick_params(axis="both", which="major", pad=1)
@@ -1074,12 +1104,15 @@ def _t_aod_panel_base_rgb(
     t_setting_colors: dict[int, tuple],
 ) -> tuple[float, float, float]:
     """Match AOD = 1 to the compile/placement setting used in the T AOD sweep panel."""
-    tr_m, dm_m, rs_m = T_CULTIVATION_MAIN_COMPILE_SETTING
+    main_idx = _t_setting_ablation_index(T_CULTIVATION_MAIN_COMPILE_SETTING)
+    if main_idx is not None and main_idx in t_setting_colors:
+        return mcolors.to_rgb(t_setting_colors[main_idx])
+    placement_m, tr_m, dm_m, rs_m = T_CULTIVATION_MAIN_COMPILE_SETTING
     for setting_idx, _label in _t_setting_study_entries():
         if setting_idx >= len(_T_SETTING_ABLATION_GRID):
             continue
         placement, tr, dm, rs = _T_SETTING_ABLATION_GRID[setting_idx]
-        if str(placement).strip() != "col_based":
+        if str(placement).strip() != str(placement_m).strip():
             continue
         if (tr, dm, rs) == (tr_m, dm_m, rs_m):
             if setting_idx in t_setting_colors:
@@ -1520,15 +1553,19 @@ def _star_runtime_profile_frame(
 def _t_runtime_profile_frame(
     layer_df: pd.DataFrame,
     triple: tuple[int, float, int],
-    compile_tuple: tuple[bool, bool, bool],
+    setting: tuple[str, bool, bool, bool],
     code_distance: int,
     aod: int,
 ) -> pd.DataFrame | None:
-    work = _filter_col_based(layer_df.copy())
+    work = layer_df.copy()
+    if work.empty or "placement" not in work.columns:
+        return None
+    placement, tr, dm, rs = setting
+    work["placement"] = work["placement"].astype(str).map(_normalize_placement_name)
+    work = work[work["placement"] == _normalize_placement_name(placement)].copy()
     if work.empty:
         return None
     cd_t, ft, fps = triple
-    tr, dm, rs = compile_tuple
     mask = _mask_t_cultivation_triple(
         work, cd_t, ft, fps
     ) & _mask_t_cultivation_compile(work, tr, dm, rs)
@@ -1541,9 +1578,11 @@ def _t_runtime_profile_frame(
     ].copy()
     work["n_aods"] = pd.to_numeric(work["n_aods"], errors="coerce").astype(int)
     work = work[work["n_aods"] == int(aod)].copy()
+    if work.empty:
+        return None
     ctx = (
         f"code_distance={code_distance}, AOD={aod}, "
-        f"compile={compile_tuple}, placement=col_based"
+        f"setting={setting}"
     )
     return _aggregate_t_runtime_profile_by_qubits(work, context=ctx)
 
@@ -1643,10 +1682,14 @@ def _plot_star_t_runtime_profile_figure(
     *,
     code_distance: int = STAR_T_GRID_COMPARISON_CODE_DISTANCE,
     aods: tuple[int, ...] = RUNTIME_PROFILE_AODS,
-    t_setting_idx: int = RUNTIME_PROFILE_T_SETTING_IDX,
+    t_setting_idx: int | None = None,
     verbose: bool = True,
 ) -> None:
     """Stacked runtime bars: STAR (top) vs T-cultivation (bottom), AOD 1 vs 5 grouped."""
+
+    def _has_profile(profiles: dict[int, pd.DataFrame | None]) -> bool:
+        return any(prof is not None and not prof.empty for prof in profiles.values())
+
     os.makedirs(output_dir, exist_ok=True)
     cd = int(code_distance)
     round_name = "full_trotter"
@@ -1658,22 +1701,23 @@ def _plot_star_t_runtime_profile_figure(
     }
     triple = _primary_t_triple_for_star_t_grid(cd)
     t_profiles: dict[int, pd.DataFrame | None] = {int(aod): None for aod in aods}
+    t_profile_setting = _runtime_profile_t_setting()
+    if t_setting_idx is not None and 0 <= int(t_setting_idx) < len(_T_SETTING_ABLATION_GRID):
+        t_profile_setting = _T_SETTING_ABLATION_GRID[int(t_setting_idx)]
     if triple is not None and round_name in t_layers_ablation:
-        if 0 <= int(t_setting_idx) < len(_T_SETTING_ABLATION_GRID):
-            placement, tr, dm, rs = _T_SETTING_ABLATION_GRID[int(t_setting_idx)]
-            if str(placement).strip() == "col_based":
-                compile_tuple = (tr, dm, rs)
-                for aod in aods:
-                    t_profiles[int(aod)] = _t_runtime_profile_frame(
-                        t_layers_ablation[round_name],
-                        triple,
-                        compile_tuple,
-                        cd,
-                        int(aod),
-                    )
-
-    def _has_profile(profiles: dict[int, pd.DataFrame | None]) -> bool:
-        return any(prof is not None and not prof.empty for prof in profiles.values())
+        for aod in aods:
+            t_profiles[int(aod)] = _t_runtime_profile_frame(
+                t_layers_ablation[round_name],
+                triple,
+                t_profile_setting,
+                cd,
+                int(aod),
+            )
+        if verbose and not _has_profile(t_profiles):
+            print(
+                "Runtime profile: no T-cultivation rows for "
+                f"setting={t_profile_setting}, d={cd}, AOD in {aods}."
+            )
 
     if not _has_profile(star_profiles) and not _has_profile(t_profiles):
         if verbose:
@@ -2195,6 +2239,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
             )
             x_pts.extend(summ["n_qubits"].dropna().astype(int).tolist())
         _finalize_panel(ax, x_pts, theory="t")
+        _apply_panel_y_ticks(ax, nbins=T_CULTIVATION_Y_NBINS)
 
     plot_star = "full_trotter" in dfs_dict_micro
     plot_t = triple is not None and not t_setting_layer.empty
