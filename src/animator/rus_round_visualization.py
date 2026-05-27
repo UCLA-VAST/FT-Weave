@@ -14,7 +14,8 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
-from typing import Dict, List, Tuple, Optional
+import matplotlib.colors as mcolors
+from typing import Dict, List, Literal, Optional, Tuple
 import os
 from src.animator.log_view_helpers import (
     normalize_factories,
@@ -22,6 +23,47 @@ from src.animator.log_view_helpers import (
     entry_start,
     entry_end,
 )
+
+# ---------------------------------------------------------------------------
+# Trap-grid style defaults (adjust here)
+# ---------------------------------------------------------------------------
+TRAP_GRID_BLOCK_SPACING = 0.55
+TRAP_GRID_SITE_STEP = 0.10
+TRAP_GRID_TRAP_OFFSET = 0.028
+TRAP_GRID_TRAP_RADIUS = 0.020
+TRAP_GRID_BLOCK_PAD = 0.05
+
+TRAP_GRID_LOGICAL_FACE = "#DDEEFF"
+TRAP_GRID_LOGICAL_EDGE = "#2A6F9E"
+TRAP_GRID_FACTORY_FACE = "#FFF2CC"
+TRAP_GRID_FACTORY_EDGE = "#CF8A1E"
+TRAP_GRID_MOVED_FACTORY_COLOR = "#CC7A1D"
+TRAP_GRID_DEPART_BOX_ALPHA = 0.12
+TRAP_GRID_ARRIVE_OVERLAY_ALPHA = 0.42
+# Factory box on logical block shifts right by (left-to-right trap spacing); traps stay put.
+TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS = 2.0
+
+TRAP_GRID_AOD_LINEWIDTH = 0.6
+TRAP_GRID_AOD_SRC_ALPHA_FACTOR = 0.22
+TRAP_GRID_AOD_ALPHA_EARLY = 0.95
+TRAP_GRID_AOD_ALPHA_LATE = 0.40
+
+TRAP_GRID_MOVEMENT_ARROW_COLOR = "#000000"
+TRAP_GRID_ARROW_LINEWIDTH = 1.2
+TRAP_GRID_ARROW_MUTATION_SCALE = 14
+# Movement time shading: earlier → darker grey, later → lighter grey (0=black, 1=white).
+TRAP_GRID_ARROW_GREY_EARLY = 0.0
+TRAP_GRID_ARROW_GREY_LATE = 0.72
+TRAP_GRID_ARROW_LABEL_FONTSIZE = 9
+TRAP_GRID_ARROW_LABEL_OFFSET = 0.06
+
+TRAP_GRID_MOVEMENT_OVERLAY: Literal["both", "arrows_only", "aod_only", "none"] = "both"
+TRAP_GRID_FIGSIZE_SCALE_X = 1.15
+TRAP_GRID_FIGSIZE_SCALE_Y = 1.05
+TRAP_GRID_FIGSIZE_PAD_X = 1.2
+TRAP_GRID_FIGSIZE_PAD_Y = 0.8
+TRAP_GRID_AXIS_MARGIN = 0.15
+TRAP_GRID_SAVE_PAD_INCHES = 0.25
 
 # Color mapping for AOD devices (for border colors)
 aod_colors = [
@@ -76,65 +118,91 @@ def _parse_location_xy(raw_loc) -> Optional[Tuple[int, int]]:
     return None
 
 
-def extract_rus_rounds(execution_log: List[dict]) -> List[List[dict]]:
+def _split_segment_into_rus_cycles(segment: List[dict]) -> List[List[dict]]:
     """
-    Extract RUS rounds from execution log.
+    Split one post-TMR log segment into individual RUS cycles.
 
-    A RUS round is bounded by barriers in the log. The pattern is:
-    - Barrier at index 0 (TMR barrier)
-    - Barrier at index 1 (RUS barrier)
-    - Barrier at index 2 (TMR barrier)
-    - Barrier at index 3 (RUS barrier)
-    - ...
-
-    Each RUS round consists of all operations between odd-indexed barriers (RUS barriers).
-
-    Args:
-        execution_log: List of execution log entries (start_time, end_time, factory_id, operation, qubit, ...)
-
-    Returns:
-        List of RUS rounds, where each round is a list of log entries (excluding barrier entries)
+    One RUS = move stage + CNOT layer + return stage (in log order).
     """
-    if not execution_log:
+    entries = [e for e in segment if e.get("operation") != "Barrier"]
+    if not entries:
         return []
 
-    # Find all barrier positions
-    barrier_indices = []
-    for i, entry in enumerate(execution_log):
-        operation = entry.get("operation")
-        if operation == "Barrier":
-            barrier_indices.append(i)
+    cycles: List[List[dict]] = []
+    current: List[dict] = []
+    after_return = False
 
+    for entry in entries:
+        op = entry.get("operation")
+        if op == "move":
+            if after_return and current:
+                cycles.append(current)
+                current = []
+            after_return = False
+            current.append(entry)
+        elif op == "CNOT":
+            after_return = False
+            current.append(entry)
+        elif op == "return_move":
+            current.append(entry)
+            after_return = True
+        elif current:
+            # RUS_success/fail, SE, etc. between CNOT and return_move
+            current.append(entry)
+
+    if current:
+        cycles.append(current)
+    return cycles
+
+
+def _extract_macro_rus_segments(execution_log: List[dict]) -> List[List[dict]]:
+    """Segments between TMR/RUS barriers (may contain multiple RUS cycles each)."""
+    barrier_indices = [
+        i
+        for i, entry in enumerate(execution_log)
+        if entry.get("operation") == "Barrier"
+    ]
     if not barrier_indices:
-        # No barriers found, return entire log as one round
         return [execution_log]
 
-    rus_rounds = []
-
-    # Iterate through barrier pairs to extract RUS rounds
-    # RUS rounds are bounded by odd-indexed barriers (indices 1, 3, 5, ...)
+    segments: List[List[dict]] = []
     for i in range(1, len(barrier_indices), 2):
         rus_barrier_idx = barrier_indices[i]
-
-        # Find the previous boundary (either previous barrier or start of log)
         if i > 1:
-            prev_barrier_idx = barrier_indices[i - 2]
-            start_idx = prev_barrier_idx + 1
+            start_idx = barrier_indices[i - 2] + 1
         else:
             start_idx = 0
-
-        # Collect all entries up to and including operations at the RUS barrier time
         end_idx = rus_barrier_idx
-
-        # Extract entries between barriers (excluding barrier entries)
-        round_entries = [
+        segment = [
             execution_log[j]
             for j in range(start_idx, end_idx)
             if execution_log[j].get("operation") != "Barrier"
         ]
+        if segment:
+            segments.append(segment)
+    return segments
 
-        if round_entries:
-            rus_rounds.append(round_entries)
+
+def extract_rus_rounds(execution_log: List[dict]) -> List[List[dict]]:
+    """
+    Extract individual RUS rounds from the execution log.
+
+    Each RUS is one move stage + one CNOT layer + one return stage. A macro
+    segment between TMR barriers (from ``_execute_rus_until_blocked``) may
+    contain several such RUS cycles; this function splits them.
+
+    Args:
+        execution_log: List of execution log entries
+
+    Returns:
+        List of RUS rounds (one list of log entries per move/CNOT/return cycle)
+    """
+    if not execution_log:
+        return []
+
+    rus_rounds: List[List[dict]] = []
+    for segment in _extract_macro_rus_segments(execution_log):
+        rus_rounds.extend(_split_segment_into_rus_cycles(segment))
     return rus_rounds
 
 
@@ -779,11 +847,805 @@ def plot_rus_round(
     return fig, magic_state_locations
 
 
+def _build_round_motion_data(
+    rus_round: List[dict], logic_qubit_locations: List[Tuple[int, int]]
+) -> tuple[dict[int, tuple[int, int]], dict[int, tuple[int, int]], list[dict], list[dict]]:
+    """Extract move/return targets and ordered AOD movement entries for one round."""
+    location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
+    move_targets: dict[int, tuple[int, int]] = {}
+    return_targets: dict[int, tuple[int, int]] = {}
+    move_steps: list[dict] = []
+    return_steps: list[dict] = []
+    move_batch_id = 0
+    return_batch_id = 0
+
+    for entry in rus_round:
+        op = entry.get("operation")
+        if op not in ("move", "return_move"):
+            continue
+        start_t = entry_start(entry)
+        if op == "move":
+            move_batch_id += 1
+            batch_id = move_batch_id
+        else:
+            return_batch_id += 1
+            batch_id = return_batch_id
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        move_vecs = entry.get("move_vecs")
+        aod_assignment = entry.get("aod_assignment")
+        for idx, factory_id in enumerate(factory_ids):
+            factory_move_vecs = _resolve_entry_value(move_vecs, idx)
+            if not (factory_move_vecs and len(factory_move_vecs) >= 2):
+                continue
+            src = _parse_location_xy(factory_move_vecs[0])
+            dst = _parse_location_xy(factory_move_vecs[1])
+            if src is None or dst is None:
+                continue
+            aod_idx = _resolve_entry_value(aod_assignment, idx)
+            if not isinstance(aod_idx, int):
+                aod_idx = 0
+            if op == "move":
+                move_targets[factory_id] = dst
+                qid = location_to_qubit.get(dst)
+                move_steps.append(
+                    {
+                        "time": start_t,
+                        "batch_id": batch_id,
+                        "factory_id": factory_id,
+                        "src": src,
+                        "dst": dst,
+                        "aod_idx": aod_idx,
+                        "qubit_id": qid,
+                    }
+                )
+            else:
+                return_targets[factory_id] = dst
+                return_steps.append(
+                    {
+                        "time": start_t,
+                        "batch_id": batch_id,
+                        "factory_id": factory_id,
+                        "src": src,
+                        "dst": dst,
+                        "aod_idx": aod_idx,
+                        "qubit_id": location_to_qubit.get(src),
+                    }
+                )
+    move_steps.sort(key=lambda x: (x["time"], x["factory_id"]))
+    return_steps.sort(key=lambda x: (x["time"], x["factory_id"]))
+    return move_targets, return_targets, move_steps, return_steps
+
+
+def _display_xy(loc: tuple[int, int], block_spacing: float) -> tuple[float, float]:
+    """Scale architecture grid coordinates for plotting."""
+    return float(loc[0]) * block_spacing, float(loc[1]) * block_spacing
+
+
+def _trap_grid_layout(d: int) -> tuple[float, float, float, float]:
+    """Return site_step, trap_offset, trap_radius, block_pad for a d×d block."""
+    del d  # geometry is uniform; d only affects site count when drawing
+    return (
+        TRAP_GRID_SITE_STEP,
+        TRAP_GRID_TRAP_OFFSET,
+        TRAP_GRID_TRAP_RADIUS,
+        TRAP_GRID_BLOCK_PAD,
+    )
+
+
+def _trap_grid_aod_intensity(order: int, total: int) -> float:
+    if total <= 1:
+        return TRAP_GRID_AOD_ALPHA_EARLY
+    t = order / (total - 1)
+    return TRAP_GRID_AOD_ALPHA_EARLY - t * (
+        TRAP_GRID_AOD_ALPHA_EARLY - TRAP_GRID_AOD_ALPHA_LATE
+    )
+
+
+def _movement_arrow_grey(order: int, total: int) -> tuple[float, float, float]:
+    """Earlier movement → darker grey; later → lighter grey."""
+    if total <= 1:
+        t = 0.0
+    else:
+        t = order / (total - 1)
+    g = TRAP_GRID_ARROW_GREY_EARLY + t * (
+        TRAP_GRID_ARROW_GREY_LATE - TRAP_GRID_ARROW_GREY_EARLY
+    )
+    base_color = TRAP_GRID_MOVEMENT_ARROW_COLOR.strip().lower()
+    if base_color not in ("#000000", "#000", "black"):
+        base = mcolors.to_rgb(TRAP_GRID_MOVEMENT_ARROW_COLOR)
+        return (
+            base[0] * (1.0 - t) + g * t,
+            base[1] * (1.0 - t) + g * t,
+            base[2] * (1.0 - t) + g * t,
+        )
+    return (g, g, g)
+
+
+def _block_half_extent(d: int, site_step: float, trap_offset: float, trap_radius: float, block_pad: float) -> float:
+    inner = ((d - 1) / 2) * site_step + trap_offset + trap_radius
+    return block_pad + inner
+
+
+def _trap_grid_scene_extent(
+    *,
+    logic_qubit_locations: List[Tuple[int, int]],
+    factory_locations: List[Tuple[int, int]],
+    arrival_factory_locs: set[tuple[int, int]],
+    steps: list[dict],
+    block_spacing: float,
+    half: float,
+    factory_box_offset: float,
+) -> tuple[float, float, float, float]:
+    """Axis limits covering all blocks, movement endpoints, overlays, and labels."""
+    raw_locs: list[tuple[int, int]] = list(logic_qubit_locations) + list(
+        factory_locations
+    )
+    raw_locs.extend(arrival_factory_locs)
+    for step in steps:
+        raw_locs.append(step["src"])
+        raw_locs.append(step["dst"])
+
+    if not raw_locs:
+        return -1.0, 1.0, -1.0, 1.0
+
+    pad = (
+        half
+        + factory_box_offset
+        + TRAP_GRID_AXIS_MARGIN
+        + TRAP_GRID_ARROW_LABEL_OFFSET
+    )
+    xs: list[float] = []
+    ys: list[float] = []
+    for loc in raw_locs:
+        x, y = _display_xy(loc, block_spacing)
+        xs.extend((x - half, x + half + factory_box_offset))
+        ys.extend((y - half, y + half))
+    return min(xs) - pad, max(xs) + pad, min(ys) - pad, max(ys) + pad
+
+
+def _figsize_from_extent(
+    x_lo: float, x_hi: float, y_lo: float, y_hi: float
+) -> tuple[float, float]:
+    span_x = max(x_hi - x_lo, 0.5)
+    span_y = max(y_hi - y_lo, 0.5)
+    w = max(4.0, span_x * TRAP_GRID_FIGSIZE_SCALE_X + TRAP_GRID_FIGSIZE_PAD_X)
+    h = max(3.5, span_y * TRAP_GRID_FIGSIZE_SCALE_Y + TRAP_GRID_FIGSIZE_PAD_Y)
+    data_aspect = span_x / span_y
+    fig_aspect = w / h
+    if fig_aspect < data_aspect:
+        h = w / data_aspect
+    elif fig_aspect > data_aspect:
+        w = h * data_aspect
+    return w, h
+
+
+def _draw_trap_grid_block(
+    ax,
+    center_x: float,
+    center_y: float,
+    *,
+    d: int,
+    facecolor: str,
+    edgecolor: str,
+    is_logical: bool,
+    site_step: float,
+    trap_offset: float,
+    trap_radius: float,
+    block_pad: float,
+    moved_factory_color: str,
+    box_alpha: float = 1.0,
+    moved_into_right: Optional[set[tuple[int, int]]] = None,
+    trap_alpha: float = 1.0,
+    factory_overlay_alpha: Optional[float] = None,
+    factory_overlay_offset_x: float = 0.0,
+    factory_left_only: bool = False,
+):
+    """Render one block as d×d sites; each site has a left/right trap pair."""
+    moved_into_right = moved_into_right or set()
+    half = _block_half_extent(d, site_step, trap_offset, trap_radius, block_pad)
+    block_w = 2 * half
+    block_h = 2 * half
+    face = mcolors.to_rgba(facecolor, box_alpha)
+    block = FancyBboxPatch(
+        (center_x - half, center_y - half),
+        block_w,
+        block_h,
+        boxstyle="round,pad=0.02,rounding_size=0.12",
+        facecolor=face,
+        edgecolor=edgecolor,
+        linewidth=1.0,
+        alpha=box_alpha,
+        zorder=2,
+    )
+    ax.add_patch(block)
+
+    # Factory box overlay only (shifted); trap markers stay on the logical block.
+    if factory_overlay_alpha is not None:
+        overlay_cx = center_x + factory_overlay_offset_x
+        overlay = FancyBboxPatch(
+            (overlay_cx - half, center_y - half),
+            block_w,
+            block_h,
+            boxstyle="round,pad=0.02,rounding_size=0.12",
+            facecolor=mcolors.to_rgba(TRAP_GRID_FACTORY_FACE, factory_overlay_alpha),
+            edgecolor=TRAP_GRID_FACTORY_EDGE,
+            linewidth=1.0,
+            alpha=factory_overlay_alpha,
+            zorder=3,
+        )
+        ax.add_patch(overlay)
+
+    left_fill = "#111111"
+    factory_fill = moved_factory_color
+    for r in range(d):
+        for c in range(d):
+            site_x = center_x + (c - (d - 1) / 2) * site_step
+            site_y = center_y + (r - (d - 1) / 2) * site_step
+            left_xy = (site_x - trap_offset, site_y)
+            right_xy = (site_x + trap_offset, site_y)
+            if is_logical:
+                ax.add_patch(
+                    plt.Circle(
+                        left_xy,
+                        trap_radius,
+                        facecolor=left_fill,
+                        edgecolor="#000000",
+                        linewidth=0.6,
+                        alpha=trap_alpha,
+                        zorder=5,
+                    )
+                )
+            right_site = (r, c)
+            if right_site in moved_into_right:
+                ax.add_patch(
+                    plt.Circle(
+                        right_xy,
+                        trap_radius,
+                        facecolor=factory_fill,
+                        edgecolor="#8A4F00",
+                        linewidth=0.6,
+                        alpha=trap_alpha,
+                        zorder=6,
+                    )
+                )
+            elif is_logical:
+                ax.add_patch(
+                    plt.Circle(
+                        right_xy,
+                        trap_radius,
+                        facecolor="#FFFFFF",
+                        edgecolor="#333333",
+                        linewidth=0.5,
+                        alpha=trap_alpha,
+                        zorder=5,
+                    )
+                )
+            else:
+                # Factory at home: left trap occupied; right reserved (empty).
+                # Factory at logical (CNOT): both traps occupied on shifted block.
+                ax.add_patch(
+                    plt.Circle(
+                        left_xy,
+                        trap_radius,
+                        facecolor=factory_fill,
+                        edgecolor="#8A4F00",
+                        linewidth=0.5,
+                        alpha=trap_alpha,
+                        zorder=5,
+                    )
+                )
+                if factory_left_only:
+                    ax.add_patch(
+                        plt.Circle(
+                            right_xy,
+                            trap_radius,
+                            facecolor="#FFFFFF",
+                            edgecolor="#333333",
+                            linewidth=0.5,
+                            alpha=trap_alpha,
+                            zorder=5,
+                        )
+                    )
+                else:
+                    ax.add_patch(
+                        plt.Circle(
+                            right_xy,
+                            trap_radius,
+                            facecolor=factory_fill,
+                            edgecolor="#8A4F00",
+                            linewidth=0.5,
+                            alpha=trap_alpha,
+                            zorder=5,
+                        )
+                    )
+
+
+def _draw_aod_grid_at_centers(
+    ax,
+    centers: set[tuple[int, int]],
+    *,
+    d: int,
+    site_step: float,
+    trap_offset: float,
+    block_spacing: float,
+    color: str,
+    alpha: float,
+    x_lo: float,
+    x_hi: float,
+    y_lo: float,
+    y_hi: float,
+    linewidth: float = TRAP_GRID_AOD_LINEWIDTH,
+    zorder: int = 7,
+):
+    """Draw d horizontal + d vertical AOD lines for each block center."""
+    drawn_h: set[float] = set()
+    drawn_v: set[float] = set()
+    for center in centers:
+        bx, by = _display_xy(center, block_spacing)
+        for r in range(d):
+            y = by + (r - (d - 1) / 2) * site_step
+            yk = round(y, 5)
+            if yk in drawn_h:
+                continue
+            drawn_h.add(yk)
+            ax.plot(
+                [x_lo, x_hi],
+                [y, y],
+                color=color,
+                linestyle="--",
+                linewidth=linewidth,
+                alpha=alpha,
+                zorder=zorder,
+            )
+        for c in range(d):
+            x = bx + (c - (d - 1) / 2) * site_step
+            xk = round(x, 5)
+            if xk in drawn_v:
+                continue
+            drawn_v.add(xk)
+            ax.plot(
+                [x, x],
+                [y_lo, y_hi],
+                color=color,
+                linestyle="--",
+                linewidth=linewidth,
+                alpha=alpha,
+                zorder=zorder,
+            )
+
+
+def _draw_aod_grid(
+    ax,
+    steps: list[dict],
+    *,
+    d: int,
+    site_step: float,
+    trap_offset: float,
+    block_spacing: float,
+    color: str,
+    alpha: float,
+    src_alpha_factor: float = TRAP_GRID_AOD_SRC_ALPHA_FACTOR,
+    linewidth: float = TRAP_GRID_AOD_LINEWIDTH,
+    zorder: int = 7,
+):
+    """
+    Draw AOD grid lines; source block grids are more transparent than destination.
+    """
+    if not steps:
+        return
+
+    src_centers = {step["src"] for step in steps}
+    dst_centers = {step["dst"] for step in steps}
+    all_centers = src_centers | dst_centers
+
+    display_pts = [_display_xy(c, block_spacing) for c in all_centers]
+    half = _block_half_extent(d, site_step, trap_offset, 0.02, 0.05) + 0.12
+    x_lo = min(p[0] for p in display_pts) - half
+    x_hi = max(p[0] for p in display_pts) + half
+    y_lo = min(p[1] for p in display_pts) - half
+    y_hi = max(p[1] for p in display_pts) + half
+
+    _draw_aod_grid_at_centers(
+        ax,
+        src_centers,
+        d=d,
+        site_step=site_step,
+        trap_offset=trap_offset,
+        block_spacing=block_spacing,
+        color=color,
+        alpha=alpha * src_alpha_factor,
+        x_lo=x_lo,
+        x_hi=x_hi,
+        y_lo=y_lo,
+        y_hi=y_hi,
+        linewidth=linewidth,
+        zorder=zorder,
+    )
+    _draw_aod_grid_at_centers(
+        ax,
+        dst_centers,
+        d=d,
+        site_step=site_step,
+        trap_offset=trap_offset,
+        block_spacing=block_spacing,
+        color=color,
+        alpha=alpha,
+        x_lo=x_lo,
+        x_hi=x_hi,
+        y_lo=y_lo,
+        y_hi=y_hi,
+        linewidth=linewidth,
+        zorder=zorder + 1,
+    )
+
+
+def _draw_movement_arrows(
+    ax,
+    steps: list[dict],
+    *,
+    block_spacing: float,
+    trap_offset: float,
+    phase: str,
+    zorder: int = 8,
+    linewidth: float = TRAP_GRID_ARROW_LINEWIDTH,
+    mutation_scale: float = TRAP_GRID_ARROW_MUTATION_SCALE,
+):
+    """Draw arrows per movement batch; same batch shares label and grey level."""
+    ordered = sorted(steps, key=lambda s: (s["batch_id"], s["factory_id"]))
+    batch_ids = sorted({s["batch_id"] for s in ordered})
+    batch_order = {bid: i for i, bid in enumerate(batch_ids)}
+    n_batches = len(batch_ids)
+
+    for step in ordered:
+        src = _display_xy(step["src"], block_spacing)
+        dst = _display_xy(step["dst"], block_spacing)
+        start = src
+        end = dst
+        batch_idx = batch_order[step["batch_id"]]
+        arrow_color = _movement_arrow_grey(batch_idx, n_batches)
+        arrow = FancyArrowPatch(
+            start,
+            end,
+            arrowstyle="->",
+            mutation_scale=mutation_scale,
+            linewidth=linewidth,
+            color=arrow_color,
+            alpha=1.0,
+            zorder=zorder,
+            connectionstyle="arc3,rad=0.08",
+        )
+        ax.add_patch(arrow)
+        mid_x = 0.5 * (start[0] + end[0])
+        mid_y = 0.5 * (start[1] + end[1])
+        ax.text(
+            mid_x,
+            mid_y - TRAP_GRID_ARROW_LABEL_OFFSET,
+            str(step["batch_id"]),
+            ha="center",
+            va="bottom",
+            fontsize=TRAP_GRID_ARROW_LABEL_FONTSIZE,
+            color=arrow_color,
+            fontweight="bold",
+            zorder=zorder + 1,
+        )
+
+
+def _plot_rus_round_trap_grid_style(
+    round_idx: int,
+    rus_round: List[dict],
+    logic_qubit_locations: List[Tuple[int, int]],
+    magic_state_locations: List[Tuple[int, int]],
+    *,
+    code_distance: int = 3,
+    block_spacing: float = TRAP_GRID_BLOCK_SPACING,
+    movement_overlay: Literal[
+        "both", "arrows_only", "aod_only", "none"
+    ] = TRAP_GRID_MOVEMENT_OVERLAY,
+) -> tuple[Optional[Figure], Optional[Figure], List[Tuple[int, int]]]:
+    """
+    New trap-grid style:
+    - no concrete x/y axes
+    - each block has d*d sites and 2 traps per site
+    - move / return rendered as separate figures with AOD overlays.
+    - ``block_spacing`` controls distance between block centers in the figure.
+    - ``movement_overlay``: ``both``, ``arrows_only``, ``aod_only``, or ``none``.
+    """
+    if not rus_round:
+        return None, None, magic_state_locations
+
+    d = max(int(code_distance), 1)
+    move_targets, return_targets, move_steps, return_steps = _build_round_motion_data(
+        rus_round, logic_qubit_locations
+    )
+
+    # Placement states for this round.
+    before_move_locations = list(magic_state_locations)
+    after_move_locations = list(magic_state_locations)
+    for fid, dst in move_targets.items():
+        if 0 <= fid < len(after_move_locations):
+            after_move_locations[fid] = dst
+    after_return_locations = list(after_move_locations)
+    for fid, dst in return_targets.items():
+        if 0 <= fid < len(after_return_locations):
+            after_return_locations[fid] = dst
+
+    site_step, trap_offset, trap_radius, block_pad = _trap_grid_layout(d)
+    half = _block_half_extent(d, site_step, trap_offset, trap_radius, block_pad)
+    show_aod = movement_overlay in ("both", "aod_only")
+    show_arrows = movement_overlay in ("both", "arrows_only")
+
+    logical_face = TRAP_GRID_LOGICAL_FACE
+    logical_edge = TRAP_GRID_LOGICAL_EDGE
+    factory_face = TRAP_GRID_FACTORY_FACE
+    factory_edge = TRAP_GRID_FACTORY_EDGE
+    moved_factory_color = TRAP_GRID_MOVED_FACTORY_COLOR
+    depart_box_alpha = TRAP_GRID_DEPART_BOX_ALPHA
+    arrive_overlay_alpha = TRAP_GRID_ARRIVE_OVERLAY_ALPHA
+
+    def _aod_groups(steps: list[dict]) -> list[tuple[int, list[dict]]]:
+        from collections import defaultdict
+
+        grouped: dict[int, list[dict]] = defaultdict(list)
+        for step in steps:
+            grouped[step["aod_idx"]].append(step)
+        return sorted(
+            grouped.items(),
+            key=lambda item: min(s["time"] for s in item[1]),
+        )
+
+    def _all_sites() -> set[tuple[int, int]]:
+        return {(r, c) for r in range(d) for c in range(d)}
+
+    def _draw_scene(
+        ax,
+        *,
+        factory_locations: list[tuple[int, int]],
+        steps: list[dict],
+        departing_factory_ids: set[int],
+        arrival_qubit_ids: set[int],
+        arrival_factory_locs: set[tuple[int, int]],
+        phase: str,
+    ):
+        logic_loc_set = set(logic_qubit_locations)
+        departing_locs = {
+            factory_locations[fid]
+            for fid in departing_factory_ids
+            if 0 <= fid < len(factory_locations)
+        }
+
+        # Logical blocks: shade never changes; factory marks right traps only.
+        for qid, (gx, gy) in enumerate(logic_qubit_locations):
+            loc = (gx, gy)
+            x, y = _display_xy(loc, block_spacing)
+            is_move_target = phase == "move" and qid in arrival_qubit_ids
+            is_return_source = phase == "return" and loc in departing_locs
+            moved_right: set[tuple[int, int]] = set()
+            overlay = None
+            trap_alpha = 1.0
+            overlay_offset_x = 0.0
+            if is_move_target:
+                moved_right = _all_sites()
+                overlay = arrive_overlay_alpha
+                overlay_offset_x = (
+                    TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS * trap_offset
+                )
+            elif is_return_source:
+                moved_right = _all_sites()
+                overlay = depart_box_alpha
+                trap_alpha = 0.22
+                overlay_offset_x = (
+                    TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS * trap_offset
+                )
+            _draw_trap_grid_block(
+                ax,
+                x,
+                y,
+                d=d,
+                facecolor=logical_face,
+                edgecolor=logical_edge,
+                is_logical=True,
+                site_step=site_step,
+                trap_offset=trap_offset,
+                trap_radius=trap_radius,
+                block_pad=block_pad,
+                moved_factory_color=moved_factory_color,
+                box_alpha=1.0,
+                moved_into_right=moved_right,
+                trap_alpha=trap_alpha,
+                factory_overlay_alpha=overlay,
+                factory_overlay_offset_x=overlay_offset_x,
+            )
+
+        # Standalone factory blocks (not co-located with a logical block).
+        for fid, (gx, gy) in enumerate(factory_locations):
+            loc = (gx, gy)
+            x, y = _display_xy(loc, block_spacing)
+            if loc in logic_loc_set:
+                continue
+            if loc in departing_locs:
+                _draw_trap_grid_block(
+                    ax,
+                    x,
+                    y,
+                    d=d,
+                    facecolor=factory_face,
+                    edgecolor=factory_edge,
+                    is_logical=False,
+                    site_step=site_step,
+                    trap_offset=trap_offset,
+                    trap_radius=trap_radius,
+                    block_pad=block_pad,
+                    moved_factory_color=moved_factory_color,
+                    box_alpha=depart_box_alpha,
+                    trap_alpha=0.18,
+                    factory_left_only=True,
+                )
+            else:
+                _draw_trap_grid_block(
+                    ax,
+                    x,
+                    y,
+                    d=d,
+                    facecolor=factory_face,
+                    edgecolor=factory_edge,
+                    is_logical=False,
+                    site_step=site_step,
+                    trap_offset=trap_offset,
+                    trap_radius=trap_radius,
+                    block_pad=block_pad,
+                    moved_factory_color=moved_factory_color,
+                    box_alpha=1.0,
+                    trap_alpha=1.0,
+                    factory_left_only=True,
+                )
+
+        # Return arrivals at factory home: solid block, left trap only.
+        if phase == "return":
+            for loc in arrival_factory_locs:
+                if loc in logic_loc_set:
+                    continue
+                ax_x, ax_y = _display_xy(loc, block_spacing)
+                _draw_trap_grid_block(
+                    ax,
+                    ax_x,
+                    ax_y,
+                    d=d,
+                    facecolor=factory_face,
+                    edgecolor=factory_edge,
+                    is_logical=False,
+                    site_step=site_step,
+                    trap_offset=trap_offset,
+                    trap_radius=trap_radius,
+                    block_pad=block_pad,
+                    moved_factory_color=moved_factory_color,
+                    box_alpha=1.0,
+                    trap_alpha=1.0,
+                    factory_left_only=True,
+                )
+
+        factory_box_offset = (
+            TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS * trap_offset
+        )
+        x_lo, x_hi, y_lo, y_hi = _trap_grid_scene_extent(
+            logic_qubit_locations=logic_qubit_locations,
+            factory_locations=factory_locations,
+            arrival_factory_locs=arrival_factory_locs,
+            steps=steps,
+            block_spacing=block_spacing,
+            half=half,
+            factory_box_offset=factory_box_offset,
+        )
+        ax.set_xlim(x_lo, x_hi)
+        ax.set_ylim(y_lo, y_hi)
+        ax.set_aspect("equal", adjustable="box")
+        ax.invert_yaxis()
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        aod_groups = _aod_groups(steps)
+        for order, (aod_idx, group) in enumerate(aod_groups):
+            color = get_aod_border_color(aod_idx)
+            alpha = _trap_grid_aod_intensity(order, len(aod_groups))
+            if show_aod:
+                _draw_aod_grid(
+                    ax,
+                    group,
+                    d=d,
+                    site_step=site_step,
+                    trap_offset=trap_offset,
+                    block_spacing=block_spacing,
+                    color=color,
+                    alpha=alpha,
+                    linewidth=TRAP_GRID_AOD_LINEWIDTH,
+                )
+        if show_arrows:
+            _draw_movement_arrows(
+                ax,
+                steps,
+                block_spacing=block_spacing,
+                trap_offset=trap_offset,
+                phase=phase,
+            )
+
+    move_departing = {s["factory_id"] for s in move_steps}
+    move_arrival_qubits = {
+        s["qubit_id"] for s in move_steps if isinstance(s.get("qubit_id"), int)
+    }
+    return_departing = {s["factory_id"] for s in return_steps}
+    return_arrival_qubits = {
+        s["qubit_id"] for s in return_steps if isinstance(s.get("qubit_id"), int)
+    }
+
+    move_arrival_factory_locs: set[tuple[int, int]] = set()
+    return_arrival_factory_locs = {
+        return_targets[fid]
+        for fid in return_departing
+        if fid in return_targets
+    }
+
+    factory_box_offset = TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS * trap_offset
+
+    move_extent = _trap_grid_scene_extent(
+        logic_qubit_locations=logic_qubit_locations,
+        factory_locations=before_move_locations,
+        arrival_factory_locs=move_arrival_factory_locs,
+        steps=move_steps,
+        block_spacing=block_spacing,
+        half=half,
+        factory_box_offset=factory_box_offset,
+    )
+    return_extent = _trap_grid_scene_extent(
+        logic_qubit_locations=logic_qubit_locations,
+        factory_locations=after_move_locations,
+        arrival_factory_locs=return_arrival_factory_locs,
+        steps=return_steps,
+        block_spacing=block_spacing,
+        half=half,
+        factory_box_offset=factory_box_offset,
+    )
+
+    fig_move, ax_move = plt.subplots(figsize=_figsize_from_extent(*move_extent))
+    _draw_scene(
+        ax_move,
+        factory_locations=before_move_locations,
+        steps=move_steps,
+        departing_factory_ids=move_departing,
+        arrival_qubit_ids=move_arrival_qubits,
+        arrival_factory_locs=move_arrival_factory_locs,
+        phase="move",
+    )
+    ax_move.set_title(f"RUS round {round_idx + 1} - move before CNOT", fontsize=14)
+
+    fig_return, ax_return = plt.subplots(figsize=_figsize_from_extent(*return_extent))
+    _draw_scene(
+        ax_return,
+        factory_locations=after_move_locations,
+        steps=return_steps,
+        departing_factory_ids=return_departing,
+        arrival_qubit_ids=return_arrival_qubits,
+        arrival_factory_locs=return_arrival_factory_locs,
+        phase="return",
+    )
+    ax_return.set_title(
+        f"RUS round {round_idx + 1} - return move after CNOT", fontsize=14
+    )
+
+    return fig_move, fig_return, after_return_locations
+
+
 def plot_all_rus_rounds(
     execution_log: List[dict],
     logic_qubit_locations: List[Tuple[int, int]],
     magic_state_locations: List[Tuple[int, int]],
     base_path: str = "output",
+    style_variant: str = "classic",
+    code_distance: int = 3,
+    block_spacing: float = TRAP_GRID_BLOCK_SPACING,
+    movement_overlay: Literal[
+        "both", "arrows_only", "aod_only", "none"
+    ] = TRAP_GRID_MOVEMENT_OVERLAY,
 ) -> None:
     """
     Plot all RUS rounds and save to separate PDF files.
@@ -819,35 +1681,59 @@ def plot_all_rus_rounds(
     # print(magic_state_locations)
     current_magic_state_locations = magic_state_locations
     for round_idx, rus_round in enumerate(rus_rounds):
-        fig, updated_locations = plot_rus_round(
-            round_idx,
-            rus_round,
-            logic_qubit_locations,
-            current_magic_state_locations,
-        )
-        # print("updated_locations")
-        # print(updated_locations)
-        # input()
-
-        # Update locations for next round
-        current_magic_state_locations = updated_locations
-
-        if fig is not None:
-            # Generate individual PDF filename
-            round_pdf_path = f"{base_path}/round{round_idx + 1}.pdf"
-
-            # Create subdirectory if needed
-            round_pdf_dir = os.path.dirname(round_pdf_path)
-            if round_pdf_dir:
-                os.makedirs(round_pdf_dir, exist_ok=True)
-
-            # Save the figure
-            fig.savefig(round_pdf_path, bbox_inches="tight")
-            plt.close(fig)
-            print(
-                f"  Round {round_idx + 1}: {len(rus_round)} events, "
-                f"{len(extract_assignments_from_round(rus_round, logic_qubit_locations))} assignments, "
-                f"saved to {round_pdf_path}"
+        if style_variant == "trap_grid":
+            fig_move, fig_return, updated_locations = _plot_rus_round_trap_grid_style(
+                round_idx,
+                rus_round,
+                logic_qubit_locations,
+                current_magic_state_locations,
+                code_distance=code_distance,
+                block_spacing=block_spacing,
+                movement_overlay=movement_overlay,
             )
+            current_magic_state_locations = updated_locations
+
+            for suffix, fig in (("move", fig_move), ("return", fig_return)):
+                if fig is None:
+                    continue
+                round_pdf_path = f"{base_path}/round{round_idx + 1}_{suffix}.pdf"
+                round_pdf_dir = os.path.dirname(round_pdf_path)
+                if round_pdf_dir:
+                    os.makedirs(round_pdf_dir, exist_ok=True)
+                fig.savefig(
+                    round_pdf_path,
+                    bbox_inches="tight",
+                    pad_inches=TRAP_GRID_SAVE_PAD_INCHES,
+                )
+                plt.close(fig)
+                print(
+                    f"  Round {round_idx + 1} ({suffix}): {len(rus_round)} events, "
+                    f"saved to {round_pdf_path}"
+                )
+        else:
+            fig, updated_locations = plot_rus_round(
+                round_idx,
+                rus_round,
+                logic_qubit_locations,
+                current_magic_state_locations,
+            )
+            current_magic_state_locations = updated_locations
+            if fig is not None:
+                # Generate individual PDF filename
+                round_pdf_path = f"{base_path}/round{round_idx + 1}.pdf"
+
+                # Create subdirectory if needed
+                round_pdf_dir = os.path.dirname(round_pdf_path)
+                if round_pdf_dir:
+                    os.makedirs(round_pdf_dir, exist_ok=True)
+
+                # Save the figure
+                fig.savefig(round_pdf_path, bbox_inches="tight")
+                plt.close(fig)
+                print(
+                    f"  Round {round_idx + 1}: {len(rus_round)} events, "
+                    f"{len(extract_assignments_from_round(rus_round, logic_qubit_locations))} assignments, "
+                    f"saved to {round_pdf_path}"
+                )
 
     print(f"\nRUS rounds visualization saved to: {output_dir}")
