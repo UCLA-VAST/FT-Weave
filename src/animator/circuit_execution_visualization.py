@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
 import os
 from collections import defaultdict
 
@@ -193,9 +194,7 @@ def _execution_timeline_box_border_width(
     """Return operation-box edge linewidth in points."""
     if show_box_text:
         return (
-            _BOX_BORDER_WIDTH
-            if box_border_width is None
-            else float(box_border_width)
+            _BOX_BORDER_WIDTH if box_border_width is None else float(box_border_width)
         )
     return (
         _NO_TEXT_BOX_BORDER_WIDTH
@@ -626,8 +625,13 @@ def _plot_circuit_execution_on_ax(
         ax.set_yticks(range(len(row_names)))
         ax.set_yticklabels(row_names)
     else:
-        ax.set_ylabel("")
+        ax.set_ylabel(
+            "Factory indices",
+            fontsize=xlabel_fs,
+            fontweight="bold",
+        )
         ax.set_yticks(range(n_factories))
+        ax.set_yticklabels([str(i) for i in range(n_factories)])
     _tpad = 6 if title_pad is None else title_pad
     ax.set_title(title, fontsize=title_fs, fontweight="bold", pad=_tpad)
     ax.tick_params(axis="x", labelsize=x_tick_fs)
@@ -662,6 +666,7 @@ def plot_star_execution_subfigures(
     no_text_box_border_width: float | None = None,
     row_time_markers: list[list[float]] | None = None,
     marker_line_kwargs: dict | None = None,
+    marker_legend_label: str = "Realtime control event",
 ):
     """Plot multiple horizontal STAR timelines as stacked subfigures (shared time axis).
 
@@ -674,9 +679,7 @@ def plot_star_execution_subfigures(
         print("No row plots to render")
         return
     if row_time_markers is not None and len(row_time_markers) != len(row_plots):
-        raise ValueError(
-            "row_time_markers must have the same length as row_plots"
-        )
+        raise ValueError("row_time_markers must have the same length as row_plots")
 
     row_count = len(row_plots)
     lane_counts = []
@@ -703,9 +706,7 @@ def plot_star_execution_subfigures(
     row_max_end_times: list[float] = []
     for _, execution_log, _, _ in row_plots:
         log = (
-            _collapse_star_tmr_blocks(execution_log)
-            if collapse_tmr
-            else execution_log
+            _collapse_star_tmr_blocks(execution_log) if collapse_tmr else execution_log
         )
         row_max_end_times.append(max(entry_end(entry) for entry in log))
     legend_row_index = _subplot_index_with_most_timeline_whitespace(row_max_end_times)
@@ -745,9 +746,10 @@ def plot_star_execution_subfigures(
         if row_count == 1:
             axes = [axes]
 
-        for row_idx, (ax, (row_title, execution_log, n_factories, n_logical_qubits)) in enumerate(
-            zip(axes, row_plots)
-        ):
+        for row_idx, (
+            ax,
+            (row_title, execution_log, n_factories, n_logical_qubits),
+        ) in enumerate(zip(axes, row_plots)):
             _plot_circuit_execution_on_ax(
                 ax,
                 execution_log,
@@ -775,7 +777,19 @@ def plot_star_execution_subfigures(
                 if marker_line_kwargs:
                     line_kwargs.update(marker_line_kwargs)
                 for marker_t in row_time_markers[row_idx]:
-                    ax.axvline(float(marker_t), **line_kwargs)
+                    t = float(marker_t)
+                    if abs(t) < 1e-9:
+                        continue
+                    # Draw in axis-fraction Y coordinates so the marker slightly
+                    # exceeds the plot frame and remains visible at the x-axis.
+                    marker = ax.vlines(
+                        t,
+                        ymin=-0.03,
+                        ymax=1.0,
+                        transform=ax.get_xaxis_transform(),
+                        **line_kwargs,
+                    )
+                    marker.set_clip_on(False)
 
         for ax in axes[:-1]:
             ax.set_xlabel("")
@@ -798,11 +812,24 @@ def plot_star_execution_subfigures(
             )
 
         legend_ax = axes[legend_row_index]
+        legend_handles = list(_star_execution_legend_handles())
+        if row_time_markers is not None:
+            legend_line_kwargs = {
+                "color": "black",
+                "linestyle": "-",
+                "linewidth": 0.8,
+                "alpha": 0.35,
+            }
+            if marker_line_kwargs:
+                legend_line_kwargs.update(marker_line_kwargs)
+            legend_handles.append(
+                Line2D([0], [0], label=marker_legend_label, **legend_line_kwargs)
+            )
         legend_ax.legend(
-            handles=_star_execution_legend_handles(),
+            handles=legend_handles,
             loc="upper right",
             bbox_to_anchor=(1.0, 1.0),
-            ncol=2,
+            ncol=1,
             fontsize=_scaled_font_size(max(10, heading_fs - 2), font_scale),
             frameon=True,
             framealpha=0.95,
@@ -1548,9 +1575,7 @@ def plot_star_t_cultivation_execution_subfigures(
         )
         * 1.03
     )
-    star_plot_log = (
-        _collapse_star_tmr_blocks(star_log) if collapse_tmr else star_log
-    )
+    star_plot_log = _collapse_star_tmr_blocks(star_log) if collapse_tmr else star_log
     star_row_max = max(entry_end(entry) for entry in star_plot_log)
     t_row_max = max(entry_end(entry) for entry in t_log)
     legend_row_index = _subplot_index_with_most_timeline_whitespace(

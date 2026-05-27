@@ -90,16 +90,25 @@ def _sync_realtime_control_markers(execution_log: list[dict]) -> list[float]:
 
 
 def _async_realtime_control_markers(execution_log: list[dict]) -> list[float]:
-    """Async markers: TMR start; before and after every move."""
+    """Async markers:
+    - TMR start
+    - start and end of every move and return_move
+    - after CNOT and before return_move when CNOT is immediately followed by return_move
+    """
     plot_log = _collapse_star_tmr_blocks(execution_log)
+    events = sorted(plot_log, key=_entry_start)
     markers: list[float] = []
-    for entry in plot_log:
+    for i, entry in enumerate(events):
         op = entry.get("operation")
         if op == "TMR":
             markers.append(_entry_start(entry))
-        elif op == "move":
-            markers.append(_entry_start(entry))  # before move
-            markers.append(_entry_end(entry))  # after move
+        elif op in {"move", "return_move"}:
+            markers.append(_entry_start(entry))
+            markers.append(_entry_end(entry))
+        elif op == "CNOT":
+            markers.append(_entry_end(entry))  # after CNOT
+            if i + 1 < len(events) and events[i + 1].get("operation") == "return_move":
+                markers.append(_entry_start(events[i + 1]))  # before return_move
     return _unique_sorted(markers)
 
 
@@ -199,8 +208,8 @@ def main(
         marker_line_kwargs = {
             "color": "#D81B60",
             "linestyle": "-.",
-            "linewidth": 1.8,
-            "alpha": 1.0,
+            "linewidth": 1.5,
+            "alpha": 0.6,
             "zorder": 80,
         }
 
@@ -217,6 +226,7 @@ def main(
         save_path=output_pdf,
         row_time_markers=row_time_markers,
         marker_line_kwargs=marker_line_kwargs,
+        marker_legend_label="Realtime control event",
     )
     logging.info(
         "Wrote STAR execution subfigures: %s and %s",
@@ -249,7 +259,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--figure-vertical-stretch",
         type=float,
-        default=2,
+        default=1.5,
         help=(
             "Multiplies stacked-panel height (taller figure => taller timeline boxes). "
             "Default 1.45; try 1.7–2.0 for very large lanes."
