@@ -1,4 +1,4 @@
-from .rus_round_visualization import plot_all_rus_rounds
+from .rus_round_visualization import plot_all_rus_rounds, plot_trap_grid_time_range
 from .circuit_execution_visualization import (
     plot_circuit_execution,
     plot_circuit_execution_vertical,

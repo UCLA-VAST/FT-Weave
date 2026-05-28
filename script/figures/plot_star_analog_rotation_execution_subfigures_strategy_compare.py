@@ -15,6 +15,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.animator.circuit_execution_visualization import plot_star_execution_subfigures
+from src.animator.rus_round_visualization import plot_all_rus_rounds
 from src.ds import FactoryPool, get_microarchitecture
 from src.star.analog_rotation_execution import factory_angle_execution
 from src.star.analog_rotation_execution_parallel import factory_angle_execution_parallel
@@ -27,24 +28,27 @@ logging.basicConfig(
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
-def _run_star_log(*, optimize_strategy: bool):
+def _run_star_log(
+    *, optimize_strategy: bool, consider_skip_rus: int = 0, rng: np.random.Generator
+):
     """Mirror ``test()`` in test_analog_rotation_execution.py (active block)."""
     # n_qubits = 8
     # n_factories = 8
     # qubit_layout = (4, 2)
-    # rng = np.random.default_rng(33)
-    n_qubits = 8
-    n_factories = 8
-    qubit_layout = (4, 2)
-    rng = np.random.default_rng(8)  # 8
+    rng = np.random.default_rng(1233)
+    n_qubits = 25
+    n_factories = 25
+    qubit_layout = (5, 5)
     logical_se_interval = 100
 
-    target_qubits_angles = {i: 0.001 for i in range(n_qubits)}
+    target_qubits_angles = {i: 0.002 for i in range(n_qubits)}
 
     factory_pool = FactoryPool(num_factories=n_factories)
 
+    prepare_lookahead_angles = True
+    # prepare_lookahead_angles = False
+
     if optimize_strategy:
-        rng = np.random.default_rng(33)
         placement = "col_based"
 
         logic_qubit_locations, magic_state_locations = get_microarchitecture(
@@ -60,17 +64,18 @@ def _run_star_log(*, optimize_strategy: bool):
             magic_state_locations,
             code_distance=7,
             column_based_placement=True,
-            n_aods=2,
-            consider_skip_rus=2,
+            n_aods=1,
+            consider_skip_rus=consider_skip_rus,
             tmr_assignment_method="matching",
             trivial_return=False,
             decompose_move=True,
             rng=rng,
+            prepare_lookahead_angles=prepare_lookahead_angles,
             logical_se_interval=logical_se_interval,
         )
     else:
         placement = "seperate_region_col"
-
+        # rng = np.random.default_rng(50)
         logic_qubit_locations, magic_state_locations = get_microarchitecture(
             n_qubits,
             n_factories,
@@ -85,14 +90,46 @@ def _run_star_log(*, optimize_strategy: bool):
             code_distance=7,
             column_based_placement=True,
             n_aods=1,
-            consider_skip_rus=0,
+            consider_skip_rus=consider_skip_rus,
             tmr_assignment_method="matching",
             trivial_return=True,
             decompose_move=False,
             rng=rng,
             logical_se_interval=logical_se_interval,
+            prepare_lookahead_angles=False,
         )
-    return log, n_factories, n_qubits
+    print(
+        f"Execution type: {optimize_strategy}, consider skip RUS: {consider_skip_rus}, total time: {_total_time}"
+    )
+    return log, n_factories, n_qubits, logic_qubit_locations, magic_state_locations, placement
+
+
+def _plot_rus_rounds_for_rows(
+    row_plots: list[tuple],
+    *,
+    rus_output_dir: str,
+    code_distance: int,
+    movement_overlay: str,
+) -> None:
+    os.makedirs(rus_output_dir, exist_ok=True)
+    for label, log, _nf, _nq, logic_locs, magic_locs, placement in row_plots:
+        slug = (
+            label.lower()
+            .replace(" ", "_")
+            .replace("/", "_")
+            .replace("w/o", "wo")
+        )
+        base_path = os.path.join(rus_output_dir, f"{slug}_{placement}")
+        logging.info("RUS trap-grid figures for %s -> %s", label, base_path)
+        plot_all_rus_rounds(
+            execution_log=log,
+            logic_qubit_locations=logic_locs,
+            magic_state_locations=magic_locs,
+            base_path=base_path,
+            style_variant="trap_grid",
+            code_distance=code_distance,
+            movement_overlay=movement_overlay,  # type: ignore[arg-type]
+        )
 
 
 def main(
@@ -101,24 +138,42 @@ def main(
     figure_width: float,
     figure_vertical_stretch: float,
     suptitle: str | None,
+    rng: np.random.Generator,
+    plot_rus_rounds: bool,
+    rus_output_dir: str,
+    rus_code_distance: int,
+    rus_movement_overlay: str,
 ) -> None:
     row_plots = [
         (
             "Unoptimized strategy",
-            *_run_star_log(optimize_strategy=False),
+            *_run_star_log(optimize_strategy=False, rng=rng),
         ),
         (
-            "Optimized strategy",
-            *_run_star_log(optimize_strategy=True),
+            "Optimized strategy w/o dropout",
+            *_run_star_log(optimize_strategy=True, rng=rng),
+        ),
+        (
+            "Optimized strategy w/ dropout",
+            *_run_star_log(optimize_strategy=True, consider_skip_rus=2, rng=rng),
         ),
     ]
+
+    if plot_rus_rounds:
+        _plot_rus_rounds_for_rows(
+            row_plots,
+            rus_output_dir=rus_output_dir,
+            code_distance=rus_code_distance,
+            movement_overlay=rus_movement_overlay,
+        )
 
     out_dir = os.path.dirname(output_pdf)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
+    timeline_rows = [(label, log, nf, nq) for label, log, nf, nq, *_rest in row_plots]
     plot_star_execution_subfigures(
-        row_plots,
+        timeline_rows,
         show_logical_qubits=False,
         figure_width=figure_width,
         figure_vertical_stretch=figure_vertical_stretch,
@@ -146,13 +201,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--figure-width",
         type=float,
-        default=40.0,
+        default=60.0,
         help="Base figure width (same scale as plot_circuit_execution in tests)",
     )
     parser.add_argument(
         "--figure-vertical-stretch",
         type=float,
-        default=2,
+        default=1.2,
         help=(
             "Multiplies stacked-panel height (taller figure => taller timeline boxes). "
             "Default 1.45; try 1.7–2.0 for very large lanes."
@@ -163,11 +218,45 @@ if __name__ == "__main__":
         default="Execution Timeline for STAR Architecture",
         help="Figure suptitle (empty string to omit)",
     )
+    parser.add_argument(
+        "--rng",
+        type=int,
+        default=9,
+        help="RNG seed",
+    )
+    parser.add_argument(
+        "--plot-rus-rounds",
+        action="store_true",
+        help="Also write per-RUS trap-grid move/return PDFs (sync-style isolation)",
+    )
+    parser.add_argument(
+        "--rus-output-dir",
+        default="output/rus_rounds_detailed/strategy_compare",
+        help="Directory for trap-grid RUS round PDFs",
+    )
+    parser.add_argument(
+        "--rus-code-distance",
+        type=int,
+        default=3,
+        help="Code distance d for trap-grid site layout",
+    )
+    parser.add_argument(
+        "--rus-movement-overlay",
+        choices=("both", "arrows_only", "aod_only", "none"),
+        default="both",
+        help="Movement visualization on trap-grid figures",
+    )
     args = parser.parse_args()
     st = args.suptitle.strip()
+    rng = args.rng
     main(
         output_pdf=args.output_pdf,
         figure_width=args.figure_width,
         figure_vertical_stretch=args.figure_vertical_stretch,
         suptitle=st if st else None,
+        rng=np.random.default_rng(rng),
+        plot_rus_rounds=args.plot_rus_rounds,
+        rus_output_dir=args.rus_output_dir,
+        rus_code_distance=args.rus_code_distance,
+        rus_movement_overlay=args.rus_movement_overlay,
     )

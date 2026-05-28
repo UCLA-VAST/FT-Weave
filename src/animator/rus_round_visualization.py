@@ -206,6 +206,140 @@ def extract_rus_rounds(execution_log: List[dict]) -> List[List[dict]]:
     return rus_rounds
 
 
+def filter_log_by_time_range(
+    execution_log: List[dict],
+    time_start: float,
+    time_end: float,
+) -> List[dict]:
+    """Keep log entries that overlap ``[time_start, time_end]``."""
+    t0 = float(time_start)
+    t1 = float(time_end)
+    if t1 < t0:
+        t0, t1 = t1, t0
+    filtered: List[dict] = []
+    for entry in execution_log:
+        if entry.get("operation") == "Barrier":
+            continue
+        start_t = entry_start(entry)
+        end_t = entry_end(entry)
+        if end_t >= t0 and start_t <= t1:
+            filtered.append(entry)
+    return filtered
+
+
+def replay_factory_locations_at_time(
+    execution_log: List[dict],
+    magic_state_locations: List[Tuple[int, int]],
+    *,
+    time: float,
+) -> List[Tuple[int, int]]:
+    """Factory grid positions after all completed moves/returns before ``time``."""
+    locs = list(magic_state_locations)
+    ordered = sorted(execution_log, key=lambda e: (entry_start(e), entry_end(e)))
+    for entry in ordered:
+        if entry_end(entry) > time:
+            continue
+        op = entry.get("operation")
+        if op not in ("move", "return_move"):
+            continue
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        move_vecs = entry.get("move_vecs")
+        for idx, factory_id in enumerate(factory_ids):
+            if factory_id < 0 or factory_id >= len(locs):
+                continue
+            factory_move_vecs = _resolve_entry_value(move_vecs, idx)
+            if not (factory_move_vecs and len(factory_move_vecs) >= 2):
+                continue
+            dst = _parse_location_xy(factory_move_vecs[1])
+            if dst is not None:
+                locs[factory_id] = dst
+    return locs
+
+
+def _save_trap_grid_round_figures(
+    *,
+    fig_move: Optional[Figure],
+    fig_return: Optional[Figure],
+    base_path: str,
+    name_prefix: str,
+) -> None:
+    for suffix, fig in (("move", fig_move), ("return", fig_return)):
+        if fig is None:
+            continue
+        round_pdf_path = f"{base_path}/{name_prefix}_{suffix}.pdf"
+        round_pdf_dir = os.path.dirname(round_pdf_path)
+        if round_pdf_dir:
+            os.makedirs(round_pdf_dir, exist_ok=True)
+        fig.savefig(
+            round_pdf_path,
+            bbox_inches="tight",
+            pad_inches=TRAP_GRID_SAVE_PAD_INCHES,
+        )
+        plt.close(fig)
+
+
+def plot_trap_grid_time_range(
+    execution_log: List[dict],
+    logic_qubit_locations: List[Tuple[int, int]],
+    magic_state_locations: List[Tuple[int, int]],
+    *,
+    time_start: float,
+    time_end: float,
+    base_path: str = "output/rus_time_window",
+    title_prefix: str | None = None,
+    code_distance: int = 3,
+    block_spacing: float = TRAP_GRID_BLOCK_SPACING,
+    movement_overlay: Literal[
+        "both", "arrows_only", "aod_only", "none"
+    ] = TRAP_GRID_MOVEMENT_OVERLAY,
+) -> None:
+    """
+    Trap-grid spatial view for all activity overlapping a time window.
+
+    Used when RUS rounds cannot be isolated (e.g. async execution with overlapping TMR).
+    """
+    filtered = filter_log_by_time_range(execution_log, time_start, time_end)
+    if not filtered:
+        print(
+            f"No log events in time range [{time_start}, {time_end}]"
+        )
+        return
+
+    t0 = min(float(time_start), float(time_end))
+    t1 = max(float(time_start), float(time_end))
+    prefix = title_prefix or f"t={t0:.1f}–{t1:.1f}"
+    initial_locs = replay_factory_locations_at_time(
+        execution_log, magic_state_locations, time=t0
+    )
+
+    output_dir = os.path.dirname(base_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    print(
+        f"Trap-grid time window [{t0}, {t1}]: {len(filtered)} events "
+        f"-> {base_path}"
+    )
+
+    fig_move, fig_return, _ = _plot_rus_round_trap_grid_style(
+        0,
+        filtered,
+        logic_qubit_locations,
+        initial_locs,
+        code_distance=code_distance,
+        block_spacing=block_spacing,
+        movement_overlay=movement_overlay,
+        title_prefix=prefix,
+    )
+    safe_name = f"window_{t0:g}_{t1:g}".replace(".", "p")
+    _save_trap_grid_round_figures(
+        fig_move=fig_move,
+        fig_return=fig_return,
+        base_path=base_path,
+        name_prefix=safe_name,
+    )
+
+
 def extract_assignments_from_round(
     rus_round: list, logic_qubit_locations: List[Tuple[int, int]]
 ) -> Tuple[Dict[int, int], Dict[int, Tuple[int, int]]]:
@@ -1341,6 +1475,7 @@ def _plot_rus_round_trap_grid_style(
     movement_overlay: Literal[
         "both", "arrows_only", "aod_only", "none"
     ] = TRAP_GRID_MOVEMENT_OVERLAY,
+    title_prefix: str | None = None,
 ) -> tuple[Optional[Figure], Optional[Figure], List[Tuple[int, int]]]:
     """
     New trap-grid style:
@@ -1616,7 +1751,12 @@ def _plot_rus_round_trap_grid_style(
         arrival_factory_locs=move_arrival_factory_locs,
         phase="move",
     )
-    ax_move.set_title(f"RUS round {round_idx + 1} - move before CNOT", fontsize=14)
+    move_title = (
+        f"{title_prefix} - move before CNOT"
+        if title_prefix
+        else f"RUS round {round_idx + 1} - move before CNOT"
+    )
+    ax_move.set_title(move_title, fontsize=14)
 
     fig_return, ax_return = plt.subplots(figsize=_figsize_from_extent(*return_extent))
     _draw_scene(
@@ -1628,9 +1768,12 @@ def _plot_rus_round_trap_grid_style(
         arrival_factory_locs=return_arrival_factory_locs,
         phase="return",
     )
-    ax_return.set_title(
-        f"RUS round {round_idx + 1} - return move after CNOT", fontsize=14
+    return_title = (
+        f"{title_prefix} - return move after CNOT"
+        if title_prefix
+        else f"RUS round {round_idx + 1} - return move after CNOT"
     )
+    ax_return.set_title(return_title, fontsize=14)
 
     return fig_move, fig_return, after_return_locations
 
@@ -1693,22 +1836,20 @@ def plot_all_rus_rounds(
             )
             current_magic_state_locations = updated_locations
 
-            for suffix, fig in (("move", fig_move), ("return", fig_return)):
-                if fig is None:
+            _save_trap_grid_round_figures(
+                fig_move=fig_move,
+                fig_return=fig_return,
+                base_path=base_path,
+                name_prefix=f"round{round_idx + 1}",
+            )
+            for suffix in ("move", "return"):
+                if (suffix == "move" and fig_move is None) or (
+                    suffix == "return" and fig_return is None
+                ):
                     continue
-                round_pdf_path = f"{base_path}/round{round_idx + 1}_{suffix}.pdf"
-                round_pdf_dir = os.path.dirname(round_pdf_path)
-                if round_pdf_dir:
-                    os.makedirs(round_pdf_dir, exist_ok=True)
-                fig.savefig(
-                    round_pdf_path,
-                    bbox_inches="tight",
-                    pad_inches=TRAP_GRID_SAVE_PAD_INCHES,
-                )
-                plt.close(fig)
                 print(
                     f"  Round {round_idx + 1} ({suffix}): {len(rus_round)} events, "
-                    f"saved to {round_pdf_path}"
+                    f"saved to {base_path}/round{round_idx + 1}_{suffix}.pdf"
                 )
         else:
             fig, updated_locations = plot_rus_round(

@@ -18,6 +18,10 @@ from src.animator.circuit_execution_visualization import (
     _collapse_star_tmr_blocks,
     plot_star_execution_subfigures,
 )
+from src.animator.rus_round_visualization import (
+    plot_all_rus_rounds,
+    plot_trap_grid_time_range,
+)
 from src.ds import FactoryPool, get_microarchitecture
 from src.star.analog_rotation_execution import factory_angle_execution
 from src.star.analog_rotation_execution_parallel import factory_angle_execution_parallel
@@ -171,7 +175,7 @@ def _run_star_log(*, parallel_execution: bool):
             logical_se_interval=logical_se_interval,
             decompose_move=True,
         )
-    return log, n_factories, n_qubits
+    return log, n_factories, n_qubits, logic_qubit_locations, magic_state_locations
 
 
 def main(
@@ -181,9 +185,22 @@ def main(
     figure_vertical_stretch: float,
     suptitle: str | None,
     add_communication_markers: bool,
+    plot_rus_rounds: bool,
+    rus_sync_output_dir: str,
+    rus_async_output_dir: str,
+    rus_code_distance: int,
+    rus_movement_overlay: str,
+    async_time_start: float,
+    async_time_end: float,
 ) -> None:
-    sync_log, sync_nf, sync_nq = _run_star_log(parallel_execution=False)
-    async_log, async_nf, async_nq = _run_star_log(parallel_execution=True)
+    (
+        sync_log,
+        sync_nf,
+        sync_nq,
+        logic_locs,
+        magic_locs,
+    ) = _run_star_log(parallel_execution=False)
+    async_log, async_nf, async_nq, _, _ = _run_star_log(parallel_execution=True)
     row_plots = [
         (
             "Synchronous execution",
@@ -234,6 +251,35 @@ def main(
         output_pdf.replace(".pdf", "_no_text.pdf"),
     )
 
+    if plot_rus_rounds:
+        logging.info("RUS trap-grid (sync, per-round) -> %s", rus_sync_output_dir)
+        plot_all_rus_rounds(
+            execution_log=sync_log,
+            logic_qubit_locations=logic_locs,
+            magic_state_locations=magic_locs,
+            base_path=rus_sync_output_dir,
+            style_variant="trap_grid",
+            code_distance=rus_code_distance,
+            movement_overlay=rus_movement_overlay,  # type: ignore[arg-type]
+        )
+        logging.info(
+            "RUS trap-grid (async, t=%s–%s) -> %s",
+            async_time_start,
+            async_time_end,
+            rus_async_output_dir,
+        )
+        plot_trap_grid_time_range(
+            execution_log=async_log,
+            logic_qubit_locations=logic_locs,
+            magic_state_locations=magic_locs,
+            time_start=async_time_start,
+            time_end=async_time_end,
+            base_path=rus_async_output_dir,
+            title_prefix=(f"Async t∈[{async_time_start:g},{async_time_end:g}]"),
+            code_distance=rus_code_distance,
+            movement_overlay=rus_movement_overlay,  # type: ignore[arg-type]
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -275,6 +321,48 @@ if __name__ == "__main__":
         action="store_true",
         help="Disable realtime-control marker lines",
     )
+    parser.add_argument(
+        "--plot-rus-rounds",
+        action="store_true",
+        default=True,
+        help=(
+            "Trap-grid spatial PDFs: per-RUS rounds for sync; time-window slice for async"
+        ),
+    )
+    parser.add_argument(
+        "--rus-sync-output-dir",
+        default="output/rus_rounds_detailed/sync_async/sync",
+        help="Output directory for synchronous per-RUS trap-grid PDFs",
+    )
+    parser.add_argument(
+        "--rus-async-output-dir",
+        default="output/rus_rounds_detailed/sync_async/async",
+        help="Output directory for asynchronous time-window trap-grid PDFs",
+    )
+    parser.add_argument(
+        "--async-time-start",
+        type=float,
+        default=0.0,
+        help="Async trap-grid window start time (same units as execution log)",
+    )
+    parser.add_argument(
+        "--async-time-end",
+        type=float,
+        default=500.0,
+        help="Async trap-grid window end time",
+    )
+    parser.add_argument(
+        "--rus-code-distance",
+        type=int,
+        default=3,
+        help="Code distance d for trap-grid site layout",
+    )
+    parser.add_argument(
+        "--rus-movement-overlay",
+        choices=("both", "arrows_only", "aod_only", "none"),
+        default="both",
+        help="Movement visualization on trap-grid figures",
+    )
     args = parser.parse_args()
     st = args.suptitle.strip()
     main(
@@ -283,4 +371,11 @@ if __name__ == "__main__":
         figure_vertical_stretch=args.figure_vertical_stretch,
         suptitle=st if st else None,
         add_communication_markers=not args.no_communication_markers,
+        plot_rus_rounds=args.plot_rus_rounds,
+        rus_sync_output_dir=args.rus_sync_output_dir,
+        rus_async_output_dir=args.rus_async_output_dir,
+        rus_code_distance=args.rus_code_distance,
+        rus_movement_overlay=args.rus_movement_overlay,
+        async_time_start=args.async_time_start,
+        async_time_end=args.async_time_end,
     )
