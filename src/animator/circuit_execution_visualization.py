@@ -653,6 +653,42 @@ def _plot_circuit_execution_on_ax(
     return max_time
 
 
+def _draw_trap_grid_time_window_highlight(
+    ax,
+    time_start: float,
+    time_end: float,
+    *,
+    color: str = "black",  # 3CA8E7",
+    alpha: float = 0.3,
+) -> None:
+    """Shade ``[time_start, time_end]`` on a timeline row (trap-grid spatial window)."""
+    t0 = min(float(time_start), float(time_end))
+    t1 = max(float(time_start), float(time_end))
+    ylo, yhi = ax.get_ylim()
+    ax.axvspan(
+        t0,
+        t1,
+        ylo,
+        yhi,
+        facecolor=color,
+        alpha=alpha,
+        zorder=-5,
+        linewidth=0,
+    )
+
+
+def _merge_timeline_xticks(ax, extra_ticks: list[float]) -> None:
+    """Ensure ``extra_ticks`` appear on the shared time axis."""
+    if not extra_ticks:
+        return
+    current = [float(t) for t in ax.get_xticks()]
+    merged = sorted(
+        {round(t, 9) for t in current} | {round(float(t), 9) for t in extra_ticks}
+    )
+    ax.set_xticks(merged)
+    ax.set_xticklabels([f"{t:g}" for t in merged])
+
+
 def plot_star_execution_subfigures(
     row_plots,
     *,
@@ -667,12 +703,17 @@ def plot_star_execution_subfigures(
     row_time_markers: list[list[float]] | None = None,
     marker_line_kwargs: dict | None = None,
     marker_legend_label: str = "Realtime control event",
+    row_time_windows: list[tuple[float, float] | None] | None = None,
+    highlight_xticks: list[float] | None = None,
+    time_window_legend_label: str = "Trap-grid window",
 ):
     """Plot multiple horizontal STAR timelines as stacked subfigures (shared time axis).
 
     row_plots: list of (row_title, execution_log, n_factories, n_logical_qubits)
     figure_vertical_stretch: multiplies default height so each lane/box is taller on screen.
     row_time_markers: optional per-row x positions for marker lines (same order as row_plots)
+    row_time_windows: optional per-row ``(t_start, t_end)`` shaded regions (e.g. async trap-grid)
+    highlight_xticks: extra x-axis tick positions (e.g. trap-grid window bounds)
     Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
     """
     if not row_plots:
@@ -680,6 +721,8 @@ def plot_star_execution_subfigures(
         return
     if row_time_markers is not None and len(row_time_markers) != len(row_plots):
         raise ValueError("row_time_markers must have the same length as row_plots")
+    if row_time_windows is not None and len(row_time_windows) != len(row_plots):
+        raise ValueError("row_time_windows must have the same length as row_plots")
 
     row_count = len(row_plots)
     lane_counts = []
@@ -766,6 +809,10 @@ def plot_star_execution_subfigures(
                 font_scale=font_scale,
                 box_border_width=resolved_border_width,
             )
+            if row_time_windows is not None:
+                window = row_time_windows[row_idx]
+                if window is not None:
+                    _draw_trap_grid_time_window_highlight(ax, window[0], window[1])
             if row_time_markers is not None:
                 line_kwargs = {
                     "color": "black",
@@ -794,6 +841,9 @@ def plot_star_execution_subfigures(
         for ax in axes[:-1]:
             ax.set_xlabel("")
             ax.tick_params(axis="x", labelbottom=False)
+
+        if highlight_xticks:
+            _merge_timeline_xticks(axes[-1], highlight_xticks)
 
         fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.98 if suptitle else 0.96))
 
@@ -824,6 +874,17 @@ def plot_star_execution_subfigures(
                 legend_line_kwargs.update(marker_line_kwargs)
             legend_handles.append(
                 Line2D([0], [0], label=marker_legend_label, **legend_line_kwargs)
+            )
+        if row_time_windows is not None and any(
+            w is not None for w in row_time_windows
+        ):
+            legend_handles.append(
+                mpatches.Patch(
+                    facecolor="#3CA8E7",
+                    edgecolor="black",
+                    alpha=0.16,
+                    label=time_window_legend_label,
+                )
             )
         legend_ax.legend(
             handles=legend_handles,

@@ -65,6 +65,10 @@ TRAP_GRID_FIGSIZE_PAD_Y = 0.8
 TRAP_GRID_AXIS_MARGIN = 0.15
 TRAP_GRID_SAVE_PAD_INCHES = 0.25
 
+TRAP_GRID_TMR_OVERLAY_ALPHA = 0.75
+TRAP_GRID_TMR_LABEL_FONTSIZE = 6
+TRAP_GRID_TMR_LABEL_COLOR = "#333333"
+
 # Color mapping for AOD devices (for border colors)
 aod_colors = [
     "#FF57579A",
@@ -278,6 +282,190 @@ def _save_trap_grid_round_figures(
         plt.close(fig)
 
 
+def _save_trap_grid_single_figure(
+    *,
+    fig: Optional[Figure],
+    base_path: str,
+    name_prefix: str,
+) -> None:
+    if fig is None:
+        return
+    pdf_path = f"{base_path}/{name_prefix}.pdf"
+    pdf_dir = os.path.dirname(pdf_path)
+    if pdf_dir:
+        os.makedirs(pdf_dir, exist_ok=True)
+    fig.savefig(
+        pdf_path,
+        bbox_inches="tight",
+        pad_inches=TRAP_GRID_SAVE_PAD_INCHES,
+    )
+    plt.close(fig)
+
+
+def _log_has_tmr_activity(entries: List[dict]) -> bool:
+    for entry in entries:
+        if entry.get("operation") not in ("SE", "Rz"):
+            continue
+        if _normalize_entry_factories(entry.get("factories")):
+            return True
+    return False
+
+
+def _lookup_factory_rz_angle(
+    execution_log: List[dict],
+    factory_id: int,
+    *,
+    not_before: float,
+    not_after: float | None = None,
+) -> float | None:
+    """First Rz preparing angle for ``factory_id`` at/after ``not_before``."""
+    best_t = float("inf")
+    best_angle: float | None = None
+    for entry in execution_log:
+        if entry.get("operation") != "Rz":
+            continue
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        if factory_id not in factory_ids:
+            continue
+        start_t = entry_start(entry)
+        if start_t < not_before - 1e-9:
+            continue
+        if not_after is not None and start_t > not_after + 1e-9:
+            continue
+        idx = factory_ids.index(factory_id)
+        raw = _resolve_entry_value(entry.get("targets"), idx)
+        if raw is None or start_t >= best_t:
+            continue
+        best_t = start_t
+        best_angle = float(raw)
+    return best_angle
+
+
+def _extract_tmr_factory_angles(
+    execution_log: List[dict],
+    *,
+    time_start: float,
+    time_end: float,
+) -> dict[int, float]:
+    """
+    Map factory_id -> Rz angle for TMR blocks overlapping the time window.
+
+    Uses collapsed TMR blocks (SE/Rz sequences) so factories still in the SE
+    preparation phase before their Rz event are included.
+    """
+    from src.animator.circuit_execution_visualization import _collapse_star_tmr_blocks
+
+    w0 = min(float(time_start), float(time_end))
+    w1 = max(float(time_start), float(time_end))
+    result: dict[int, float] = {}
+
+    for entry in _collapse_star_tmr_blocks(execution_log):
+        if entry.get("operation") != "TMR":
+            continue
+        block_t0 = entry_start(entry)
+        block_t1 = entry_end(entry)
+        if block_t1 <= w0 or block_t0 > w1:
+            continue
+        factory_ids = _normalize_entry_factories(entry.get("factories"))
+        theta = entry.get("targets")
+        if isinstance(theta, list):
+            for idx, fid in enumerate(factory_ids):
+                if idx < len(theta) and theta[idx] is not None:
+                    result[fid] = float(theta[idx])
+                else:
+                    angle = _lookup_factory_rz_angle(
+                        execution_log, fid, not_before=block_t0, not_after=block_t1
+                    )
+                    if angle is not None:
+                        result[fid] = angle
+        elif isinstance(theta, (int, float)):
+            val = float(theta)
+            for fid in factory_ids:
+                result[fid] = val
+        else:
+            for fid in factory_ids:
+                angle = _lookup_factory_rz_angle(
+                    execution_log, fid, not_before=block_t0, not_after=block_t1
+                )
+                if angle is not None:
+                    result[fid] = angle
+    return result
+
+
+def _draw_tmr_factory_markup(
+    ax,
+    *,
+    factory_angles: dict[int, float],
+    factory_locations: list[tuple[int, int]],
+    logic_qubit_locations: list[tuple[int, int]],
+    block_spacing: float,
+    d: int,
+    site_step: float,
+    trap_offset: float,
+    trap_radius: float,
+    block_pad: float,
+) -> None:
+    """Transparent white overlay on factory blocks and ``Rz(θ)`` label."""
+    if not factory_angles:
+        return
+    logic_loc_set = set(logic_qubit_locations)
+    half = _block_half_extent(d, site_step, trap_offset, trap_radius, block_pad)
+    block_w = 2 * half
+    block_h = 2 * half
+    factory_box_offset = TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS * trap_offset
+
+    for fid, angle in factory_angles.items():
+        if fid < 0 or fid >= len(factory_locations):
+            continue
+        loc = factory_locations[fid]
+        x, y = _display_xy(loc, block_spacing)
+        overlay_x = x + factory_box_offset if loc in logic_loc_set else x
+        ax.add_patch(
+            FancyBboxPatch(
+                (overlay_x - half, y - half),
+                block_w,
+                block_h,
+                boxstyle="round,pad=0.02,rounding_size=0.12",
+                facecolor=(1.0, 1.0, 1.0, TRAP_GRID_TMR_OVERLAY_ALPHA),
+                edgecolor=TRAP_GRID_FACTORY_EDGE,
+                linewidth=1.0,
+                zorder=25,
+            )
+        )
+        ax.text(
+            overlay_x,
+            y,
+            f"Rz({angle:g})",
+            ha="center",
+            va="center",
+            fontsize=TRAP_GRID_TMR_LABEL_FONTSIZE,
+            color=TRAP_GRID_TMR_LABEL_COLOR,
+            fontweight="bold",
+            zorder=26,
+        )
+
+
+def _draw_time_window_axis(
+    ax,
+    time_start: float,
+    time_end: float,
+) -> None:
+    """Minimal time axis matching the STAR execution timeline (window ticks only)."""
+    t0 = min(float(time_start), float(time_end))
+    t1 = max(float(time_start), float(time_end))
+    span = t1 - t0
+    pad = max(0.05 * span, 0.1) if span > 0 else 0.1
+    ax.set_xlim(t0 - pad, t1 + pad)
+    ax.set_xticks([t0, t1])
+    ax.set_xticklabels([f"{t0:g}", f"{t1:g}"])
+    ax.set_yticks([])
+    ax.set_xlabel("Time (circuit moments)", fontsize=10, fontweight="bold")
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.tick_params(axis="x", labelsize=9)
+    ax.grid(axis="x", alpha=0.3, linestyle="--")
+
+
 def plot_trap_grid_time_range(
     execution_log: List[dict],
     logic_qubit_locations: List[Tuple[int, int]],
@@ -300,9 +488,7 @@ def plot_trap_grid_time_range(
     """
     filtered = filter_log_by_time_range(execution_log, time_start, time_end)
     if not filtered:
-        print(
-            f"No log events in time range [{time_start}, {time_end}]"
-        )
+        print(f"No log events in time range [{time_start}, {time_end}]")
         return
 
     t0 = min(float(time_start), float(time_end))
@@ -317,11 +503,16 @@ def plot_trap_grid_time_range(
         os.makedirs(output_dir, exist_ok=True)
 
     print(
-        f"Trap-grid time window [{t0}, {t1}]: {len(filtered)} events "
-        f"-> {base_path}"
+        f"Trap-grid time window [{t0}, {t1}]: {len(filtered)} events " f"-> {base_path}"
     )
 
-    fig_move, fig_return, _ = _plot_rus_round_trap_grid_style(
+    tmr_angles = (
+        _extract_tmr_factory_angles(execution_log, time_start=t0, time_end=t1)
+        if _log_has_tmr_activity(filtered)
+        else {}
+    )
+
+    fig, _, _ = _plot_rus_round_trap_grid_style(
         0,
         filtered,
         logic_qubit_locations,
@@ -330,11 +521,13 @@ def plot_trap_grid_time_range(
         block_spacing=block_spacing,
         movement_overlay=movement_overlay,
         title_prefix=prefix,
+        combined_time_window=True,
+        tmr_factory_angles=tmr_angles,
+        time_window=(t0, t1),
     )
     safe_name = f"window_{t0:g}_{t1:g}".replace(".", "p")
-    _save_trap_grid_round_figures(
-        fig_move=fig_move,
-        fig_return=fig_return,
+    _save_trap_grid_single_figure(
+        fig=fig,
         base_path=base_path,
         name_prefix=safe_name,
     )
@@ -983,7 +1176,9 @@ def plot_rus_round(
 
 def _build_round_motion_data(
     rus_round: List[dict], logic_qubit_locations: List[Tuple[int, int]]
-) -> tuple[dict[int, tuple[int, int]], dict[int, tuple[int, int]], list[dict], list[dict]]:
+) -> tuple[
+    dict[int, tuple[int, int]], dict[int, tuple[int, int]], list[dict], list[dict]
+]:
     """Extract move/return targets and ordered AOD movement entries for one round."""
     location_to_qubit = {loc: idx for idx, loc in enumerate(logic_qubit_locations)}
     move_targets: dict[int, tuple[int, int]] = {}
@@ -1048,6 +1243,50 @@ def _build_round_motion_data(
     move_steps.sort(key=lambda x: (x["time"], x["factory_id"]))
     return_steps.sort(key=lambda x: (x["time"], x["factory_id"]))
     return move_targets, return_targets, move_steps, return_steps
+
+
+def _expand_decomposed_handoff_returns(
+    return_steps: list[dict],
+    factory_locations: list[tuple[int, int]],
+    magic_state_locations: list[tuple[int, int]],
+) -> list[dict]:
+    """
+    Append paired handoff hops for decomposed returns.
+
+    When a return lands on a cell occupied by another factory not at home,
+    add a synthetic hop for that occupant to its architecture home (e.g.
+    (8,4)->(7,4) paired with occupant at (7,4)->(5,4)).
+    """
+    expanded = list(return_steps)
+    existing = {(s["factory_id"], s["src"], s["dst"]) for s in return_steps}
+
+    for step in return_steps:
+        dst = step["dst"]
+        returning_fid = step["factory_id"]
+        for fid, loc in enumerate(factory_locations):
+            if fid == returning_fid or loc != dst:
+                continue
+            home = magic_state_locations[fid]
+            if home == loc:
+                continue
+            key = (fid, loc, home)
+            if key in existing:
+                continue
+            expanded.append(
+                {
+                    "time": step["time"],
+                    "batch_id": step["batch_id"],
+                    "factory_id": fid,
+                    "src": loc,
+                    "dst": home,
+                    "aod_idx": step["aod_idx"],
+                    "qubit_id": None,
+                }
+            )
+            existing.add(key)
+
+    expanded.sort(key=lambda x: (x["time"], x["batch_id"], x["factory_id"]))
+    return expanded
 
 
 def _round_time_bounds(rus_round: List[dict]) -> tuple[float, float]:
@@ -1158,7 +1397,9 @@ def _movement_arrow_grey(order: int, total: int) -> tuple[float, float, float]:
     return (g, g, g)
 
 
-def _block_half_extent(d: int, site_step: float, trap_offset: float, trap_radius: float, block_pad: float) -> float:
+def _block_half_extent(
+    d: int, site_step: float, trap_offset: float, trap_radius: float, block_pad: float
+) -> float:
     inner = ((d - 1) / 2) * site_step + trap_offset + trap_radius
     return block_pad + inner
 
@@ -1186,10 +1427,7 @@ def _trap_grid_scene_extent(
         return -1.0, 1.0, -1.0, 1.0
 
     pad = (
-        half
-        + factory_box_offset
-        + TRAP_GRID_AXIS_MARGIN
-        + TRAP_GRID_ARROW_LABEL_OFFSET
+        half + factory_box_offset + TRAP_GRID_AXIS_MARGIN + TRAP_GRID_ARROW_LABEL_OFFSET
     )
     xs: list[float] = []
     ys: list[float] = []
@@ -1212,7 +1450,8 @@ def _trap_grid_scene_extent_resolved(
 ) -> tuple[float, float, float, float]:
     """Extent helper that uses resolved per-factory movement sources."""
     resolved_steps = [
-        {**step, "src": _resolve_step_src_loc(step, factory_locations)} for step in steps
+        {**step, "src": _resolve_step_src_loc(step, factory_locations)}
+        for step in steps
     ]
     return _trap_grid_scene_extent(
         logic_qubit_locations=logic_qubit_locations,
@@ -1457,9 +1696,7 @@ def _draw_aod_grid(
     if not steps:
         return
 
-    src_centers = {
-        _resolve_step_src_loc(step, factory_locations) for step in steps
-    }
+    src_centers = {_resolve_step_src_loc(step, factory_locations) for step in steps}
     dst_centers = {step["dst"] for step in steps}
     all_centers = src_centers | dst_centers
 
@@ -1577,9 +1814,10 @@ def _plot_rus_round_trap_grid_style(
         "both", "arrows_only", "aod_only", "none"
     ] = TRAP_GRID_MOVEMENT_OVERLAY,
     title_prefix: str | None = None,
-    execution_log: List[dict] | None = None,
-    round_end_time: float | None = None,
     architecture_magic_state_locations: List[Tuple[int, int]] | None = None,
+    combined_time_window: bool = False,
+    tmr_factory_angles: dict[int, float] | None = None,
+    time_window: tuple[float, float] | None = None,
 ) -> tuple[Optional[Figure], Optional[Figure], List[Tuple[int, int]]]:
     """
     New trap-grid style:
@@ -1603,15 +1841,16 @@ def _plot_rus_round_trap_grid_style(
     for fid, dst in move_targets.items():
         if 0 <= fid < len(after_move_locations):
             after_move_locations[fid] = dst
+    arch_magic = architecture_magic_state_locations or magic_state_locations
+    return_steps = _expand_decomposed_handoff_returns(
+        return_steps, after_move_locations, arch_magic
+    )
+    for step in return_steps:
+        return_targets[step["factory_id"]] = step["dst"]
     after_return_locations = list(after_move_locations)
     for fid, dst in return_targets.items():
         if 0 <= fid < len(after_return_locations):
             after_return_locations[fid] = dst
-    arch_magic = architecture_magic_state_locations or magic_state_locations
-    if execution_log is not None and round_end_time is not None:
-        after_return_locations = replay_factory_locations_at_time(
-            execution_log, arch_magic, time=round_end_time
-        )
 
     return_destination_locs = {step["dst"] for step in return_steps}
     return_final_locs = set(return_targets.values())
@@ -1652,7 +1891,21 @@ def _plot_rus_round_trap_grid_style(
         arrival_qubit_ids: set[int],
         arrival_factory_locs: set[tuple[int, int]],
         phase: str,
+        return_steps: list[dict] | None = None,
+        move_departing_factory_ids: set[int] | None = None,
+        return_departing_factory_ids: set[int] | None = None,
+        tmr_factory_angles: dict[int, float] | None = None,
     ):
+        move_depart = (
+            move_departing_factory_ids
+            if move_departing_factory_ids is not None
+            else departing_factory_ids
+        )
+        return_depart = (
+            return_departing_factory_ids
+            if return_departing_factory_ids is not None
+            else departing_factory_ids
+        )
         logic_loc_set = set(logic_qubit_locations)
         factories_on_logical = _factories_by_logical_loc(
             factory_locations, logic_loc_set
@@ -1663,18 +1916,18 @@ def _plot_rus_round_trap_grid_style(
             loc = (gx, gy)
             x, y = _display_xy(loc, block_spacing)
             co_located = factories_on_logical.get(loc, [])
-            is_move_target = phase == "move" and qid in arrival_qubit_ids
-            is_move_source = phase == "move" and any(
-                fid in departing_factory_ids for fid in co_located
+            is_move_target = phase in ("move", "combined") and qid in arrival_qubit_ids
+            is_move_source = phase in ("move", "combined") and any(
+                fid in move_depart for fid in co_located
             )
-            is_return_source = phase == "return" and any(
-                fid in departing_factory_ids for fid in co_located
+            is_return_source = phase in ("return", "combined") and any(
+                fid in return_depart for fid in co_located
             )
             is_carried_factory = (
-                phase == "move"
+                phase in ("move", "combined")
                 and co_located
                 and not is_move_target
-                and not any(fid in departing_factory_ids for fid in co_located)
+                and not any(fid in move_depart for fid in co_located)
             )
             moved_right: set[tuple[int, int]] = set()
             overlay = None
@@ -1765,7 +2018,7 @@ def _plot_rus_round_trap_grid_style(
                 )
 
         # Return arrivals at factory home (and intermediate hops): solid at final dst.
-        if phase == "return":
+        if phase in ("return", "combined"):
             for loc in arrival_factory_locs:
                 if loc in logic_loc_set:
                     continue
@@ -1789,14 +2042,29 @@ def _plot_rus_round_trap_grid_style(
                     factory_left_only=True,
                 )
 
-        factory_box_offset = (
-            TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS * trap_offset
-        )
+        if tmr_factory_angles:
+            _draw_tmr_factory_markup(
+                ax,
+                factory_angles=tmr_factory_angles,
+                factory_locations=factory_locations,
+                logic_qubit_locations=logic_qubit_locations,
+                block_spacing=block_spacing,
+                d=d,
+                site_step=site_step,
+                trap_offset=trap_offset,
+                trap_radius=trap_radius,
+                block_pad=block_pad,
+            )
+
+        factory_box_offset = TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS * trap_offset
+        extent_steps = steps
+        if phase == "combined" and return_steps:
+            extent_steps = steps + return_steps
         x_lo, x_hi, y_lo, y_hi = _trap_grid_scene_extent_resolved(
             logic_qubit_locations=logic_qubit_locations,
             factory_locations=factory_locations,
             arrival_factory_locs=arrival_factory_locs,
-            steps=steps,
+            steps=extent_steps,
             block_spacing=block_spacing,
             half=half,
             factory_box_offset=factory_box_offset,
@@ -1827,6 +2095,27 @@ def _plot_rus_round_trap_grid_style(
                     linewidth=TRAP_GRID_AOD_LINEWIDTH,
                     factory_locations=factory_locations,
                 )
+        if phase == "combined" and return_steps:
+            ret_aod_groups = _aod_groups(return_steps)
+            base = len(aod_groups)
+            for order, (aod_idx, group) in enumerate(ret_aod_groups):
+                color = get_aod_border_color(aod_idx)
+                alpha = _trap_grid_aod_intensity(
+                    base + order, base + len(ret_aod_groups)
+                )
+                if show_aod:
+                    _draw_aod_grid(
+                        ax,
+                        group,
+                        d=d,
+                        site_step=site_step,
+                        trap_offset=trap_offset,
+                        block_spacing=block_spacing,
+                        color=color,
+                        alpha=alpha,
+                        linewidth=TRAP_GRID_AOD_LINEWIDTH,
+                        factory_locations=factory_locations,
+                    )
         if show_arrows:
             _draw_movement_arrows(
                 ax,
@@ -1837,6 +2126,16 @@ def _plot_rus_round_trap_grid_style(
                 factory_locations=factory_locations,
                 logic_qubit_locations=logic_qubit_locations,
             )
+            if phase == "combined" and return_steps:
+                _draw_movement_arrows(
+                    ax,
+                    return_steps,
+                    block_spacing=block_spacing,
+                    trap_offset=trap_offset,
+                    phase=phase,
+                    factory_locations=factory_locations,
+                    logic_qubit_locations=logic_qubit_locations,
+                )
 
     move_departing = {s["factory_id"] for s in move_steps}
     move_arrival_qubits = {
@@ -1852,14 +2151,27 @@ def _plot_rus_round_trap_grid_style(
 
     factory_box_offset = TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS * trap_offset
 
-    move_extent = _trap_grid_scene_extent_resolved(
+    combined_extent = _trap_grid_scene_extent_resolved(
         logic_qubit_locations=logic_qubit_locations,
         factory_locations=before_move_locations,
-        arrival_factory_locs=move_arrival_factory_locs,
-        steps=move_steps,
+        arrival_factory_locs=return_arrival_factory_locs,
+        steps=move_steps + return_steps,
         block_spacing=block_spacing,
         half=half,
         factory_box_offset=factory_box_offset,
+    )
+    move_extent = (
+        combined_extent
+        if combined_time_window
+        else _trap_grid_scene_extent_resolved(
+            logic_qubit_locations=logic_qubit_locations,
+            factory_locations=before_move_locations,
+            arrival_factory_locs=move_arrival_factory_locs,
+            steps=move_steps,
+            block_spacing=block_spacing,
+            half=half,
+            factory_box_offset=factory_box_offset,
+        )
     )
     return_extent = _trap_grid_scene_extent_resolved(
         logic_qubit_locations=logic_qubit_locations,
@@ -1871,22 +2183,53 @@ def _plot_rus_round_trap_grid_style(
         factory_box_offset=factory_box_offset,
     )
 
-    fig_move, ax_move = plt.subplots(figsize=_figsize_from_extent(*move_extent))
+    if combined_time_window and time_window is not None:
+        w, h = _figsize_from_extent(*move_extent)
+        fig_move = plt.figure(figsize=(w, h + 0.65))
+        gs = fig_move.add_gridspec(2, 1, height_ratios=[10, 1], hspace=0.12)
+        ax_move = fig_move.add_subplot(gs[0])
+        ax_time = fig_move.add_subplot(gs[1])
+    else:
+        fig_move, ax_move = plt.subplots(figsize=_figsize_from_extent(*move_extent))
+        ax_time = None
+
     _draw_scene(
         ax_move,
         factory_locations=before_move_locations,
         steps=move_steps,
-        departing_factory_ids=move_departing,
+        departing_factory_ids=(
+            move_departing | return_departing
+            if combined_time_window
+            else move_departing
+        ),
         arrival_qubit_ids=move_arrival_qubits,
-        arrival_factory_locs=move_arrival_factory_locs,
-        phase="move",
+        arrival_factory_locs=(
+            return_arrival_factory_locs
+            if combined_time_window
+            else move_arrival_factory_locs
+        ),
+        phase="combined" if combined_time_window else "move",
+        return_steps=return_steps if combined_time_window else None,
+        move_departing_factory_ids=move_departing,
+        return_departing_factory_ids=return_departing,
+        tmr_factory_angles=tmr_factory_angles if combined_time_window else None,
     )
     move_title = (
-        f"{title_prefix} - move before CNOT"
-        if title_prefix
-        else f"RUS round {round_idx + 1} - move before CNOT"
+        title_prefix
+        if combined_time_window
+        else (
+            f"{title_prefix} - move before CNOT"
+            if title_prefix
+            else f"RUS round {round_idx + 1} - move before CNOT"
+        )
     )
     ax_move.set_title(move_title, fontsize=14)
+
+    if combined_time_window and time_window is not None and ax_time is not None:
+        _draw_time_window_axis(ax_time, time_window[0], time_window[1])
+
+    if combined_time_window:
+        return fig_move, None, after_return_locations
 
     fig_return, ax_return = plt.subplots(figsize=_figsize_from_extent(*return_extent))
     _draw_scene(
@@ -1952,13 +2295,10 @@ def plot_all_rus_rounds(
     # Save each round as a separate PDF
     # print("init magic_state_locations")
     # print(magic_state_locations)
-    prev_round_end = 0.0
     arch_magic = list(magic_state_locations)
+    current_locs = list(magic_state_locations)
     for round_idx, rus_round in enumerate(rus_rounds):
-        _round_start, round_end = _round_time_bounds(rus_round)
-        before_locs = replay_factory_locations_at_time(
-            execution_log, arch_magic, time=prev_round_end
-        )
+        before_locs = list(current_locs)
         if style_variant == "trap_grid":
             fig_move, fig_return, updated_locations = _plot_rus_round_trap_grid_style(
                 round_idx,
@@ -1968,11 +2308,9 @@ def plot_all_rus_rounds(
                 code_distance=code_distance,
                 block_spacing=block_spacing,
                 movement_overlay=movement_overlay,
-                execution_log=execution_log,
-                round_end_time=round_end,
                 architecture_magic_state_locations=arch_magic,
             )
-            prev_round_end = round_end
+            current_locs = updated_locations
 
             _save_trap_grid_round_figures(
                 fig_move=fig_move,
@@ -1990,15 +2328,13 @@ def plot_all_rus_rounds(
                     f"saved to {base_path}/round{round_idx + 1}_{suffix}.pdf"
                 )
         else:
-            current_magic_state_locations = before_locs
             fig, updated_locations = plot_rus_round(
                 round_idx,
                 rus_round,
                 logic_qubit_locations,
-                current_magic_state_locations,
+                before_locs,
             )
-            current_magic_state_locations = updated_locations
-            prev_round_end = round_end
+            current_locs = updated_locations
             if fig is not None:
                 # Generate individual PDF filename
                 round_pdf_path = f"{base_path}/round{round_idx + 1}.pdf"
