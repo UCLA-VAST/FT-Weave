@@ -101,7 +101,14 @@ def _run_star_log(
     print(
         f"Execution type: {optimize_strategy}, consider skip RUS: {consider_skip_rus}, total time: {_total_time}"
     )
-    return log, n_factories, n_qubits, logic_qubit_locations, magic_state_locations, placement
+    return (
+        log,
+        n_factories,
+        n_qubits,
+        logic_qubit_locations,
+        magic_state_locations,
+        placement,
+    )
 
 
 def _plot_rus_rounds_for_rows(
@@ -113,12 +120,7 @@ def _plot_rus_rounds_for_rows(
 ) -> None:
     os.makedirs(rus_output_dir, exist_ok=True)
     for label, log, _nf, _nq, logic_locs, magic_locs, placement in row_plots:
-        slug = (
-            label.lower()
-            .replace(" ", "_")
-            .replace("/", "_")
-            .replace("w/o", "wo")
-        )
+        slug = label.lower().replace(" ", "_").replace("/", "_").replace("w/o", "wo")
         base_path = os.path.join(rus_output_dir, f"{slug}_{placement}")
         logging.info("RUS trap-grid figures for %s -> %s", label, base_path)
         plot_all_rus_rounds(
@@ -227,6 +229,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--plot-rus-rounds",
         action="store_true",
+        default=True,
         help="Also write per-RUS trap-grid move/return PDFs (sync-style isolation)",
     )
     parser.add_argument(
