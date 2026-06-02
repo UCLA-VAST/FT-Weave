@@ -11,14 +11,18 @@ from src.animator.log_view_helpers import (
     entry_start,
     entry_end,
 )
+from src.animator.rus_round_visualization import draw_trap_grid_time_range_on_axes
 
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
-_FIG_FONT_SIZE = 18
+_FIG_FONT_SIZE = 14
 # Full two-column paper width (PRX/APS ~6.75–7 in); used for *_no_text* timeline PDFs.
 _TCULT_EXEC_FIGURE_WIDTH = 7.0
 # No-text PDFs: axis titles and legends scaled relative to with-text sizes.
 _NO_TEXT_FONT_SCALE = 0.5
+# Combined timeline+movement no-text: keep titles/legend larger than axis ticks.
+_COMBINED_TIMELINE_MOVEMENT_NO_TEXT_TITLE_SCALE = 0.82
+_COMBINED_TIMELINE_MOVEMENT_NO_TEXT_AXIS_FONT_SCALE = 0.74
 # No-text PDFs: x/y tick labels can be tuned independently.
 _NO_TEXT_X_TICK_FONT_SCALE = 0.5
 _NO_TEXT_Y_TICK_FONT_SCALE = 0.37
@@ -86,6 +90,8 @@ _TITLE_FONT_SIZE = 28
 _LEGEND_FONT_SIZE = 20
 # STAR stacked subfigures: same size for suptitle, per-panel title, and x-axis label.
 _STAR_SUBFIG_HEADING_FONT_SIZE = 21
+_TRAP_GRID_TIME_WINDOW_COLOR = "#3CA8E7"
+_TRAP_GRID_TIME_WINDOW_ALPHA = 0.22
 # Inches scaling for total figure height (larger => taller lanes / taller boxes on screen).
 _STAR_SUBFIG_DEFAULT_VERTICAL_STRETCH = 1.8
 
@@ -166,6 +172,19 @@ def _execution_timeline_font_scale(*, show_box_text: bool) -> float:
 
 def _scaled_font_size(base: float, font_scale: float) -> float:
     return base * font_scale
+
+
+def _capitalize_title_words(text: str) -> str:
+    """Capitalize the first letter of each word; preserve all-caps tokens (e.g. STAR)."""
+
+    def _cap_word(word: str) -> str:
+        if not word:
+            return word
+        if word.isupper() and len(word) > 1:
+            return word
+        return word[0].upper() + word[1:].lower()
+
+    return " ".join(_cap_word(part) for part in text.split())
 
 
 def _execution_timeline_tick_font_sizes(
@@ -444,6 +463,7 @@ def _plot_circuit_execution_on_ax(
     show_factory_yticks: bool = True,
     factory_axis_label: str = "Factories",
     show_factory_ylabel: bool = True,
+    axis_tick_font_scale: float | None = None,
 ) -> float:
     """Draw horizontal STAR execution on *ax*; returns max end time in the log."""
     plot_log = (
@@ -615,9 +635,13 @@ def _plot_circuit_execution_on_ax(
         ),
         font_scale,
     )
-    x_tick_fs, y_tick_fs = _execution_timeline_tick_font_sizes(
-        show_box_text=show_box_text
-    )
+    if axis_tick_font_scale is not None:
+        x_tick_fs = _scaled_font_size(_FIG_FONT_SIZE, axis_tick_font_scale)
+        y_tick_fs = _scaled_font_size(_FIG_FONT_SIZE, axis_tick_font_scale)
+    else:
+        x_tick_fs, y_tick_fs = _execution_timeline_tick_font_sizes(
+            show_box_text=show_box_text
+        )
     ax.set_xlabel(
         "Time (circuit moments)",
         fontsize=xlabel_fs,
@@ -648,8 +672,9 @@ def _plot_circuit_execution_on_ax(
             ax.set_ylabel("")
             ax.set_yticks([])
             ax.tick_params(axis="y", length=0)
-    _tpad = 6 if title_pad is None else title_pad
-    ax.set_title(title, fontsize=title_fs, fontweight="bold", pad=_tpad)
+    if title:
+        _tpad = 6 if title_pad is None else title_pad
+        ax.set_title(title, fontsize=title_fs, fontweight="bold", pad=_tpad)
     ax.tick_params(axis="x", labelsize=x_tick_fs)
     ax.tick_params(axis="y", labelsize=y_tick_fs)
     ax.grid(axis="x", alpha=0.3, linestyle="--")
@@ -702,9 +727,7 @@ def _draw_trap_grid_time_window_highlight(
     alpha: float = 0.3,
 ) -> None:
     """Shade ``[time_start, time_end]`` on a timeline row (trap-grid spatial window)."""
-    _draw_timeline_time_highlight(
-        ax, time_start, time_end, color=color, alpha=alpha
-    )
+    _draw_timeline_time_highlight(ax, time_start, time_end, color=color, alpha=alpha)
 
 
 def _draw_timeline_shade_specs(ax, shade_specs: list[dict]) -> None:
@@ -741,7 +764,12 @@ def _legend_patches_for_shade_specs(
     return handles
 
 
-def _merge_timeline_xticks(ax, extra_ticks: list[float]) -> None:
+def _merge_timeline_xticks(
+    ax,
+    extra_ticks: list[float],
+    *,
+    bold_ticks: list[float] | None = None,
+) -> None:
     """Ensure ``extra_ticks`` appear on the shared time axis."""
     if not extra_ticks:
         return
@@ -751,6 +779,15 @@ def _merge_timeline_xticks(ax, extra_ticks: list[float]) -> None:
     )
     ax.set_xticks(merged)
     ax.set_xticklabels([f"{t:g}" for t in merged])
+    if bold_ticks:
+        bold_set = {round(float(t), 9) for t in bold_ticks}
+        for label in ax.get_xticklabels():
+            try:
+                tick_val = round(float(label.get_text()), 9)
+            except ValueError:
+                continue
+            if tick_val in bold_set:
+                label.set_fontweight("bold")
 
 
 def plot_star_execution_subfigures(
@@ -770,9 +807,9 @@ def plot_star_execution_subfigures(
     row_time_windows: list[tuple[float, float] | None] | None = None,
     row_time_shades: list[list[dict] | None] | None = None,
     highlight_xticks: list[float] | None = None,
-    time_window_legend_label: str = "Trap-grid window",
-    time_window_shade_color: str = "black",
-    time_window_shade_alpha: float = 0.3,
+    time_window_legend_label: str = "Movement window",
+    time_window_shade_color: str = _TRAP_GRID_TIME_WINDOW_COLOR,
+    time_window_shade_alpha: float = _TRAP_GRID_TIME_WINDOW_ALPHA,
     show_factory_yticks: bool = False,
     factory_axis_label: str = "Factories",
     subfig_heading_fontsize: float | None = None,
@@ -935,7 +972,11 @@ def plot_star_execution_subfigures(
             ax.tick_params(axis="x", labelbottom=False)
 
         if highlight_xticks:
-            _merge_timeline_xticks(axes[-1], highlight_xticks)
+            _merge_timeline_xticks(
+                axes[-1],
+                highlight_xticks,
+                bold_ticks=highlight_xticks,
+            )
 
         legend_handles = list(_star_execution_legend_handles())
         if row_time_markers is not None:
@@ -1012,6 +1053,482 @@ def plot_star_execution_subfigures(
         fig.savefig(out_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
         print(f"\nSTAR execution subfigure plot saved to: {out_path}")
+
+
+def _combined_timeline_movement_fig_width(
+    figure_width: float,
+    circuit_length: int,
+    *,
+    show_box_text: bool,
+) -> float:
+    """Provisional figure width in inches (timeline-heavy; movement is a narrow strip)."""
+    ref = max(float(figure_width), 1.0)
+    if show_box_text:
+        tl = max(ref * 0.45, circuit_length / 10 + 4.5)
+    else:
+        paper = float(_TCULT_EXEC_FIGURE_WIDTH)
+        tl = paper * max(1.0, ref / 30.0)
+    return tl * 1.12
+
+
+def _movement_slot_figure_width(ax_mv, row_height: float) -> float | None:
+    """Natural movement-panel width in figure coordinates for *row_height*."""
+    x1_lim, x2_lim = ax_mv.get_xlim()
+    y1_lim, y2_lim = ax_mv.get_ylim()
+    span_x = float(x2_lim) - float(x1_lim)
+    span_y = float(y2_lim) - float(y1_lim)
+    if span_y <= 1e-9 or span_x <= 1e-9 or row_height <= 0:
+        return None
+    return row_height * (span_x / span_y)
+
+
+def _fit_movement_in_slot(
+    ax_mv, x0: float, y0: float, height: float, width: float | None = None
+) -> tuple[float, float, float, float] | None:
+    """Place movement at *x0* with natural equal-aspect size (or fixed *width*).
+
+    Returns ``(x0, y0, width, height)`` of the placed axes, or ``None``.
+    """
+    new_w = width if width is not None else _movement_slot_figure_width(ax_mv, height)
+    if new_w is None or new_w <= 0:
+        return None
+    new_h = height
+    new_y0 = y0 + (height - new_h) / 2.0
+    ax_mv.set_position([x0, new_y0, new_w, new_h])
+    return (x0, new_y0, new_w, new_h)
+
+
+def _tighten_movement_axes_limits(ax_mv, *, inset_frac: float = 0.06) -> None:
+    """Trim trap-grid axis limits to reduce left/right padding inside the movement panel."""
+    x_lo, x_hi = ax_mv.get_xlim()
+    y_lo, y_hi = ax_mv.get_ylim()
+    x_span = float(x_hi) - float(x_lo)
+    y_span = float(y_hi) - float(y_lo)
+    if x_span > 1e-9:
+        dx = x_span * inset_frac
+        ax_mv.set_xlim(x_lo + dx, x_hi - dx)
+    if y_span > 1e-9:
+        dy = y_span * inset_frac
+        ax_mv.set_ylim(y_lo + dy, y_hi - dy)
+
+
+def _layout_combined_timeline_movement_rows(
+    timeline_axes,
+    movement_axes,
+    *,
+    left_margin: float = 0.065,
+    right_margin: float = 0.98,
+    col_gap: float = 0.010,
+) -> float:
+    """Timeline fills the row; movement is only as wide as its aspect needs (right side).
+
+    Returns the rightmost figure coordinate used (for trimming excess right margin).
+    """
+    plot_w = right_margin - left_margin
+    content_right = left_margin
+
+    for ax_tl, ax_mv in zip(timeline_axes, movement_axes):
+        pos_tl = ax_tl.get_position()
+        y0 = pos_tl.y0
+        h = pos_tl.height
+        mv_w = _movement_slot_figure_width(ax_mv, h)
+        if mv_w is None or mv_w <= 0:
+            mv_w = plot_w * 0.12
+        mv_w = min(mv_w, plot_w * 0.35)
+        tl_w = max(plot_w - col_gap - mv_w, plot_w * 0.45)
+        mv_w = plot_w - col_gap - tl_w
+        mv_x0 = left_margin + tl_w + col_gap
+        ax_tl.set_position([left_margin, y0, tl_w, h])
+        placed = _fit_movement_in_slot(ax_mv, mv_x0, y0, h, width=mv_w)
+        if placed is not None:
+            content_right = max(content_right, placed[0] + placed[2])
+        else:
+            content_right = max(content_right, mv_x0 + mv_w)
+
+    return content_right + 0.01
+
+
+def _shrink_figure_to_content_width(
+    fig, content_right: float, *, pad_frac: float = 0.02
+) -> float:
+    """Resize figure so horizontal inches match used content (fraction of axes span)."""
+    w_in, h_in = fig.get_size_inches()
+    used = min(0.99, float(content_right) + pad_frac)
+    if used > 0.15 and used < 0.995:
+        fig.set_size_inches(w_in * used, h_in)
+    return used
+
+
+def plot_star_timeline_movement_combined(
+    row_plots,
+    *,
+    logic_qubit_locations,
+    magic_state_locations,
+    movement_time_start: float,
+    movement_time_end: float,
+    movement_code_distance: int = 3,
+    movement_overlay: str = "both",
+    movement_column_title: str | None = None,
+    timeline_movement_width_ratios: tuple[float, float] = (1.0, 1.0),
+    show_logical_qubits: bool = False,
+    figure_width: float = 50.0,
+    figure_vertical_stretch: float = _STAR_SUBFIG_DEFAULT_VERTICAL_STRETCH,
+    suptitle: str | None = None,
+    save_path: str = "output/circuit_execution/star_timeline_movement.pdf",
+    collapse_tmr: bool = True,
+    box_border_width: float | None = None,
+    no_text_box_border_width: float | None = None,
+    row_time_markers: list[list[float]] | None = None,
+    marker_line_kwargs: dict | None = None,
+    marker_legend_label: str = "Realtime control event",
+    row_time_windows: list[tuple[float, float] | None] | None = None,
+    row_time_shades: list[list[dict] | None] | None = None,
+    highlight_xticks: list[float] | None = None,
+    time_window_legend_label: str = "Movement window",
+    time_window_shade_color: str = _TRAP_GRID_TIME_WINDOW_COLOR,
+    time_window_shade_alpha: float = _TRAP_GRID_TIME_WINDOW_ALPHA,
+    show_factory_yticks: bool = False,
+    factory_axis_label: str = "Factories",
+    subfig_heading_fontsize: float | None = None,
+    timeline_xmax: float | None = None,
+    movement_axis_margin: float | None = 0.05,
+    movement_axes_inset_frac: float = 0.05,
+) -> None:
+    """Timeline (left) and trap-grid movement (right) for each execution setting.
+
+  One row per setting; writes *save_path* and a ``_no_text`` sibling.
+    """
+    if not row_plots:
+        print("No row plots to render")
+        return
+    if row_time_markers is not None and len(row_time_markers) != len(row_plots):
+        raise ValueError("row_time_markers must have the same length as row_plots")
+    if row_time_windows is not None and len(row_time_windows) != len(row_plots):
+        raise ValueError("row_time_windows must have the same length as row_plots")
+    if row_time_shades is not None and len(row_time_shades) != len(row_plots):
+        raise ValueError("row_time_shades must have the same length as row_plots")
+
+    row_count = len(row_plots)
+    lane_counts = []
+    for _, execution_log, nf, nlq in row_plots:
+        _, _, _, n_rows = _resolve_star_row_layout(
+            execution_log, nf, nlq, show_logical_qubits
+        )
+        lane_counts.append(n_rows)
+    row_height_ratios = [max(1.15, lanes / 2.2) for lanes in lane_counts]
+
+    def _logs_for_xmax():
+        for _, execution_log, _, _ in row_plots:
+            log = (
+                _collapse_star_tmr_blocks(execution_log)
+                if collapse_tmr
+                else execution_log
+            )
+            yield log
+
+    full_xmax = (
+        max(max(entry_end(entry) for entry in log) for log in _logs_for_xmax()) * 1.01
+    )
+    global_xmax = (
+        min(full_xmax, float(timeline_xmax))
+        if timeline_xmax is not None
+        else full_xmax
+    )
+
+    max_circuit_length = max(len(execution_log) for _, execution_log, _, _ in row_plots)
+    with_text_fig_width = _combined_timeline_movement_fig_width(
+        figure_width,
+        max_circuit_length,
+        show_box_text=True,
+    )
+    lane_sum = sum(row_height_ratios)
+    fig_height = 1.2 + 1.0 * float(figure_vertical_stretch) * lane_sum
+    heading_fs = (
+        _STAR_SUBFIG_HEADING_FONT_SIZE
+        if subfig_heading_fontsize is None
+        else float(subfig_heading_fontsize)
+    )
+    t0 = min(float(movement_time_start), float(movement_time_end))
+    t1 = max(float(movement_time_start), float(movement_time_end))
+    if movement_column_title is None:
+        movement_column_title = f"t={t0:g}–{t1:g}"
+    movement_column_title = _capitalize_title_words(movement_column_title)
+    if suptitle:
+        suptitle = _capitalize_title_words(suptitle)
+
+    output_dir = os.path.dirname(save_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    for show_box_text in (True, False):
+        font_scale = _execution_timeline_font_scale(show_box_text=show_box_text)
+        resolved_border_width = _execution_timeline_box_border_width(
+            show_box_text=show_box_text,
+            box_border_width=box_border_width,
+            no_text_box_border_width=no_text_box_border_width,
+        )
+        fig_width = _combined_timeline_movement_fig_width(
+            figure_width,
+            max_circuit_length,
+            show_box_text=show_box_text,
+        )
+        if timeline_xmax is not None and full_xmax > 1e-9:
+            fig_width *= max(0.55, float(global_xmax) / float(full_xmax))
+        fig_height_plot = (
+            fig_height
+            if show_box_text
+            else fig_height * (fig_width / with_text_fig_width)
+        )
+        fig = plt.figure(figsize=(fig_width, fig_height_plot))
+        gs = fig.add_gridspec(
+            row_count,
+            2,
+            width_ratios=list(timeline_movement_width_ratios),
+            height_ratios=row_height_ratios,
+            hspace=0.14,
+            wspace=0.02,
+        )
+        title_font_scale = (
+            font_scale
+            if show_box_text
+            else _COMBINED_TIMELINE_MOVEMENT_NO_TEXT_TITLE_SCALE
+        )
+        axis_font_scale = (
+            1.08
+            if show_box_text
+            else _COMBINED_TIMELINE_MOVEMENT_NO_TEXT_AXIS_FONT_SCALE
+        )
+        row_title_fs = _scaled_font_size(heading_fs + 1, title_font_scale)
+        col_title_fs = _scaled_font_size(heading_fs, title_font_scale)
+        suptitle_fs = _scaled_font_size(heading_fs + 3, title_font_scale)
+        legend_fs = _scaled_font_size(max(14, heading_fs + 1), title_font_scale)
+        row_titles = [
+            _capitalize_title_words(title) for title, _, _, _ in row_plots
+        ]
+        timeline_axes = []
+        movement_axes = []
+        for row_idx, (
+            _row_title,
+            execution_log,
+            n_factories,
+            n_logical_qubits,
+        ) in enumerate(row_plots):
+            if row_idx == 0:
+                ax_tl = fig.add_subplot(gs[row_idx, 0])
+            else:
+                ax_tl = fig.add_subplot(gs[row_idx, 0], sharex=timeline_axes[0])
+            timeline_axes.append(ax_tl)
+            ax_mv = fig.add_subplot(gs[row_idx, 1])
+            movement_axes.append(ax_mv)
+
+            _plot_circuit_execution_on_ax(
+                ax_tl,
+                execution_log,
+                n_factories,
+                n_logical_qubits,
+                show_box_text=show_box_text,
+                show_logical_qubits=show_logical_qubits,
+                title="",
+                shared_xmax=global_xmax,
+                show_legend=False,
+                unified_heading_fontsize=heading_fs,
+                title_pad=4.0,
+                collapse_tmr=collapse_tmr,
+                font_scale=axis_font_scale,
+                axis_tick_font_scale=axis_font_scale,
+                box_border_width=resolved_border_width,
+                show_factory_yticks=show_factory_yticks,
+                factory_axis_label=factory_axis_label,
+                show_factory_ylabel=True,
+            )
+            if row_time_shades is not None:
+                shades = row_time_shades[row_idx]
+                if shades:
+                    _draw_timeline_shade_specs(ax_tl, shades)
+            if row_time_windows is not None:
+                window = row_time_windows[row_idx]
+                if window is not None:
+                    _draw_timeline_time_highlight(
+                        ax_tl,
+                        window[0],
+                        window[1],
+                        color=time_window_shade_color,
+                        alpha=time_window_shade_alpha,
+                    )
+            if row_time_markers is not None:
+                line_kwargs = {
+                    "color": "black",
+                    "linestyle": "-",
+                    "linewidth": 0.8,
+                    "alpha": 0.35,
+                    "zorder": 25,
+                }
+                if marker_line_kwargs:
+                    line_kwargs.update(marker_line_kwargs)
+                for marker_t in row_time_markers[row_idx]:
+                    t = float(marker_t)
+                    if abs(t) < 1e-9:
+                        continue
+                    marker = ax_tl.vlines(
+                        t,
+                        ymin=-0.03,
+                        ymax=1.0,
+                        transform=ax_tl.get_xaxis_transform(),
+                        **line_kwargs,
+                    )
+                    marker.set_clip_on(False)
+
+            if not draw_trap_grid_time_range_on_axes(
+                ax_mv,
+                execution_log,
+                logic_qubit_locations,
+                magic_state_locations,
+                time_start=movement_time_start,
+                time_end=movement_time_end,
+                title=None,
+                code_distance=movement_code_distance,
+                movement_overlay=movement_overlay,  # type: ignore[arg-type]
+                axis_margin=movement_axis_margin,
+                arrow_label_offset=0.03,
+            ):
+                ax_mv.text(
+                    0.5,
+                    0.5,
+                    "No movement in window",
+                    ha="center",
+                    va="center",
+                    transform=ax_mv.transAxes,
+                    fontsize=_scaled_font_size(heading_fs - 2, font_scale),
+                )
+                ax_mv.set_axis_off()
+            elif movement_axes_inset_frac > 0:
+                _tighten_movement_axes_limits(
+                    ax_mv, inset_frac=movement_axes_inset_frac
+                )
+
+        for ax_tl in timeline_axes[:-1]:
+            ax_tl.set_xlabel("")
+            ax_tl.tick_params(axis="x", labelbottom=False)
+
+        if highlight_xticks:
+            _merge_timeline_xticks(
+                timeline_axes[-1],
+                highlight_xticks,
+                bold_ticks=highlight_xticks,
+            )
+
+        legend_handles = list(_star_execution_legend_handles())
+        if row_time_markers is not None:
+            legend_line_kwargs = {
+                "color": "black",
+                "linestyle": "-",
+                "linewidth": 0.8,
+                "alpha": 0.35,
+            }
+            if marker_line_kwargs:
+                legend_line_kwargs.update(marker_line_kwargs)
+            legend_handles.append(
+                Line2D([0], [0], label=marker_legend_label, **legend_line_kwargs)
+            )
+        if row_time_windows is not None and any(
+            w is not None for w in row_time_windows
+        ):
+            legend_handles.append(
+                mpatches.Patch(
+                    facecolor=time_window_shade_color,
+                    edgecolor="black",
+                    alpha=time_window_shade_alpha,
+                    label=time_window_legend_label,
+                )
+            )
+        if row_time_shades is not None:
+            row_shade_labels: set[str] = set()
+            for shades in row_time_shades:
+                if not shades:
+                    continue
+                for patch in _legend_patches_for_shade_specs(shades):
+                    if patch.get_label() in row_shade_labels:
+                        continue
+                    row_shade_labels.add(patch.get_label())
+                    legend_handles.append(patch)
+
+        layout_top = 0.96 if suptitle else 0.97
+        layout_bottom = 0.22
+        fig.tight_layout(rect=(0.02, layout_bottom, 0.98, layout_top))
+
+        content_right = _layout_combined_timeline_movement_rows(
+            timeline_axes,
+            movement_axes,
+        )
+        fig.subplots_adjust(right=min(0.98, content_right))
+        content_center = (0.065 + content_right) / 2.0
+
+        row_title_offset = 0.008
+        first_row_title_y = timeline_axes[0].get_position().y1 + row_title_offset
+
+        for row_idx, row_title in enumerate(row_titles):
+            pos = timeline_axes[row_idx].get_position()
+            fig.text(
+                content_center,
+                pos.y1 + row_title_offset,
+                row_title,
+                ha="center",
+                va="bottom",
+                fontsize=row_title_fs,
+                fontweight="bold",
+                transform=fig.transFigure,
+            )
+
+        if movement_axes:
+            mv0 = movement_axes[0].get_position()
+            fig.text(
+                (mv0.x0 + mv0.x1) / 2.0,
+                mv0.y1 + 0.006,
+                movement_column_title,
+                ha="center",
+                va="bottom",
+                fontsize=col_title_fs,
+                fontweight="bold",
+                transform=fig.transFigure,
+            )
+
+        if suptitle:
+            suptitle_gap = 0.006
+            suptitle_line_frac = 0.022
+            fig.text(
+                content_center,
+                first_row_title_y + suptitle_line_frac + suptitle_gap,
+                suptitle,
+                ha="center",
+                va="bottom",
+                fontsize=suptitle_fs,
+                fontweight="bold",
+                transform=fig.transFigure,
+            )
+
+        n_handles = len(legend_handles)
+        legend_ncol = min(n_handles, 5) if n_handles <= 6 else (n_handles + 1) // 2
+        fig.legend(
+            handles=legend_handles,
+            loc="lower center",
+            bbox_to_anchor=(content_center, -0.015),
+            bbox_transform=fig.transFigure,
+            ncol=legend_ncol,
+            fontsize=legend_fs,
+            frameon=True,
+            framealpha=0.98,
+            columnspacing=1.0,
+            handletextpad=0.4,
+        )
+
+        _shrink_figure_to_content_width(fig, content_right)
+
+        out_path = _save_path_for_box_text_variant(
+            save_path, show_box_text=show_box_text
+        )
+        fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.08)
+        plt.close(fig)
+        print(f"\nSTAR timeline + movement plot saved to: {out_path}")
 
 
 # ============================================================================

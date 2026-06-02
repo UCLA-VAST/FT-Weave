@@ -10,6 +10,7 @@ For each round, displays a 2D layout of magic state factories and qubits with:
 """
 
 from attr import Factory
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -48,12 +49,12 @@ TRAP_GRID_AOD_SRC_ALPHA_FACTOR = 0.22
 TRAP_GRID_AOD_ALPHA_EARLY = 0.95
 TRAP_GRID_AOD_ALPHA_LATE = 0.40
 
-TRAP_GRID_MOVEMENT_ARROW_COLOR = "#000000"
+# Movement arcs/labels: earlier batch → darker, later → lighter (matches execution-timeline AOD move purple).
+TRAP_GRID_MOVEMENT_COLOR_EARLY = "#7E22CE"
+# TRAP_GRID_MOVEMENT_COLOR_LATE =#B274F3 115 249)F3"
+TRAP_GRID_MOVEMENT_COLOR_LATE = "#8C5CC0"
 TRAP_GRID_ARROW_LINEWIDTH = 1.2
 TRAP_GRID_ARROW_MUTATION_SCALE = 14
-# Movement time shading: earlier → darker grey, later → lighter grey (0=black, 1=white).
-TRAP_GRID_ARROW_GREY_EARLY = 0.0
-TRAP_GRID_ARROW_GREY_LATE = 0.56
 TRAP_GRID_ARROW_LABEL_FONTSIZE = 9
 TRAP_GRID_ARROW_LABEL_OFFSET = 0.06
 
@@ -602,6 +603,57 @@ def plot_trap_grid_time_range(
         base_path=base_path,
         name_prefix=safe_name,
     )
+
+
+def draw_trap_grid_time_range_on_axes(
+    ax: Axes,
+    execution_log: List[dict],
+    logic_qubit_locations: List[Tuple[int, int]],
+    magic_state_locations: List[Tuple[int, int]],
+    *,
+    time_start: float,
+    time_end: float,
+    title: str | None = None,
+    code_distance: int = 3,
+    block_spacing: float = TRAP_GRID_BLOCK_SPACING,
+    movement_overlay: Literal[
+        "both", "arrows_only", "aod_only", "none"
+    ] = TRAP_GRID_MOVEMENT_OVERLAY,
+    axis_margin: float | None = None,
+    arrow_label_offset: float | None = None,
+) -> bool:
+    """Draw trap-grid movement for ``[time_start, time_end]`` on an existing axes."""
+    filtered = filter_log_by_time_range(execution_log, time_start, time_end)
+    if not filtered:
+        return False
+
+    t0 = min(float(time_start), float(time_end))
+    t1 = max(float(time_start), float(time_end))
+    initial_locs = replay_factory_locations_at_time(
+        execution_log, magic_state_locations, time=t0
+    )
+    tmr_angles = (
+        _extract_tmr_factory_angles(execution_log, time_start=t0, time_end=t1)
+        if _log_has_tmr_activity(filtered)
+        else {}
+    )
+    _plot_rus_round_trap_grid_style(
+        0,
+        filtered,
+        logic_qubit_locations,
+        initial_locs,
+        code_distance=code_distance,
+        block_spacing=block_spacing,
+        movement_overlay=movement_overlay,
+        title_prefix=title,
+        combined_time_window=True,
+        tmr_factory_angles=tmr_angles,
+        time_window=(t0, t1),
+        target_ax=ax,
+        axis_margin=axis_margin,
+        arrow_label_offset=arrow_label_offset,
+    )
+    return True
 
 
 def extract_assignments_from_round(
@@ -1448,24 +1500,21 @@ def _trap_grid_aod_intensity(order: int, total: int) -> float:
     )
 
 
-def _movement_arrow_grey(order: int, total: int) -> tuple[float, float, float]:
-    """Earlier movement → darker grey; later → lighter grey."""
+def _movement_arrow_color(
+    order: int,
+    total: int,
+    *,
+    color_early: str = TRAP_GRID_MOVEMENT_COLOR_EARLY,
+    color_late: str = TRAP_GRID_MOVEMENT_COLOR_LATE,
+) -> tuple[float, float, float]:
+    """Earlier movement → darker shade; later → lighter shade."""
     if total <= 1:
         t = 0.0
     else:
         t = order / (total - 1)
-    g = TRAP_GRID_ARROW_GREY_EARLY + t * (
-        TRAP_GRID_ARROW_GREY_LATE - TRAP_GRID_ARROW_GREY_EARLY
-    )
-    base_color = TRAP_GRID_MOVEMENT_ARROW_COLOR.strip().lower()
-    if base_color not in ("#000000", "#000", "black"):
-        base = mcolors.to_rgb(TRAP_GRID_MOVEMENT_ARROW_COLOR)
-        return (
-            base[0] * (1.0 - t) + g * t,
-            base[1] * (1.0 - t) + g * t,
-            base[2] * (1.0 - t) + g * t,
-        )
-    return (g, g, g)
+    early = mcolors.to_rgb(color_early)
+    late = mcolors.to_rgb(color_late)
+    return tuple(early[i] + t * (late[i] - early[i]) for i in range(3))
 
 
 def _block_half_extent(
@@ -1484,6 +1533,8 @@ def _trap_grid_scene_extent(
     block_spacing: float,
     half: float,
     factory_box_offset: float,
+    axis_margin: float | None = None,
+    arrow_label_offset: float | None = None,
 ) -> tuple[float, float, float, float]:
     """Axis limits covering all blocks, movement endpoints, overlays, and labels."""
     raw_locs: list[tuple[int, int]] = list(logic_qubit_locations) + list(
@@ -1497,9 +1548,15 @@ def _trap_grid_scene_extent(
     if not raw_locs:
         return -1.0, 1.0, -1.0, 1.0
 
-    pad = (
-        half + factory_box_offset + TRAP_GRID_AXIS_MARGIN + TRAP_GRID_ARROW_LABEL_OFFSET
+    margin = (
+        TRAP_GRID_AXIS_MARGIN if axis_margin is None else float(axis_margin)
     )
+    arrow_off = (
+        TRAP_GRID_ARROW_LABEL_OFFSET
+        if arrow_label_offset is None
+        else float(arrow_label_offset)
+    )
+    pad = half + factory_box_offset + margin + arrow_off
     xs: list[float] = []
     ys: list[float] = []
     for loc in raw_locs:
@@ -1518,6 +1575,8 @@ def _trap_grid_scene_extent_resolved(
     block_spacing: float,
     half: float,
     factory_box_offset: float,
+    axis_margin: float | None = None,
+    arrow_label_offset: float | None = None,
 ) -> tuple[float, float, float, float]:
     """Extent helper that uses resolved per-factory movement sources."""
     resolved_steps = [
@@ -1532,6 +1591,8 @@ def _trap_grid_scene_extent_resolved(
         block_spacing=block_spacing,
         half=half,
         factory_box_offset=factory_box_offset,
+        axis_margin=axis_margin,
+        arrow_label_offset=arrow_label_offset,
     )
 
 
@@ -1821,11 +1882,13 @@ def _draw_movement_arrows(
     phase: str,
     factory_locations: list[tuple[int, int]] | None = None,
     logic_qubit_locations: list[tuple[int, int]] | None = None,
+    movement_color_early: str = TRAP_GRID_MOVEMENT_COLOR_EARLY,
+    movement_color_late: str = TRAP_GRID_MOVEMENT_COLOR_LATE,
     zorder: int = 8,
     linewidth: float = TRAP_GRID_ARROW_LINEWIDTH,
     mutation_scale: float = TRAP_GRID_ARROW_MUTATION_SCALE,
 ):
-    """Draw arrows per movement batch; same batch shares label and grey level."""
+    """Draw arrows per movement batch; same batch shares label and color shade."""
     ordered = sorted(steps, key=lambda s: (s["batch_id"], s["factory_id"]))
     batch_ids = sorted({s["batch_id"] for s in ordered})
     batch_order = {bid: i for i, bid in enumerate(batch_ids)}
@@ -1841,7 +1904,12 @@ def _draw_movement_arrows(
         start = src
         end = dst
         batch_idx = batch_order[step["batch_id"]]
-        arrow_color = _movement_arrow_grey(batch_idx, n_batches)
+        arrow_color = _movement_arrow_color(
+            batch_idx,
+            n_batches,
+            color_early=movement_color_early,
+            color_late=movement_color_late,
+        )
         rad = _movement_arrow_rad(
             src_loc,
             dst_loc,
@@ -1884,11 +1952,16 @@ def _plot_rus_round_trap_grid_style(
     movement_overlay: Literal[
         "both", "arrows_only", "aod_only", "none"
     ] = TRAP_GRID_MOVEMENT_OVERLAY,
+    movement_color_early: str = TRAP_GRID_MOVEMENT_COLOR_EARLY,
+    movement_color_late: str = TRAP_GRID_MOVEMENT_COLOR_LATE,
     title_prefix: str | None = None,
     architecture_magic_state_locations: List[Tuple[int, int]] | None = None,
     combined_time_window: bool = False,
     tmr_factory_angles: dict[int, float] | None = None,
     time_window: tuple[float, float] | None = None,
+    target_ax: Axes | None = None,
+    axis_margin: float | None = None,
+    arrow_label_offset: float | None = None,
 ) -> tuple[Optional[Figure], Optional[Figure], List[Tuple[int, int]]]:
     """
     New trap-grid style:
@@ -2139,6 +2212,8 @@ def _plot_rus_round_trap_grid_style(
             block_spacing=block_spacing,
             half=half,
             factory_box_offset=factory_box_offset,
+            axis_margin=axis_margin,
+            arrow_label_offset=arrow_label_offset,
         )
         ax.set_xlim(x_lo, x_hi)
         ax.set_ylim(y_lo, y_hi)
@@ -2196,6 +2271,8 @@ def _plot_rus_round_trap_grid_style(
                 phase=phase,
                 factory_locations=factory_locations,
                 logic_qubit_locations=logic_qubit_locations,
+                movement_color_early=movement_color_early,
+                movement_color_late=movement_color_late,
             )
             if phase == "combined" and return_steps:
                 _draw_movement_arrows(
@@ -2206,6 +2283,8 @@ def _plot_rus_round_trap_grid_style(
                     phase=phase,
                     factory_locations=factory_locations,
                     logic_qubit_locations=logic_qubit_locations,
+                    movement_color_early=movement_color_early,
+                    movement_color_late=movement_color_late,
                 )
 
     move_departing = {s["factory_id"] for s in move_steps}
@@ -2254,7 +2333,11 @@ def _plot_rus_round_trap_grid_style(
         factory_box_offset=factory_box_offset,
     )
 
-    if combined_time_window and time_window is not None:
+    if target_ax is not None:
+        ax_move = target_ax
+        ax_time = None
+        fig_move = None
+    elif combined_time_window and time_window is not None:
         w, h = _figsize_from_extent(*move_extent)
         fig_move = plt.figure(figsize=(w, h + 0.65))
         gs = fig_move.add_gridspec(2, 1, height_ratios=[10, 1], hspace=0.12)
@@ -2294,12 +2377,18 @@ def _plot_rus_round_trap_grid_style(
             else f"RUS round {round_idx + 1} - move before CNOT"
         )
     )
-    ax_move.set_title(move_title, fontsize=14)
+    if move_title:
+        ax_move.set_title(move_title, fontsize=14)
 
-    if combined_time_window and time_window is not None and ax_time is not None:
+    if (
+        target_ax is None
+        and combined_time_window
+        and time_window is not None
+        and ax_time is not None
+    ):
         _draw_time_window_axis(ax_time, time_window[0], time_window[1])
 
-    if combined_time_window:
+    if target_ax is not None or combined_time_window:
         return fig_move, None, after_return_locations
 
     fig_return, ax_return = plt.subplots(figsize=_figsize_from_extent(*return_extent))
@@ -2333,6 +2422,8 @@ def plot_all_rus_rounds(
     movement_overlay: Literal[
         "both", "arrows_only", "aod_only", "none"
     ] = TRAP_GRID_MOVEMENT_OVERLAY,
+    movement_color_early: str = TRAP_GRID_MOVEMENT_COLOR_EARLY,
+    movement_color_late: str = TRAP_GRID_MOVEMENT_COLOR_LATE,
 ) -> None:
     """
     Plot all RUS rounds and save to separate PDF files.
@@ -2379,6 +2470,8 @@ def plot_all_rus_rounds(
                 code_distance=code_distance,
                 block_spacing=block_spacing,
                 movement_overlay=movement_overlay,
+                movement_color_early=movement_color_early,
+                movement_color_late=movement_color_late,
                 architecture_magic_state_locations=arch_magic,
             )
             current_locs = updated_locations

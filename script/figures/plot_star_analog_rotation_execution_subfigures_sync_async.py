@@ -17,10 +17,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from src.animator.circuit_execution_visualization import (
     _collapse_star_tmr_blocks,
     plot_star_execution_subfigures,
+    plot_star_timeline_movement_combined,
 )
 from src.animator.rus_round_visualization import (
     build_rus_move_shade_specs,
-    plot_all_rus_rounds,
     plot_trap_grid_time_range,
 )
 from src.ds import FactoryPool, get_microarchitecture
@@ -119,12 +119,12 @@ def _async_realtime_control_markers(execution_log: list[dict]) -> list[float]:
 
 def _run_star_log(*, parallel_execution: bool):
     """Mirror ``test()`` in test_analog_rotation_execution.py (active block)."""
-    n_qubits = 9
-    n_factories = 9
-    qubit_layout = (5, 5)
-    # n_qubits = 25
-    # n_factories = 25
+    # n_qubits = 9
+    # n_factories = 9
     # qubit_layout = (5, 5)
+    n_qubits = 25
+    n_factories = 25
+    qubit_layout = (5, 5)
     placement = "col_based"
     n_aods = 4
     n_aods_se = 4
@@ -186,6 +186,7 @@ def _run_star_log(*, parallel_execution: bool):
 def main(
     *,
     output_pdf: str,
+    timeline_subfigures_pdf: str | None,
     figure_width: float,
     figure_vertical_stretch: float,
     suptitle: str | None,
@@ -195,8 +196,9 @@ def main(
     rus_async_output_dir: str,
     rus_code_distance: int,
     rus_movement_overlay: str,
-    async_time_start: float,
-    async_time_end: float,
+    trap_window_start: float,
+    trap_window_end: float,
+    timeline_xmax: float | None,
     shade_rus_moves: bool,
     sync_rus_shade_rounds: list[int],
     rus_shade_alpha: float,
@@ -249,84 +251,111 @@ def main(
         )
         row_time_shades = [sync_specs if sync_specs else None, None]
 
-    plot_star_execution_subfigures(
-        row_plots,
+    trap_window = (trap_window_start, trap_window_end)
+    combined_kwargs = dict(
         show_logical_qubits=False,
         figure_width=figure_width,
         figure_vertical_stretch=figure_vertical_stretch,
         suptitle=suptitle,
-        save_path=output_pdf,
         row_time_markers=row_time_markers,
         marker_line_kwargs=marker_line_kwargs,
         marker_legend_label="Realtime control event",
-        row_time_windows=[None, (async_time_start, async_time_end)],
+        row_time_windows=[trap_window, trap_window],
         row_time_shades=row_time_shades,
-        highlight_xticks=[async_time_start, async_time_end],
-        time_window_legend_label="Trap-grid window",
+        highlight_xticks=[trap_window_start, trap_window_end],
+        time_window_legend_label="Movement window",
         show_factory_yticks=False,
+        timeline_xmax=timeline_xmax,
+    )
+    plot_star_timeline_movement_combined(
+        row_plots,
+        logic_qubit_locations=logic_locs,
+        magic_state_locations=magic_locs,
+        movement_time_start=trap_window_start,
+        movement_time_end=trap_window_end,
+        movement_code_distance=rus_code_distance,
+        movement_overlay=rus_movement_overlay,
+        save_path=output_pdf,
+        **combined_kwargs,
     )
     logging.info(
-        "Wrote STAR execution subfigures: %s and %s",
+        "Wrote timeline + movement figure: %s and %s",
         output_pdf,
         output_pdf.replace(".pdf", "_no_text.pdf"),
     )
 
-    if plot_rus_rounds:
-        logging.info("RUS trap-grid (sync, per-round) -> %s", rus_sync_output_dir)
-        plot_all_rus_rounds(
-            execution_log=sync_log,
-            logic_qubit_locations=logic_locs,
-            magic_state_locations=magic_locs,
-            base_path=rus_sync_output_dir,
-            style_variant="trap_grid",
-            code_distance=rus_code_distance,
-            movement_overlay=rus_movement_overlay,  # type: ignore[arg-type]
+    if timeline_subfigures_pdf:
+        plot_star_execution_subfigures(
+            row_plots,
+            save_path=timeline_subfigures_pdf,
+            **combined_kwargs,
         )
         logging.info(
-            "RUS trap-grid (async, t=%s–%s) -> %s",
-            async_time_start,
-            async_time_end,
-            rus_async_output_dir,
+            "Wrote timeline-only subfigures: %s and %s",
+            timeline_subfigures_pdf,
+            timeline_subfigures_pdf.replace(".pdf", "_no_text.pdf"),
         )
-        plot_trap_grid_time_range(
-            execution_log=async_log,
-            logic_qubit_locations=logic_locs,
-            magic_state_locations=magic_locs,
-            time_start=async_time_start,
-            time_end=async_time_end,
-            base_path=rus_async_output_dir,
-            title_prefix=(f"Async t=[{async_time_start:g},{async_time_end:g}]"),
-            code_distance=rus_code_distance,
-            movement_overlay=rus_movement_overlay,  # type: ignore[arg-type]
-        )
+
+    if plot_rus_rounds:
+        for label, log, out_dir in (
+            ("sync", sync_log, rus_sync_output_dir),
+            ("async", async_log, rus_async_output_dir),
+        ):
+            logging.info(
+                "RUS trap-grid (%s, t=%s–%s) -> %s",
+                label,
+                trap_window_start,
+                trap_window_end,
+                out_dir,
+            )
+            plot_trap_grid_time_range(
+                execution_log=log,
+                logic_qubit_locations=logic_locs,
+                magic_state_locations=magic_locs,
+                time_start=trap_window_start,
+                time_end=trap_window_end,
+                base_path=out_dir,
+                title_prefix=(
+                    f"{label.capitalize()} t=[{trap_window_start:g},{trap_window_end:g}]"
+                ),
+                code_distance=rus_code_distance,
+                movement_overlay=rus_movement_overlay,  # type: ignore[arg-type]
+            )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=(
-            "Two stacked horizontal STAR timelines (n=9, f=9, col_based, nAOD=3): "
-            "synchronous vs asynchronous execution, matching test_analog_rotation_execution.py."
+            "Sync vs async STAR figures: timeline (left) and movement trap-grid (right) "
+            "per row, for a shared movement time window."
         )
     )
     parser.add_argument(
         "--output-pdf",
         default=(
             "output/circuit_execution/"
-            "test.pdf"
-            # "star_n9f9_col_based_naod3_synchronous_vs_asynchronous_subfigures.pdf"
+            "star_n9f9_col_based_naod3_synchronous_vs_asynchronous_timeline_movement.pdf"
         ),
-        help="Output path for the PDF",
+        help="Output path for the combined timeline + movement PDF",
+    )
+    parser.add_argument(
+        "--timeline-subfigures-pdf",
+        default=None,
+        help=(
+            "If set, also write timeline-only stacked subfigures to this path "
+            "(e.g. ..._subfigures.pdf)"
+        ),
     )
     parser.add_argument(
         "--figure-width",
         type=float,
-        default=30.0,
+        default=60.0,
         help="Base figure width (same scale as plot_circuit_execution in tests)",
     )
     parser.add_argument(
         "--figure-vertical-stretch",
         type=float,
-        default=1.5,
+        default=1,
         help=(
             "Multiplies stacked-panel height (taller figure => taller timeline boxes). "
             "Default 1.45; try 1.7–2.0 for very large lanes."
@@ -334,7 +363,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--suptitle",
-        default="Execution Timeline for STAR Architecture",
+        default="Execution timeline and movement for STAR architecture",
         help="Figure suptitle (empty string to omit)",
     )
     parser.add_argument(
@@ -346,10 +375,9 @@ if __name__ == "__main__":
         "--plot-rus-rounds",
         action="store_true",
         # default=False,
-        default=False,
+        default=True,
         help=(
-            "Trap-grid spatial PDFs: per-RUS move/return for sync; "
-            "single combined time-window figure for async"
+            "Trap-grid spatial PDFs for sync and async over the trap-window time range"
         ),
     )
     parser.add_argument(
@@ -363,16 +391,29 @@ if __name__ == "__main__":
         help="Output directory for asynchronous time-window trap-grid PDFs",
     )
     parser.add_argument(
+        "--trap-window-start",
         "--async-time-start",
         type=float,
-        default=14.0,
-        help="Async trap-grid window start time (same units as execution log)",
+        default=17.0,
+        dest="trap_window_start",
+        help="Trap-grid / timeline highlight window start (circuit moments)",
     )
     parser.add_argument(
+        "--trap-window-end",
         "--async-time-end",
         type=float,
-        default=14.0,
-        help="Async trap-grid window end time",
+        default=18.0,
+        dest="trap_window_end",
+        help="Trap-grid / timeline highlight window end (circuit moments)",
+    )
+    parser.add_argument(
+        "--timeline-xmax",
+        type=float,
+        default=77.0,
+        help=(
+            "Crop execution timeline x-axis at this moment (reduces trailing whitespace). "
+            "Use a negative value to show the full circuit length."
+        ),
     )
     parser.add_argument(
         "--rus-code-distance",
@@ -405,12 +446,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     st = args.suptitle.strip()
     sync_rus_rounds = [
-        int(x.strip())
-        for x in args.sync_rus_shade_rounds.split(",")
-        if x.strip()
+        int(x.strip()) for x in args.sync_rus_shade_rounds.split(",") if x.strip()
     ]
     main(
         output_pdf=args.output_pdf,
+        timeline_subfigures_pdf=args.timeline_subfigures_pdf,
         figure_width=args.figure_width,
         figure_vertical_stretch=args.figure_vertical_stretch,
         suptitle=st if st else None,
@@ -420,8 +460,11 @@ if __name__ == "__main__":
         rus_async_output_dir=args.rus_async_output_dir,
         rus_code_distance=args.rus_code_distance,
         rus_movement_overlay=args.rus_movement_overlay,
-        async_time_start=args.async_time_start,
-        async_time_end=args.async_time_end,
+        trap_window_start=args.trap_window_start,
+        trap_window_end=args.trap_window_end,
+        timeline_xmax=(
+            None if args.timeline_xmax < 0 else float(args.timeline_xmax)
+        ),
         shade_rus_moves=not args.no_rus_move_shade,
         sync_rus_shade_rounds=sync_rus_rounds,
         rus_shade_alpha=args.rus_shade_alpha,

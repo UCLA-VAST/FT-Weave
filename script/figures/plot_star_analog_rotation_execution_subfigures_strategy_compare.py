@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from src.animator.circuit_execution_visualization import plot_star_execution_subfigures
 from src.animator.rus_round_visualization import (
+    TRAP_GRID_MOVEMENT_COLOR_EARLY,
+    TRAP_GRID_MOVEMENT_COLOR_LATE,
     build_rus_move_shade_specs,
     plot_all_rus_rounds,
 )
@@ -36,6 +38,11 @@ _ROW_RUS_MOVE_SHADE_ROUNDS = [
     [1],  # Optimized strategy w/o dropout
     [5],  # Optimized strategy w/ dropout
 ]
+
+# Trap-grid movement arc/label colors (earlier batch → later batch). Override here or in
+# rus_round_visualization.TRAP_GRID_MOVEMENT_COLOR_* for all callers.
+RUS_TRAP_GRID_MOVEMENT_COLOR_EARLY = TRAP_GRID_MOVEMENT_COLOR_EARLY
+RUS_TRAP_GRID_MOVEMENT_COLOR_LATE = TRAP_GRID_MOVEMENT_COLOR_LATE
 
 
 def _run_star_log(
@@ -141,6 +148,8 @@ def _plot_rus_rounds_for_rows(
             style_variant="trap_grid",
             code_distance=code_distance,
             movement_overlay=movement_overlay,  # type: ignore[arg-type]
+            movement_color_early=RUS_TRAP_GRID_MOVEMENT_COLOR_EARLY,
+            movement_color_late=RUS_TRAP_GRID_MOVEMENT_COLOR_LATE,
         )
 
 
@@ -230,7 +239,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--figure-vertical-stretch",
         type=float,
-        default=1.1,
+        default=1,
         help=(
             "Multiplies stacked-panel height (taller figure => taller timeline boxes). "
             "Default 1.45; try 1.7–2.0 for very large lanes."
