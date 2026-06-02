@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
+from matplotlib.transforms import ScaledTranslation
 import os
 from collections import defaultdict
 
@@ -764,18 +765,77 @@ def _legend_patches_for_shade_specs(
     return handles
 
 
+def _stagger_close_xtick_labels(
+    ax,
+    tick_values: list[float],
+    *,
+    min_sep: float | None = None,
+    max_offset_pts: float = 11.0,
+) -> None:
+    """Horizontally offset x tick labels when tick positions are very close."""
+    if len(tick_values) < 2:
+        return
+    x_lo, x_hi = ax.get_xlim()
+    span = float(x_hi) - float(x_lo)
+    if span <= 1e-9:
+        return
+    threshold = min_sep if min_sep is not None else max(1.5, span * 0.035)
+    sorted_vals = sorted({round(float(t), 9) for t in tick_values})
+    offset_pts: dict[float, float] = {}
+    idx = 0
+    while idx < len(sorted_vals):
+        cluster = [sorted_vals[idx]]
+        j = idx + 1
+        while j < len(sorted_vals) and sorted_vals[j] - sorted_vals[j - 1] < threshold:
+            cluster.append(sorted_vals[j])
+            j += 1
+        if len(cluster) > 1:
+            for k, tick_val in enumerate(cluster):
+                frac = k / (len(cluster) - 1)
+                offset_pts[tick_val] = -max_offset_pts + 2 * max_offset_pts * frac
+        idx = j
+
+    if not offset_pts:
+        return
+    fig = ax.figure
+    for label in ax.get_xticklabels():
+        try:
+            tick_val = round(float(label.get_text()), 9)
+        except ValueError:
+            continue
+        dx_pts = offset_pts.get(tick_val)
+        if dx_pts is None:
+            continue
+        label.set_transform(
+            label.get_transform()
+            + ScaledTranslation(dx_pts / 72.0, 0, fig.dpi_scale_trans)
+        )
+
+
 def _merge_timeline_xticks(
     ax,
     extra_ticks: list[float],
     *,
     bold_ticks: list[float] | None = None,
+    labeled_ticks: list[float] | None = None,
+    stagger_close_ticks: bool = False,
 ) -> None:
-    """Ensure ``extra_ticks`` appear on the shared time axis."""
+    """Ensure highlight ticks appear on the shared time axis.
+
+    *labeled_ticks* controls which positions get tick marks and labels (defaults to
+    all *extra_ticks*). Use a single label (e.g. only ``17``) when the window spans
+    two nearby moments (``17``–``18``).
+    """
     if not extra_ticks:
         return
+    label_ticks = (
+        [float(t) for t in labeled_ticks]
+        if labeled_ticks is not None
+        else [float(t) for t in extra_ticks]
+    )
     current = [float(t) for t in ax.get_xticks()]
     merged = sorted(
-        {round(t, 9) for t in current} | {round(float(t), 9) for t in extra_ticks}
+        {round(t, 9) for t in current} | {round(float(t), 9) for t in label_ticks}
     )
     ax.set_xticks(merged)
     ax.set_xticklabels([f"{t:g}" for t in merged])
@@ -788,6 +848,8 @@ def _merge_timeline_xticks(
                 continue
             if tick_val in bold_set:
                 label.set_fontweight("bold")
+    if stagger_close_ticks and len(label_ticks) > 1:
+        _stagger_close_xtick_labels(ax, label_ticks)
 
 
 def plot_star_execution_subfigures(
@@ -1060,14 +1122,28 @@ def _combined_timeline_movement_fig_width(
     circuit_length: int,
     *,
     show_box_text: bool,
+    timeline_span: float | None = None,
+    reference_timeline_span: float | None = None,
 ) -> float:
-    """Provisional figure width in inches (timeline-heavy; movement is a narrow strip)."""
+    """Provisional figure width in inches (timeline-heavy; movement is a narrow strip).
+
+    When *timeline_span* is set, width follows the displayed time range (not log length).
+    """
     ref = max(float(figure_width), 1.0)
+    span = (
+        float(timeline_span)
+        if timeline_span is not None
+        else float(max(circuit_length, 1))
+    )
+    ref_span = (
+        float(reference_timeline_span) if reference_timeline_span is not None else span
+    )
+    span_scale = span / ref_span if ref_span > 1e-9 else 1.0
     if show_box_text:
-        tl = max(ref * 0.45, circuit_length / 10 + 4.5)
+        tl = max(ref * 0.45, span / 10 + 4.5)
     else:
         paper = float(_TCULT_EXEC_FIGURE_WIDTH)
-        tl = paper * max(1.0, ref / 30.0)
+        tl = paper * max(1.0, ref / 30.0) * span_scale
     return tl * 1.12
 
 
@@ -1098,7 +1174,7 @@ def _fit_movement_in_slot(
     return (x0, new_y0, new_w, new_h)
 
 
-def _tighten_movement_axes_limits(ax_mv, *, inset_frac: float = 0.06) -> None:
+def _tighten_movement_axes_limits(ax_mv, *, inset_frac: float = -0.01) -> None:
     """Trim trap-grid axis limits to reduce left/right padding inside the movement panel."""
     x_lo, x_hi = ax_mv.get_xlim()
     y_lo, y_hi = ax_mv.get_ylim()
@@ -1190,13 +1266,16 @@ def plot_star_timeline_movement_combined(
     show_factory_yticks: bool = False,
     factory_axis_label: str = "Factories",
     subfig_heading_fontsize: float | None = None,
-    timeline_xmax: float | None = None,
+    timeline_xmax: float | None = 65.0,
     movement_axis_margin: float | None = 0.05,
     movement_axes_inset_frac: float = 0.05,
+    highlight_xtick_labels: list[float] | None = None,
+    marker_line_ymin: float = -0.01,
+    marker_line_ymax: float = 1.0,
 ) -> None:
     """Timeline (left) and trap-grid movement (right) for each execution setting.
 
-  One row per setting; writes *save_path* and a ``_no_text`` sibling.
+    One row per setting; writes *save_path* and a ``_no_text`` sibling.
     """
     if not row_plots:
         print("No row plots to render")
@@ -1229,17 +1308,18 @@ def plot_star_timeline_movement_combined(
     full_xmax = (
         max(max(entry_end(entry) for entry in log) for log in _logs_for_xmax()) * 1.01
     )
-    global_xmax = (
-        min(full_xmax, float(timeline_xmax))
-        if timeline_xmax is not None
-        else full_xmax
-    )
+    if timeline_xmax is not None:
+        global_xmax = min(full_xmax, float(timeline_xmax))
+    else:
+        global_xmax = full_xmax
 
     max_circuit_length = max(len(execution_log) for _, execution_log, _, _ in row_plots)
     with_text_fig_width = _combined_timeline_movement_fig_width(
         figure_width,
         max_circuit_length,
         show_box_text=True,
+        timeline_span=global_xmax,
+        reference_timeline_span=full_xmax,
     )
     lane_sum = sum(row_height_ratios)
     fig_height = 1.2 + 1.0 * float(figure_vertical_stretch) * lane_sum
@@ -1271,9 +1351,9 @@ def plot_star_timeline_movement_combined(
             figure_width,
             max_circuit_length,
             show_box_text=show_box_text,
+            timeline_span=global_xmax,
+            reference_timeline_span=full_xmax,
         )
-        if timeline_xmax is not None and full_xmax > 1e-9:
-            fig_width *= max(0.55, float(global_xmax) / float(full_xmax))
         fig_height_plot = (
             fig_height
             if show_box_text
@@ -1302,9 +1382,7 @@ def plot_star_timeline_movement_combined(
         col_title_fs = _scaled_font_size(heading_fs, title_font_scale)
         suptitle_fs = _scaled_font_size(heading_fs + 3, title_font_scale)
         legend_fs = _scaled_font_size(max(14, heading_fs + 1), title_font_scale)
-        row_titles = [
-            _capitalize_title_words(title) for title, _, _, _ in row_plots
-        ]
+        row_titles = [_capitalize_title_words(title) for title, _, _, _ in row_plots]
         timeline_axes = []
         movement_axes = []
         for row_idx, (
@@ -1371,8 +1449,8 @@ def plot_star_timeline_movement_combined(
                         continue
                     marker = ax_tl.vlines(
                         t,
-                        ymin=-0.03,
-                        ymax=1.0,
+                        ymin=marker_line_ymin,
+                        ymax=marker_line_ymax,
                         transform=ax_tl.get_xaxis_transform(),
                         **line_kwargs,
                     )
@@ -1411,10 +1489,16 @@ def plot_star_timeline_movement_combined(
             ax_tl.tick_params(axis="x", labelbottom=False)
 
         if highlight_xticks:
+            tick_labels = (
+                highlight_xtick_labels
+                if highlight_xtick_labels is not None
+                else highlight_xticks
+            )
             _merge_timeline_xticks(
                 timeline_axes[-1],
                 highlight_xticks,
-                bold_ticks=highlight_xticks,
+                bold_ticks=tick_labels,
+                labeled_ticks=tick_labels,
             )
 
         legend_handles = list(_star_execution_legend_handles())

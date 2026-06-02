@@ -263,6 +263,7 @@ def main(
         row_time_windows=[trap_window, trap_window],
         row_time_shades=row_time_shades,
         highlight_xticks=[trap_window_start, trap_window_end],
+        highlight_xtick_labels=[trap_window_start],
         time_window_legend_label="Movement window",
         show_factory_yticks=False,
         timeline_xmax=timeline_xmax,
@@ -409,10 +410,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--timeline-xmax",
         type=float,
-        default=77.0,
+        default=65.0,
         help=(
-            "Crop execution timeline x-axis at this moment (reduces trailing whitespace). "
-            "Use a negative value to show the full circuit length."
+            "Timeline x-axis maximum (default 65 for n9f9 sync/async). "
+            "Use a negative value for the full circuit time range."
         ),
     )
     parser.add_argument(
@@ -462,9 +463,7 @@ if __name__ == "__main__":
         rus_movement_overlay=args.rus_movement_overlay,
         trap_window_start=args.trap_window_start,
         trap_window_end=args.trap_window_end,
-        timeline_xmax=(
-            None if args.timeline_xmax < 0 else float(args.timeline_xmax)
-        ),
+        timeline_xmax=(None if args.timeline_xmax < 0 else float(args.timeline_xmax)),
         shade_rus_moves=not args.no_rus_move_shade,
         sync_rus_shade_rounds=sync_rus_rounds,
         rus_shade_alpha=args.rus_shade_alpha,
