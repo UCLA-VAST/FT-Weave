@@ -85,7 +85,7 @@ _AXIS_LABEL_FONT_SIZE = 24
 _TITLE_FONT_SIZE = 28
 _LEGEND_FONT_SIZE = 20
 # STAR stacked subfigures: same size for suptitle, per-panel title, and x-axis label.
-_STAR_SUBFIG_HEADING_FONT_SIZE = 18  # 24  # 16
+_STAR_SUBFIG_HEADING_FONT_SIZE = 21
 # Inches scaling for total figure height (larger => taller lanes / taller boxes on screen).
 _STAR_SUBFIG_DEFAULT_VERTICAL_STRETCH = 1.8
 
@@ -441,6 +441,9 @@ def _plot_circuit_execution_on_ax(
     collapse_tmr: bool = True,
     font_scale: float = 1.0,
     box_border_width: float | None = None,
+    show_factory_yticks: bool = True,
+    factory_axis_label: str = "Factories",
+    show_factory_ylabel: bool = True,
 ) -> float:
     """Draw horizontal STAR execution on *ax*; returns max end time in the log."""
     plot_log = (
@@ -625,13 +628,26 @@ def _plot_circuit_execution_on_ax(
         ax.set_yticks(range(len(row_names)))
         ax.set_yticklabels(row_names)
     else:
-        ax.set_ylabel(
-            "Factory indices",
-            fontsize=xlabel_fs,
-            fontweight="bold",
-        )
-        ax.set_yticks(range(n_factories))
-        ax.set_yticklabels([str(i) for i in range(n_factories)])
+        if show_factory_yticks:
+            ax.set_ylabel(
+                factory_axis_label,
+                fontsize=xlabel_fs,
+                fontweight="bold",
+            )
+            ax.set_yticks(range(n_factories))
+            ax.set_yticklabels([str(i) for i in range(n_factories)])
+        elif show_factory_ylabel:
+            ax.set_ylabel(
+                factory_axis_label,
+                fontsize=xlabel_fs,
+                fontweight="bold",
+            )
+            ax.set_yticks([])
+            ax.tick_params(axis="y", length=0)
+        else:
+            ax.set_ylabel("")
+            ax.set_yticks([])
+            ax.tick_params(axis="y", length=0)
     _tpad = 6 if title_pad is None else title_pad
     ax.set_title(title, fontsize=title_fs, fontweight="bold", pad=_tpad)
     ax.tick_params(axis="x", labelsize=x_tick_fs)
@@ -653,15 +669,15 @@ def _plot_circuit_execution_on_ax(
     return max_time
 
 
-def _draw_trap_grid_time_window_highlight(
+def _draw_timeline_time_highlight(
     ax,
     time_start: float,
     time_end: float,
     *,
-    color: str = "black",  # 3CA8E7",
+    color: str = "black",
     alpha: float = 0.3,
 ) -> None:
-    """Shade ``[time_start, time_end]`` on a timeline row (trap-grid spatial window)."""
+    """Shade ``[time_start, time_end]`` across the full row height."""
     t0 = min(float(time_start), float(time_end))
     t1 = max(float(time_start), float(time_end))
     ylo, yhi = ax.get_ylim()
@@ -675,6 +691,54 @@ def _draw_trap_grid_time_window_highlight(
         zorder=-5,
         linewidth=0,
     )
+
+
+def _draw_trap_grid_time_window_highlight(
+    ax,
+    time_start: float,
+    time_end: float,
+    *,
+    color: str = "black",
+    alpha: float = 0.3,
+) -> None:
+    """Shade ``[time_start, time_end]`` on a timeline row (trap-grid spatial window)."""
+    _draw_timeline_time_highlight(
+        ax, time_start, time_end, color=color, alpha=alpha
+    )
+
+
+def _draw_timeline_shade_specs(ax, shade_specs: list[dict]) -> None:
+    """Apply a list of shade specs from :func:`build_rus_move_shade_specs`."""
+    for spec in shade_specs:
+        _draw_timeline_time_highlight(
+            ax,
+            spec["time_start"],
+            spec["time_end"],
+            color=spec.get("color", "black"),
+            alpha=float(spec.get("alpha", 0.22)),
+        )
+
+
+def _legend_patches_for_shade_specs(
+    shade_specs: list[dict],
+) -> list[mpatches.Patch]:
+    """One legend patch per unique shade label (preserves first-seen order)."""
+    seen: set[str] = set()
+    handles: list[mpatches.Patch] = []
+    for spec in shade_specs:
+        label = spec.get("label")
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        handles.append(
+            mpatches.Patch(
+                facecolor=spec.get("color", "black"),
+                edgecolor="black",
+                alpha=float(spec.get("alpha", 0.22)),
+                label=label,
+            )
+        )
+    return handles
 
 
 def _merge_timeline_xticks(ax, extra_ticks: list[float]) -> None:
@@ -704,8 +768,14 @@ def plot_star_execution_subfigures(
     marker_line_kwargs: dict | None = None,
     marker_legend_label: str = "Realtime control event",
     row_time_windows: list[tuple[float, float] | None] | None = None,
+    row_time_shades: list[list[dict] | None] | None = None,
     highlight_xticks: list[float] | None = None,
     time_window_legend_label: str = "Trap-grid window",
+    time_window_shade_color: str = "black",
+    time_window_shade_alpha: float = 0.3,
+    show_factory_yticks: bool = False,
+    factory_axis_label: str = "Factories",
+    subfig_heading_fontsize: float | None = None,
 ):
     """Plot multiple horizontal STAR timelines as stacked subfigures (shared time axis).
 
@@ -713,7 +783,10 @@ def plot_star_execution_subfigures(
     figure_vertical_stretch: multiplies default height so each lane/box is taller on screen.
     row_time_markers: optional per-row x positions for marker lines (same order as row_plots)
     row_time_windows: optional per-row ``(t_start, t_end)`` shaded regions (e.g. async trap-grid)
+    row_time_shades: optional per-row shade specs (e.g. RUS move/return intervals)
     highlight_xticks: extra x-axis tick positions (e.g. trap-grid window bounds)
+    show_factory_yticks: when False, hide factory-index tick labels but keep *factory_axis_label*
+    factory_axis_label: y-axis title when factory tick labels are hidden (default ``Factories``)
     Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
     """
     if not row_plots:
@@ -723,6 +796,8 @@ def plot_star_execution_subfigures(
         raise ValueError("row_time_markers must have the same length as row_plots")
     if row_time_windows is not None and len(row_time_windows) != len(row_plots):
         raise ValueError("row_time_windows must have the same length as row_plots")
+    if row_time_shades is not None and len(row_time_shades) != len(row_plots):
+        raise ValueError("row_time_shades must have the same length as row_plots")
 
     row_count = len(row_plots)
     lane_counts = []
@@ -759,7 +834,11 @@ def plot_star_execution_subfigures(
         figure_width, max_circuit_length, show_box_text=True
     )
     fig_height = 0.9 + 0.90 * float(figure_vertical_stretch) * sum(row_height_ratios)
-    heading_fs = _STAR_SUBFIG_HEADING_FONT_SIZE
+    heading_fs = (
+        _STAR_SUBFIG_HEADING_FONT_SIZE
+        if subfig_heading_fontsize is None
+        else float(subfig_heading_fontsize)
+    )
     output_dir = os.path.dirname(save_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
@@ -808,11 +887,24 @@ def plot_star_execution_subfigures(
                 collapse_tmr=collapse_tmr,
                 font_scale=font_scale,
                 box_border_width=resolved_border_width,
+                show_factory_yticks=show_factory_yticks,
+                factory_axis_label=factory_axis_label,
+                show_factory_ylabel=True,
             )
+            if row_time_shades is not None:
+                shades = row_time_shades[row_idx]
+                if shades:
+                    _draw_timeline_shade_specs(ax, shades)
             if row_time_windows is not None:
                 window = row_time_windows[row_idx]
                 if window is not None:
-                    _draw_trap_grid_time_window_highlight(ax, window[0], window[1])
+                    _draw_timeline_time_highlight(
+                        ax,
+                        window[0],
+                        window[1],
+                        color=time_window_shade_color,
+                        alpha=time_window_shade_alpha,
+                    )
             if row_time_markers is not None:
                 line_kwargs = {
                     "color": "black",
@@ -845,23 +937,6 @@ def plot_star_execution_subfigures(
         if highlight_xticks:
             _merge_timeline_xticks(axes[-1], highlight_xticks)
 
-        fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.98 if suptitle else 0.96))
-
-        if suptitle:
-            fig.canvas.draw()
-            renderer = fig.canvas.get_renderer()
-            bb0 = (
-                axes[0].get_tightbbox(renderer).transformed(fig.transFigure.inverted())
-            )
-            fig.suptitle(
-                suptitle,
-                fontsize=_scaled_font_size(heading_fs, font_scale),
-                fontweight="bold",
-                y=float(min(0.998, bb0.y1 + 0.008)),
-                va="bottom",
-            )
-
-        legend_ax = axes[legend_row_index]
         legend_handles = list(_star_execution_legend_handles())
         if row_time_markers is not None:
             legend_line_kwargs = {
@@ -880,21 +955,56 @@ def plot_star_execution_subfigures(
         ):
             legend_handles.append(
                 mpatches.Patch(
-                    facecolor="#3CA8E7",
+                    facecolor=time_window_shade_color,
                     edgecolor="black",
-                    alpha=0.16,
+                    alpha=time_window_shade_alpha,
                     label=time_window_legend_label,
                 )
             )
-        legend_ax.legend(
+        if row_time_shades is not None:
+            row_shade_labels: set[str] = set()
+            for shades in row_time_shades:
+                if not shades:
+                    continue
+                for patch in _legend_patches_for_shade_specs(shades):
+                    if patch.get_label() in row_shade_labels:
+                        continue
+                    row_shade_labels.add(patch.get_label())
+                    legend_handles.append(patch)
+
+        fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.98 if suptitle else 0.96))
+
+        if suptitle:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            bb0 = (
+                axes[0].get_tightbbox(renderer).transformed(fig.transFigure.inverted())
+            )
+            fig.suptitle(
+                suptitle,
+                fontsize=_scaled_font_size(heading_fs, font_scale),
+                fontweight="bold",
+                y=float(min(0.998, bb0.y1 + 0.008)),
+                va="bottom",
+            )
+
+        # Legend at the original upper-right (panel with most timeline whitespace),
+        # with that axes stacked above later panels so the box is not covered.
+        for ax_idx, ax in enumerate(axes):
+            ax.set_zorder(ax_idx + 1)
+        legend_ax = axes[legend_row_index]
+        legend_ax.set_zorder(len(axes) + 10)
+        legend = legend_ax.legend(
             handles=legend_handles,
             loc="upper right",
             bbox_to_anchor=(1.0, 1.0),
             ncol=1,
-            fontsize=_scaled_font_size(max(10, heading_fs - 2), font_scale),
+            fontsize=_scaled_font_size(max(11, heading_fs - 1), font_scale),
             frameon=True,
-            framealpha=0.95,
+            framealpha=0.98,
         )
+        legend.set_zorder(1000)
+        legend.set_clip_on(False)
 
         out_path = _save_path_for_box_text_variant(
             save_path, show_box_text=show_box_text

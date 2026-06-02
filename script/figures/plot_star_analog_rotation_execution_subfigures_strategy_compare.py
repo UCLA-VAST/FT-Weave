@@ -15,7 +15,10 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.animator.circuit_execution_visualization import plot_star_execution_subfigures
-from src.animator.rus_round_visualization import plot_all_rus_rounds
+from src.animator.rus_round_visualization import (
+    build_rus_move_shade_specs,
+    plot_all_rus_rounds,
+)
 from src.ds import FactoryPool, get_microarchitecture
 from src.star.analog_rotation_execution import factory_angle_execution
 from src.star.analog_rotation_execution_parallel import factory_angle_execution_parallel
@@ -26,6 +29,13 @@ logging.basicConfig(
     force=True,
 )
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
+
+# Per-panel RUS rounds to highlight (move before CNOT + return after CNOT).
+_ROW_RUS_MOVE_SHADE_ROUNDS = [
+    [1],  # Unoptimized strategy
+    [1],  # Optimized strategy w/o dropout
+    [5],  # Optimized strategy w/ dropout
+]
 
 
 def _run_star_log(
@@ -145,6 +155,9 @@ def main(
     rus_output_dir: str,
     rus_code_distance: int,
     rus_movement_overlay: str,
+    shade_rus_moves: bool,
+    rus_shade_alpha: float,
+    row_rus_shade_rounds: list[list[int]],
 ) -> None:
     row_plots = [
         (
@@ -174,6 +187,12 @@ def main(
         os.makedirs(out_dir, exist_ok=True)
 
     timeline_rows = [(label, log, nf, nq) for label, log, nf, nq, *_rest in row_plots]
+    row_time_shades: list[list[dict] | None] | None = None
+    if shade_rus_moves:
+        row_time_shades = []
+        for (_, log, *_rest), rounds in zip(row_plots, row_rus_shade_rounds):
+            specs = build_rus_move_shade_specs(log, rounds, alpha=rus_shade_alpha)
+            row_time_shades.append(specs if specs else None)
     plot_star_execution_subfigures(
         timeline_rows,
         show_logical_qubits=False,
@@ -181,6 +200,8 @@ def main(
         figure_vertical_stretch=figure_vertical_stretch,
         suptitle=suptitle,
         save_path=output_pdf,
+        row_time_shades=row_time_shades,
+        show_factory_yticks=False,
     )
     logging.info("Wrote STAR execution subfigures: %s", output_pdf)
 
@@ -209,7 +230,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--figure-vertical-stretch",
         type=float,
-        default=1.2,
+        default=1.1,
         help=(
             "Multiplies stacked-panel height (taller figure => taller timeline boxes). "
             "Default 1.45; try 1.7–2.0 for very large lanes."
@@ -249,9 +270,37 @@ if __name__ == "__main__":
         default="both",
         help="Movement visualization on trap-grid figures",
     )
+    parser.add_argument(
+        "--no-rus-move-shade",
+        action="store_true",
+        help="Disable colored timeline shading for selected RUS move/return intervals",
+    )
+    parser.add_argument(
+        "--rus-shade-alpha",
+        type=float,
+        default=0.22,
+        help="Alpha for RUS move/return timeline shading",
+    )
+    parser.add_argument(
+        "--row-rus-shade-rounds",
+        default="1|1,5|5",
+        help=(
+            "Per-panel 1-based RUS rounds to shade, separated by '|' "
+            "(default: 1|1,5|5 for the three strategy rows)"
+        ),
+    )
     args = parser.parse_args()
     st = args.suptitle.strip()
     rng = args.rng
+    row_rus_shade_rounds = [
+        [int(x.strip()) for x in panel.split(",") if x.strip()]
+        for panel in args.row_rus_shade_rounds.split("|")
+    ]
+    if len(row_rus_shade_rounds) != len(_ROW_RUS_MOVE_SHADE_ROUNDS):
+        parser.error(
+            f"--row-rus-shade-rounds must have {len(_ROW_RUS_MOVE_SHADE_ROUNDS)} "
+            f"panels (got {len(row_rus_shade_rounds)})"
+        )
     main(
         output_pdf=args.output_pdf,
         figure_width=args.figure_width,
@@ -262,4 +311,7 @@ if __name__ == "__main__":
         rus_output_dir=args.rus_output_dir,
         rus_code_distance=args.rus_code_distance,
         rus_movement_overlay=args.rus_movement_overlay,
+        shade_rus_moves=not args.no_rus_move_shade,
+        rus_shade_alpha=args.rus_shade_alpha,
+        row_rus_shade_rounds=row_rus_shade_rounds,
     )

@@ -210,6 +210,77 @@ def extract_rus_rounds(execution_log: List[dict]) -> List[List[dict]]:
     return rus_rounds
 
 
+# Timeline shading for STAR subfigures (one color per highlighted RUS round).
+RUS_ROUND_SHADE_COLORS = [
+    "#6BAED6",
+    "#FD8D3C",
+    "#74C476",
+    "#BCBDDC",
+    "#E377C2",
+    "#A1D99B",
+    "#FDAE6B",
+    "#9ECAE1",
+]
+
+
+def rus_round_legend_label(round_index_1based: int) -> str:
+    """Human-readable legend label, e.g. ``1st RUS``, ``5th RUS``."""
+    n = int(round_index_1based)
+    if 11 <= (n % 100) <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix} RUS"
+
+
+def _movement_intervals_in_rus_cycle(cycle: List[dict]) -> List[Tuple[float, float]]:
+    """Time spans for ``move`` (before CNOT) and ``return_move`` (after CNOT)."""
+    intervals: List[Tuple[float, float]] = []
+    for entry in cycle:
+        op = entry.get("operation")
+        if op not in ("move", "return_move"):
+            continue
+        t0 = entry_start(entry)
+        t1 = entry_end(entry)
+        if t1 < t0:
+            t0, t1 = t1, t0
+        intervals.append((t0, t1))
+    return intervals
+
+
+def build_rus_move_shade_specs(
+    execution_log: List[dict],
+    round_indices_1based: List[int],
+    *,
+    alpha: float = 0.22,
+) -> List[dict]:
+    """Build per-row timeline shade specs for selected RUS rounds.
+
+    Each spec is a dict with keys ``time_start``, ``time_end``, ``color``,
+    ``label``, and ``alpha``. Move-before-CNOT and return-move-after-CNOT
+    intervals in the same round share one color and one legend entry.
+    """
+    rounds = extract_rus_rounds(execution_log)
+    specs: List[dict] = []
+    for round_idx in round_indices_1based:
+        ri = int(round_idx)
+        if ri < 1 or ri > len(rounds):
+            continue
+        color = RUS_ROUND_SHADE_COLORS[(ri - 1) % len(RUS_ROUND_SHADE_COLORS)]
+        label = rus_round_legend_label(ri)
+        for t0, t1 in _movement_intervals_in_rus_cycle(rounds[ri - 1]):
+            specs.append(
+                {
+                    "time_start": t0,
+                    "time_end": t1,
+                    "color": color,
+                    "label": label,
+                    "alpha": alpha,
+                }
+            )
+    return specs
+
+
 def filter_log_by_time_range(
     execution_log: List[dict],
     time_start: float,

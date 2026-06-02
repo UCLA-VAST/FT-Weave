@@ -19,6 +19,7 @@ from src.animator.circuit_execution_visualization import (
     plot_star_execution_subfigures,
 )
 from src.animator.rus_round_visualization import (
+    build_rus_move_shade_specs,
     plot_all_rus_rounds,
     plot_trap_grid_time_range,
 )
@@ -118,12 +119,15 @@ def _async_realtime_control_markers(execution_log: list[dict]) -> list[float]:
 
 def _run_star_log(*, parallel_execution: bool):
     """Mirror ``test()`` in test_analog_rotation_execution.py (active block)."""
-    n_qubits = 25
-    n_factories = 25
+    n_qubits = 9
+    n_factories = 9
     qubit_layout = (5, 5)
+    # n_qubits = 25
+    # n_factories = 25
+    # qubit_layout = (5, 5)
     placement = "col_based"
-    n_aods = 3
-    n_aods_se = 3
+    n_aods = 4
+    n_aods_se = 4
     consider_skip_rus = 2
     tmr_assignment_method = "matching"
     trivial_return = False
@@ -139,7 +143,8 @@ def _run_star_log(*, parallel_execution: bool):
     )
 
     factory_pool = FactoryPool(num_factories=n_factories)
-    rng = np.random.default_rng(47)
+    # rng = np.random.default_rng(20)
+    rng = np.random.default_rng(65)
 
     if parallel_execution:
         _total_time, log = factory_angle_execution_parallel(
@@ -192,6 +197,9 @@ def main(
     rus_movement_overlay: str,
     async_time_start: float,
     async_time_end: float,
+    shade_rus_moves: bool,
+    sync_rus_shade_rounds: list[int],
+    rus_shade_alpha: float,
 ) -> None:
     (
         sync_log,
@@ -234,6 +242,13 @@ def main(
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
+    row_time_shades: list[list[dict] | None] | None = None
+    if shade_rus_moves and sync_rus_shade_rounds:
+        sync_specs = build_rus_move_shade_specs(
+            sync_log, sync_rus_shade_rounds, alpha=rus_shade_alpha
+        )
+        row_time_shades = [sync_specs if sync_specs else None, None]
+
     plot_star_execution_subfigures(
         row_plots,
         show_logical_qubits=False,
@@ -244,6 +259,11 @@ def main(
         row_time_markers=row_time_markers,
         marker_line_kwargs=marker_line_kwargs,
         marker_legend_label="Realtime control event",
+        row_time_windows=[None, (async_time_start, async_time_end)],
+        row_time_shades=row_time_shades,
+        highlight_xticks=[async_time_start, async_time_end],
+        time_window_legend_label="Trap-grid window",
+        show_factory_yticks=False,
     )
     logging.info(
         "Wrote STAR execution subfigures: %s and %s",
@@ -275,7 +295,7 @@ def main(
             time_start=async_time_start,
             time_end=async_time_end,
             base_path=rus_async_output_dir,
-            title_prefix=(f"Async t∈[{async_time_start:g},{async_time_end:g}]"),
+            title_prefix=(f"Async t=[{async_time_start:g},{async_time_end:g}]"),
             code_distance=rus_code_distance,
             movement_overlay=rus_movement_overlay,  # type: ignore[arg-type]
         )
@@ -292,7 +312,8 @@ if __name__ == "__main__":
         "--output-pdf",
         default=(
             "output/circuit_execution/"
-            "star_n9f9_col_based_naod3_synchronous_vs_asynchronous_subfigures.pdf"
+            "test.pdf"
+            # "star_n9f9_col_based_naod3_synchronous_vs_asynchronous_subfigures.pdf"
         ),
         help="Output path for the PDF",
     )
@@ -324,9 +345,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--plot-rus-rounds",
         action="store_true",
-        default=True,
+        # default=False,
+        default=False,
         help=(
-            "Trap-grid spatial PDFs: per-RUS rounds for sync; time-window slice for async"
+            "Trap-grid spatial PDFs: per-RUS move/return for sync; "
+            "single combined time-window figure for async"
         ),
     )
     parser.add_argument(
@@ -342,13 +365,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--async-time-start",
         type=float,
-        default=0.0,
+        default=14.0,
         help="Async trap-grid window start time (same units as execution log)",
     )
     parser.add_argument(
         "--async-time-end",
         type=float,
-        default=500.0,
+        default=14.0,
         help="Async trap-grid window end time",
     )
     parser.add_argument(
@@ -363,8 +386,29 @@ if __name__ == "__main__":
         default="both",
         help="Movement visualization on trap-grid figures",
     )
+    parser.add_argument(
+        "--no-rus-move-shade",
+        action="store_true",
+        help="Disable RUS move/return shading on the synchronous panel",
+    )
+    parser.add_argument(
+        "--sync-rus-shade-rounds",
+        default="1",
+        help="Comma-separated 1-based RUS round indices to shade on the sync panel (e.g. 1,5)",
+    )
+    parser.add_argument(
+        "--rus-shade-alpha",
+        type=float,
+        default=0.22,
+        help="Alpha for RUS move/return timeline shading",
+    )
     args = parser.parse_args()
     st = args.suptitle.strip()
+    sync_rus_rounds = [
+        int(x.strip())
+        for x in args.sync_rus_shade_rounds.split(",")
+        if x.strip()
+    ]
     main(
         output_pdf=args.output_pdf,
         figure_width=args.figure_width,
@@ -378,4 +422,7 @@ if __name__ == "__main__":
         rus_movement_overlay=args.rus_movement_overlay,
         async_time_start=args.async_time_start,
         async_time_end=args.async_time_end,
+        shade_rus_moves=not args.no_rus_move_shade,
+        sync_rus_shade_rounds=sync_rus_rounds,
+        rus_shade_alpha=args.rus_shade_alpha,
     )
