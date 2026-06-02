@@ -32,8 +32,8 @@ plt.rcParams.update(
 # (placement, prepare_lookahead_angles, trivial_return, consider_skip_rus,
 #  decompose_move, parallel_execution) — keep in sync with evaluation_fidelity_star.py
 SETTINGS = [
-    ("seperate_region_row", False, True, 0, False, False),
-    ("seperate_region_row", False, False, 0, True, False),
+    ("seperate_region_row", False, True, 0, False, False),  # Basline
+    ("seperate_region_row", False, False, 0, True, False),  # Baseline + opt mov
     # ("seperate_region_row", False, False, 2, True, False),
     # ("seperate_region_row", True, True, 0, False, False),
     # ("seperate_region_row", True, False, 0, True, False),
@@ -43,10 +43,18 @@ SETTINGS = [
     # ("col_based", True, False, 0, True, False),
     # ("col_based", True, False, 2, True, False),
     # ("col_based", True, False, 2, False, True),
-    ("col_based", False, False, 0, True, False),
-    ("col_based", False, False, 2, True, False),
-    ("col_based", True, False, 2, True, False),
-    ("col_based", False, False, 2, False, True),
+    ("col_based", False, False, 0, True, False),  # Baseline + opt mov + opt micro arch
+    ("col_based", True, False, 0, True, True),  # Greedy with opt micro arch
+    (
+        "col_based",
+        False,
+        False,
+        2,
+        True,
+        False,
+    ),  # Efficient Parallel Execution with opt micro arch
+    # ("col_based", True, False, 2, True, False),
+    # ("col_based", False, False, 2, False, True),
 ]
 
 RESULT_COLS = ["total_time", "movement_time", "return_movement_time"]
@@ -59,13 +67,36 @@ SETTING_STUDY_DUAL_AODS: tuple[int, ...] = (1, 5)
 SETTING_STUDY_DUAL_AOD_FRONT_BLEND: float = 0.52
 # Denser y-axis ticks on AOD / execution-time panels.
 STAR_AOD_COMPARISON_Y_NBINS: int = 8
+# AOD line panel: sync vs best strategy, AOD = 1, 2, 3, 5.
+AOD_COMPARISON_AODS: tuple[int, ...] = (1, 2, 3, 5)
+T_AOD_SYNC_SETTING_INDEX: int = 0
+_LINE_MARKERSIZE: float = 13.0
+_LINE_MARKER_EDGEWIDTH: float = 2.0
+_LINE_MARKER_FACE_BLEND: float = 0.52
+# Setting-study panel: one clearly distinct color per strategy (no repeated hue family).
+_SETTING_STUDY_CATEGORICAL_HEX: tuple[str, ...] = (
+    "#31A354",  # green
+    "#3182BD",  # blue
+    "#DE2D26",  # red
+    "#F16913",  # orange
+    "#756BB1",  # purple
+    "#636363",  # gray (fallback only)
+)
 T_CULTIVATION_Y_NBINS: int = 10
 # Setting-study left panel: crop y-axis when Vanilla (index 0) dominates the scale.
 STAR_SETTING_STUDY_VANILLA_IDX: int = 0
+STAR_AOD_SYNC_SETTING_INDEX: int = STAR_SETTING_STUDY_VANILLA_IDX
 # Broken-axis split: bottom panel [0, break], top panel [break, Vanilla max].
 STAR_SETTING_STUDY_Y_BREAK: float = 1200.0
 STAR_SETTING_STUDY_Y_CROP_GAP_RATIO: float = 1.25
 STAR_SETTING_STUDY_Y_CROP_PAD_FRAC: float = 0.1
+# Broken-axis layout for STAR AOD panel (modest gap + sparse upper ticks).
+STAR_BROKEN_AXIS_HEIGHT_RATIOS: tuple[int, int] = (2, 5)
+STAR_BROKEN_INNER_HSPACE: float = 0.11
+STAR_BROKEN_TOP_Y_NBINS: int = 3
+STAR_BROKEN_CLIP_MARGIN_FRAC: float = 0.012
+AOD_BOTTOM_LEGEND_ROW_STEP: float = 0.042
+AOD_BOTTOM_LEGEND_BASE_Y: float = 0.015
 # T setting-study: configure placement per ablation entry (like STAR `SETTINGS`).
 
 T_CULTIVATION_MAIN_COMPILE_SETTING: tuple[str, bool, bool, bool] = (
@@ -150,12 +181,13 @@ _T_COMPILE_ABLATION_LABELS: list[str] = [
 # ]
 
 _STAR_ABLATION_LABELS = [
-    "Sync. execution",
+    "Baseline",
     " + Routing opt.",
     " + Microarch. opt.",
-    " + Dropout",
-    " + Lookahead angle prep.",  # "(d) + Lookahead angle prep.",
-    "Async. execution",
+    "Greedy exec.",
+    "High parallelism exec.",
+    # " + Lookahead angle prep.",  # "(d) + Lookahead angle prep.",
+    # "Async. execution",
 ]
 
 
@@ -201,6 +233,111 @@ _AOD_DARK_RGB = (0.0, 0.0, 0.0)  # AOD = 1
 _AOD_LIGHT_RGB = (0.72, 0.72, 0.72)  # AOD = 5
 
 
+def _blend_rgb_toward_white(
+    rgb: tuple[float, float, float], blend: float
+) -> tuple[float, float, float]:
+    """Lighten *rgb* by blending toward white (``blend`` in [0, 1])."""
+    t = float(np.clip(blend, 0.0, 1.0))
+    base = np.array(mcolors.to_rgb(rgb), dtype=float)
+    white = np.ones(3, dtype=float)
+    return tuple(np.clip((1.0 - t) * base + t * white, 0.0, 1.0))
+
+
+def _sample_sequential_palette(
+    hex_colors: tuple[str, ...] | list[str], n: int
+) -> list[tuple[float, float, float]]:
+    """Pick *n* evenly spaced colors from a light→dark hex ramp."""
+    if n <= 0:
+        return []
+    ramp = list(hex_colors)
+    if n == 1:
+        return [mcolors.to_rgb(ramp[len(ramp) // 2])]
+    idx = np.linspace(0, len(ramp) - 1, n)
+    return [mcolors.to_rgb(ramp[int(round(i))]) for i in idx]
+
+
+def _setting_study_categorical_colors(
+    entries: list[tuple[int, str]],
+) -> dict[int, tuple[float, float, float]]:
+    """Assign a unique categorical color to each compilation strategy."""
+    if len(entries) > len(_SETTING_STUDY_CATEGORICAL_HEX):
+        raise ValueError(
+            f"Need {len(entries)} distinct setting-study colors but only "
+            f"{len(_SETTING_STUDY_CATEGORICAL_HEX)} are defined."
+        )
+    return {
+        setting_idx: mcolors.to_rgb(_SETTING_STUDY_CATEGORICAL_HEX[i])
+        for i, (setting_idx, _label) in enumerate(entries)
+    }
+
+
+def _marker_facecolor(
+    edge_rgb: tuple[float, float, float],
+    *,
+    blend: float = _LINE_MARKER_FACE_BLEND,
+) -> tuple[float, float, float]:
+    return _blend_rgb_toward_white(edge_rgb, blend)
+
+
+def _plot_styled_errorbar(
+    ax,
+    x,
+    y,
+    yerr,
+    color,
+    *,
+    linestyle: str = "-",
+    label: str | None = None,
+    zorder: int = 2,
+):
+    """Line + marker with light fill, dark edge, vertical std bars (no caps)."""
+    edge = mcolors.to_rgb(color)
+    face = _marker_facecolor(edge)
+    return ax.errorbar(
+        x,
+        y,
+        yerr=yerr,
+        color=color,
+        linestyle=linestyle,
+        linewidth=2.0,
+        marker="o",
+        markersize=_LINE_MARKERSIZE,
+        markerfacecolor=face,
+        markeredgecolor=color,
+        markeredgewidth=_LINE_MARKER_EDGEWIDTH,
+        capsize=0,
+        elinewidth=1.6,
+        ecolor=color,
+        label=label,
+        zorder=zorder,
+    )
+
+
+def _aod_column_legend_handles(
+    aod_color_map: dict[int, tuple[float, float, float]],
+) -> list[Line2D]:
+    """Legend rows: colored marker + AOD number (reference figure style)."""
+    handles: list[Line2D] = []
+    for aod in sorted(aod_color_map):
+        edge = mcolors.to_rgb(aod_color_map[int(aod)])
+        face = _marker_facecolor(edge)
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=edge,
+                marker="o",
+                markersize=_LINE_MARKERSIZE - 1,
+                markerfacecolor=face,
+                markeredgecolor=edge,
+                markeredgewidth=_LINE_MARKER_EDGEWIDTH,
+                linewidth=0,
+                label=str(int(aod)),
+            )
+        )
+    return handles
+
+
 def _build_aod_color_map(plot_aods: list[int] | None = None) -> dict[int, tuple]:
     """Grayscale ramp: AOD=1 is dark, AOD=5 is light."""
     light_rgb = np.array(_AOD_LIGHT_RGB, dtype=float)
@@ -226,9 +363,12 @@ def _build_aod_color_map_from_base(
     base_rgb: tuple[float, float, float],
     plot_aods: list[int] | None = None,
 ) -> dict[int, tuple]:
-    """AOD = 1 matches *base_rgb*; higher AOD values are progressively darker."""
-    base = np.clip(np.asarray(base_rgb, dtype=float), 0.0, 1.0)
-    dark_rgb = base * 0.38
+    """Light→dark lightness ramp anchored on the upper-panel setting color.
+
+    AOD = min uses a lighter tint; AOD = max matches *base_rgb* exactly.
+    """
+    base = np.clip(np.asarray(mcolors.to_rgb(base_rgb), dtype=float), 0.0, 1.0)
+    light_rgb = np.array(_blend_rgb_toward_white(tuple(base), 0.58), dtype=float)
     aods = sorted(
         {
             int(a)
@@ -237,14 +377,14 @@ def _build_aod_color_map_from_base(
             )
         }
     )
+    if not aods:
+        return {}
     out: dict[int, tuple] = {}
-    denom = max(_AOD_COLORBAR_MAX - _AOD_COLORBAR_MIN, 1)
+    aod_min, aod_max = int(aods[0]), int(aods[-1])
+    denom = max(aod_max - aod_min, 1)
     for aod in aods:
-        if int(aod) == _AOD_COLORBAR_MIN:
-            out[int(aod)] = tuple(base)
-            continue
-        t = (int(aod) - _AOD_COLORBAR_MIN) / denom
-        rgb = (1.0 - t) * base + t * dark_rgb
+        t = (int(aod) - aod_min) / denom
+        rgb = (1.0 - t) * light_rgb + t * base
         out[int(aod)] = tuple(np.clip(rgb, 0.0, 1.0))
     return out
 
@@ -430,6 +570,31 @@ def _apply_panel_y_ticks(ax, *, nbins: int = STAR_AOD_COMPARISON_Y_NBINS) -> Non
     ax.yaxis.set_major_locator(MaxNLocator(nbins=int(nbins), prune="lower"))
 
 
+def _apply_broken_top_y_ticks(
+    ax,
+    y_lo: float,
+    y_hi: float,
+    *,
+    nbins: int = STAR_BROKEN_TOP_Y_NBINS,
+) -> None:
+    """Sparse y ticks on the upper segment of a broken axis."""
+    ax.set_ylim(float(y_lo), float(y_hi))
+    ax.yaxis.set_major_locator(
+        MaxNLocator(nbins=int(nbins), prune="both", min_n_ticks=2)
+    )
+
+
+def _apply_broken_bot_y_ticks(
+    ax,
+    y_hi: float,
+    *,
+    nbins: int = STAR_AOD_COMPARISON_Y_NBINS,
+) -> None:
+    """Bottom segment: hide the tick nearest the break to reduce clutter."""
+    ax.set_ylim(0.0, float(y_hi))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=int(nbins), prune="upper"))
+
+
 def _coerce_result_cols_numeric(df: pd.DataFrame) -> pd.DataFrame:
     numeric_cols = RESULT_COLS + [
         "stage1_time",
@@ -562,15 +727,20 @@ def _mask_t_cultivation_compile(
 
 
 def _filter_t_cultivation_main_compile_setting(df: pd.DataFrame) -> pd.DataFrame:
-    cols = ("placement", "trivial_return", "decompose_move", "redistribute_stage1_success")
+    cols = (
+        "placement",
+        "trivial_return",
+        "decompose_move",
+        "redistribute_stage1_success",
+    )
     if df.empty or not all(c in df.columns for c in cols):
         return df
     placement, tr, dm, rs = T_CULTIVATION_MAIN_COMPILE_SETTING
     work = df.copy()
     work["placement"] = work["placement"].astype(str).map(_normalize_placement_name)
-    mask = (work["placement"] == _normalize_placement_name(placement)) & _mask_t_cultivation_compile(
-        work, tr, dm, rs
-    )
+    mask = (
+        work["placement"] == _normalize_placement_name(placement)
+    ) & _mask_t_cultivation_compile(work, tr, dm, rs)
     return work.loc[mask].copy()
 
 
@@ -606,7 +776,9 @@ def _save_setting_aod_architecture_figure(
     draw_aod,
     setting_legend_handles: list,
     aod_legend_handles: list | None = None,
-    aod_color_map: dict[int, tuple],
+    aod_color_map: dict[int, tuple] | None = None,
+    aod_line_legend_handles: list | None = None,
+    show_aod_colorbar: bool = True,
     figure_title: str,
     out_path: str,
     xlabel: str = "Number of Qubits",
@@ -632,33 +804,41 @@ def _save_setting_aod_architecture_figure(
     else:
         ax_setting_top = ax_setting_bot = axes[0, 0]
 
+    aod_axes = getattr(axes[1, 0], "_broken_aod_axes", None)
+    if aod_axes:
+        ax_aod_top, ax_aod_bot = aod_axes
+    else:
+        ax_aod_top = ax_aod_bot = axes[1, 0]
+
     panel_title_fs = _FIG_FONT_SIZE - 1
     legend_fs = _FIG_FONT_SIZE - 4
     ax_setting_top.set_title(column_titles[0], fontsize=panel_title_fs, pad=8)
-    axes[1, 0].set_title(column_titles[1], fontsize=panel_title_fs, pad=8)
+    ax_aod_bot.set_title(column_titles[1], fontsize=panel_title_fs, pad=8)
     y_label = "Execution time (×10³)" if y_axis_thousands else "Execution time"
     ax_setting_bot.set_ylabel(y_label, fontsize=_FIG_FONT_SIZE, labelpad=2)
-    axes[1, 0].set_ylabel(y_label, fontsize=_FIG_FONT_SIZE, labelpad=2)
+    ax_aod_bot.set_ylabel(y_label, fontsize=_FIG_FONT_SIZE, labelpad=2)
     if y_axis_thousands:
-        _apply_y_axis_thousands([ax_setting_bot, axes[1, 0]])
-        for _ax in (ax_setting_top, ax_setting_bot, axes[1, 0]):
+        _apply_y_axis_thousands([ax_setting_bot, ax_aod_bot])
+        for _ax in (ax_setting_top, ax_setting_bot, ax_aod_top, ax_aod_bot):
             _apply_panel_y_ticks(_ax, nbins=T_CULTIVATION_Y_NBINS)
-    for row in range(2):
-        if row == 0:
-            ax_setting_top.tick_params(axis="both", which="major", pad=1)
-            ax_setting_bot.tick_params(axis="both", which="major", pad=1)
-        else:
-            axes[row, 0].tick_params(axis="both", which="major", pad=1)
-    axes[1, 0].set_xlabel(xlabel, fontsize=_FIG_FONT_SIZE, labelpad=0)
+    ax_setting_top.tick_params(axis="both", which="major", pad=1)
+    ax_setting_bot.tick_params(axis="both", which="major", pad=1)
+    ax_aod_top.tick_params(axis="both", which="major", pad=1)
+    ax_aod_bot.tick_params(axis="both", which="major", pad=1)
+    ax_aod_bot.set_xlabel(xlabel, fontsize=_FIG_FONT_SIZE, labelpad=0)
 
     fig.suptitle(figure_title, fontsize=_FIG_FONT_SIZE + 1, y=0.98)
-    fig.tight_layout(rect=(0.08, 0.06, 0.90, 0.94), pad=0.10, h_pad=0.85)
+    has_aod_bottom_legend = bool(
+        getattr(axes[1, 0], "_aod_bottom_legend_rows", None)
+    )
+    bottom_margin = 0.16 if has_aod_bottom_legend else 0.08
+    fig.tight_layout(rect=(0.08, bottom_margin, 0.90, 0.94), pad=0.10, h_pad=0.35)
     fig.subplots_adjust(
-        top=0.92, bottom=0.08, left=0.12, right=0.88, hspace=panel_hspace
+        top=0.92, bottom=bottom_margin, left=0.12, right=0.88, hspace=panel_hspace
     )
     if bottom_axis_y_shift:
-        bot_pos = axes[1, 0].get_position()
-        axes[1, 0].set_position(
+        bot_pos = ax_aod_bot.get_position()
+        ax_aod_bot.set_position(
             [
                 bot_pos.x0,
                 bot_pos.y0 - float(bottom_axis_y_shift),
@@ -666,16 +846,26 @@ def _save_setting_aod_architecture_figure(
                 bot_pos.height,
             ]
         )
+        if aod_axes:
+            top_pos_aod = ax_aod_top.get_position()
+            ax_aod_top.set_position(
+                [
+                    top_pos_aod.x0,
+                    top_pos_aod.y0 - float(bottom_axis_y_shift) * 0.35,
+                    top_pos_aod.width,
+                    top_pos_aod.height,
+                ]
+            )
 
     combined_legend = [*setting_legend_handles, _expected_time_legend_handle()]
     top_pos = axes[0, 0].get_position()
-    bot_pos = axes[1, 0].get_position()
+    bot_pos = ax_aod_bot.get_position()
     blend = float(np.clip(legend_y_blend, 0.0, 1.0))
     legend_y = (1.0 - blend) * top_pos.y0 + blend * bot_pos.y1
     if figure_title == "T-cultivation":
         legend_y -= 0.0
     else:
-        legend_y += 0.15
+        legend_y += 0.06
     fig.legend(
         handles=combined_legend,
         loc="center",
@@ -707,25 +897,41 @@ def _save_setting_aod_architecture_figure(
             labelspacing=0.35,
         )
 
-    aod_cmap = _aod_listed_colormap(aod_color_map)
-    aod_norm = mcolors.BoundaryNorm(
-        boundaries=np.arange(
-            _AOD_COLORBAR_MIN - 0.5, _AOD_COLORBAR_MAX + 1.5, dtype=float
-        ),
-        ncolors=_AOD_COLORBAR_MAX,
-    )
-    sm = ScalarMappable(norm=aod_norm, cmap=aod_cmap)
-    sm.set_array([])
-    cbar = fig.colorbar(
-        sm,
-        ax=axes[1, 0],
-        orientation="vertical",
-        fraction=0.046,
-        pad=0.04,
-        ticks=list(range(_AOD_COLORBAR_MIN, _AOD_COLORBAR_MAX + 1)),
-    )
-    cbar.ax.tick_params(labelsize=legend_fs)
-    cbar.outline.set_linewidth(0.8)
+    _apply_aod_bottom_legend(fig, axes[1, 0], legend_fs=legend_fs)
+
+    if aod_line_legend_handles:
+        axes[1, 0].legend(
+            handles=aod_line_legend_handles,
+            title="AOD",
+            loc="upper right",
+            fontsize=legend_fs,
+            title_fontsize=legend_fs,
+            frameon=True,
+            handlelength=1.2,
+            handletextpad=0.35,
+            labelspacing=0.35,
+            borderpad=0.35,
+        )
+    elif show_aod_colorbar and aod_color_map is not None:
+        aod_cmap = _aod_listed_colormap(aod_color_map)
+        aod_norm = mcolors.BoundaryNorm(
+            boundaries=np.arange(
+                _AOD_COLORBAR_MIN - 0.5, _AOD_COLORBAR_MAX + 1.5, dtype=float
+            ),
+            ncolors=_AOD_COLORBAR_MAX,
+        )
+        sm = ScalarMappable(norm=aod_norm, cmap=aod_cmap)
+        sm.set_array([])
+        cbar = fig.colorbar(
+            sm,
+            ax=axes[1, 0],
+            orientation="vertical",
+            fraction=0.046,
+            pad=0.04,
+            ticks=list(range(_AOD_COLORBAR_MIN, _AOD_COLORBAR_MAX + 1)),
+        )
+        cbar.ax.tick_params(labelsize=legend_fs)
+        cbar.outline.set_linewidth(0.8)
 
     fig.savefig(out_path, bbox_inches="tight", pad_inches=0.06)
     plt.close(fig)
@@ -742,6 +948,7 @@ def _trim_extreme_total_time_samples(times: pd.Series) -> pd.Series:
         return pd.Series(
             {
                 "total_time_mean": np.nan,
+                "total_time_std": np.nan,
                 "total_time_min": np.nan,
                 "total_time_max": np.nan,
             }
@@ -750,6 +957,7 @@ def _trim_extreme_total_time_samples(times: pd.Series) -> pd.Series:
         return pd.Series(
             {
                 "total_time_mean": float(np.mean(vals)),
+                "total_time_std": float(np.std(vals, ddof=1)) if vals.size > 1 else 0.0,
                 "total_time_min": float(np.min(vals)),
                 "total_time_max": float(np.max(vals)),
             }
@@ -766,6 +974,9 @@ def _trim_extreme_total_time_samples(times: pd.Series) -> pd.Series:
     return pd.Series(
         {
             "total_time_mean": float(np.mean(trimmed)),
+            "total_time_std": (
+                float(np.std(trimmed, ddof=1)) if trimmed.size > 1 else 0.0
+            ),
             "total_time_min": float(np.min(trimmed)),
             "total_time_max": float(np.max(trimmed)),
         }
@@ -785,13 +996,14 @@ def _aggregate_total_time_by_qubits(
     else:
         grouped = (
             df.groupby("n_qubits")[["total_time"]]
-            .agg(["mean", "min", "max"])
+            .agg(["mean", "std", "min", "max"])
             .reset_index()
         )
         grouped.columns = [
             "_".join(c).strip("_") if isinstance(c, tuple) else c
             for c in grouped.columns
         ]
+        grouped["total_time_std"] = grouped["total_time_std"].fillna(0.0)
     return grouped
 
 
@@ -863,13 +1075,15 @@ def _aggregate_t_setting_study(
 
 
 def _agg_y_extent(grouped: pd.DataFrame) -> tuple[float, float]:
-    """Min/max execution time including error bars."""
+    """Mean ± std extent for y-axis limits."""
     sub = grouped.sort_values("n_qubits")
-    mean_vals = sub["total_time_mean"]
-    min_vals = sub["total_time_min"]
-    max_vals = sub["total_time_max"]
-    y_lo = float((mean_vals - (mean_vals - min_vals)).min())
-    y_hi = float((mean_vals + (max_vals - mean_vals)).max())
+    mean_vals = pd.to_numeric(sub["total_time_mean"], errors="coerce")
+    std_vals = pd.to_numeric(
+        sub.get("total_time_std", pd.Series(0.0, index=sub.index)),
+        errors="coerce",
+    ).fillna(0.0)
+    y_lo = float((mean_vals - std_vals).min())
+    y_hi = float((mean_vals + std_vals).max())
     return y_lo, y_hi
 
 
@@ -920,14 +1134,16 @@ def _draw_axis_break_between(
     ax_upper,
     ax_lower,
     *,
-    d: float = 0.018,
+    d: float = 0.009,
+    lw: float = 1.0,
 ) -> None:
-    """Diagonal break marks between a top (Vanilla) and bottom (zoomed) panel."""
+    """Diagonal break marks between a top (high-y) and bottom (zoomed) panel."""
     kwargs = {
-        "color": "black",
+        "color": "0.25",
         "clip_on": False,
-        "linewidth": 1.2,
+        "linewidth": lw,
         "solid_capstyle": "round",
+        "zorder": 12,
     }
     ax_upper.plot(
         (-d, +d),
@@ -955,15 +1171,63 @@ def _draw_axis_break_between(
     )
 
 
-def _create_star_setting_broken_axes(ax_parent):
-    """Split the setting-study cell into top (Vanilla) and bottom (other settings) axes."""
+def _grouped_aod_y_extent(grouped: pd.DataFrame | None) -> tuple[float, float]:
+    """Mean ± std y-range for one AOD sweep dataframe."""
+    if grouped is None or grouped.empty:
+        return 0.0, 0.0
+    mean_vals = pd.to_numeric(grouped["total_time_mean"], errors="coerce")
+    std_vals = pd.to_numeric(
+        grouped.get("total_time_std", pd.Series(0.0, index=grouped.index)),
+        errors="coerce",
+    ).fillna(0.0)
+    return float((mean_vals - std_vals).min()), float((mean_vals + std_vals).max())
+
+
+def _star_aod_broken_axis_needed(
+    sync_extent: tuple[float, float],
+    best_extent: tuple[float, float],
+    *,
+    gap_ratio: float = STAR_SETTING_STUDY_Y_CROP_GAP_RATIO,
+) -> bool:
+    sync_lo, sync_hi = sync_extent
+    best_lo, best_hi = best_extent
+    if sync_hi <= 0.0 or best_hi <= 0.0:
+        return False
+    if sync_hi <= best_hi * float(gap_ratio):
+        return False
+    return (sync_hi - sync_lo) > (best_hi - best_lo) * 0.15
+
+
+def _compute_star_aod_break_y(
+    sync_extent: tuple[float, float],
+    best_extent: tuple[float, float],
+    *,
+    pad_frac: float = STAR_SETTING_STUDY_Y_CROP_PAD_FRAC,
+) -> float:
+    sync_lo, sync_hi = sync_extent
+    _best_lo, best_hi = best_extent
+    break_y = max(best_hi * (1.0 + pad_frac), sync_lo * (1.0 + 0.5 * pad_frac))
+    break_y = min(break_y, sync_hi * (1.0 - 0.04))
+    if break_y <= sync_lo:
+        break_y = (sync_lo + sync_hi) / 2.0
+    return float(break_y)
+
+
+def _create_broken_y_axes(
+    ax_parent,
+    *,
+    height_ratios: tuple[int, int] = (1, 4),
+    hspace: float = 0.06,
+    attr_name: str = "_broken_setting_axes",
+):
+    """Split a panel into top (high-y) and bottom (zoomed) sub-axes."""
     fig = ax_parent.figure
     ax_parent.set_visible(False)
     gs = ax_parent.get_subplotspec().subgridspec(
         2,
         1,
-        height_ratios=[1, 4],
-        hspace=0.06,
+        height_ratios=list(height_ratios),
+        hspace=float(hspace),
     )
     ax_top = fig.add_subplot(gs[0])
     ax_bot = fig.add_subplot(gs[1], sharex=ax_top)
@@ -974,19 +1238,23 @@ def _create_star_setting_broken_axes(ax_parent):
     ax_bot.set_axisbelow(True)
     ax_top.grid(True, alpha=0.3)
     ax_bot.grid(True, alpha=0.3)
-    ax_parent._broken_setting_axis = True  # type: ignore[attr-defined]
-    ax_parent._broken_setting_axes = (ax_top, ax_bot)  # type: ignore[attr-defined]
+    setattr(ax_parent, attr_name, (ax_top, ax_bot))
     return ax_top, ax_bot
 
 
-def _blend_rgb_toward_white(
-    rgb: tuple[float, float, float], blend: float
-) -> tuple[float, float, float]:
-    """Lighten *rgb* by blending toward white (``blend`` in [0, 1])."""
-    t = float(np.clip(blend, 0.0, 1.0))
-    base = np.array(mcolors.to_rgb(rgb), dtype=float)
-    white = np.ones(3, dtype=float)
-    return tuple(np.clip((1.0 - t) * base + t * white, 0.0, 1.0))
+def _create_star_aod_broken_axes(ax_parent):
+    """Broken AOD panel with a wide gap and a compact upper segment."""
+    return _create_broken_y_axes(
+        ax_parent,
+        height_ratios=STAR_BROKEN_AXIS_HEIGHT_RATIOS,
+        hspace=STAR_BROKEN_INNER_HSPACE,
+        attr_name="_broken_aod_axes",
+    )
+
+
+def _create_star_setting_broken_axes(ax_parent):
+    """Split the setting-study cell into top (Vanilla) and bottom (other settings) axes."""
+    return _create_broken_y_axes(ax_parent, attr_name="_broken_setting_axes")
 
 
 def _mean_total_time_from_grouped(grouped: pd.DataFrame | None) -> float | None:
@@ -1163,11 +1431,10 @@ def _draw_setting_study_grouped_bars(
             if int(nq) in by_q.index:
                 row = by_q.loc[int(nq)]
                 mean = float(row["total_time_mean"])
-                lo = float(row["total_time_min"])
-                hi = float(row["total_time_max"])
+                std = float(row.get("total_time_std", 0.0) or 0.0)
                 heights.append(mean)
-                yerr_lo.append(max(0.0, mean - lo))
-                yerr_hi.append(max(0.0, hi - mean))
+                yerr_lo.append(max(0.0, std))
+                yerr_hi.append(max(0.0, std))
             else:
                 heights.append(0.0)
                 yerr_lo.append(0.0)
@@ -1182,7 +1449,7 @@ def _draw_setting_study_grouped_bars(
             edgecolor="black",
             linewidth=0.5,
             yerr=[yerr_lo, yerr_hi],
-            capsize=2.5,
+            capsize=0,
             error_kw={"elinewidth": 1.0, "ecolor": "black"},
         )
 
@@ -1248,11 +1515,10 @@ def _draw_setting_study_dual_aod_bars(
             if int(nq) in by_q.index:
                 row = by_q.loc[int(nq)]
                 mean = float(row["total_time_mean"])
-                lo = float(row["total_time_min"])
-                hi = float(row["total_time_max"])
+                std = float(row.get("total_time_std", 0.0) or 0.0)
                 heights.append(mean)
-                yerr_lo.append(max(0.0, mean - lo))
-                yerr_hi.append(max(0.0, hi - mean))
+                yerr_lo.append(max(0.0, std))
+                yerr_hi.append(max(0.0, std))
             else:
                 heights.append(0.0)
                 yerr_lo.append(0.0)
@@ -1277,7 +1543,7 @@ def _draw_setting_study_dual_aod_bars(
             edgecolor="black",
             linewidth=0.5,
             yerr=[err_lo, err_hi],
-            capsize=2.5,
+            capsize=0,
             error_kw={"elinewidth": 1.0, "ecolor": "black"},
             zorder=1,
         )
@@ -1580,10 +1846,7 @@ def _t_runtime_profile_frame(
     work = work[work["n_aods"] == int(aod)].copy()
     if work.empty:
         return None
-    ctx = (
-        f"code_distance={code_distance}, AOD={aod}, "
-        f"setting={setting}"
-    )
+    ctx = f"code_distance={code_distance}, AOD={aod}, " f"setting={setting}"
     return _aggregate_t_runtime_profile_by_qubits(work, context=ctx)
 
 
@@ -1702,7 +1965,9 @@ def _plot_star_t_runtime_profile_figure(
     triple = _primary_t_triple_for_star_t_grid(cd)
     t_profiles: dict[int, pd.DataFrame | None] = {int(aod): None for aod in aods}
     t_profile_setting = _runtime_profile_t_setting()
-    if t_setting_idx is not None and 0 <= int(t_setting_idx) < len(_T_SETTING_ABLATION_GRID):
+    if t_setting_idx is not None and 0 <= int(t_setting_idx) < len(
+        _T_SETTING_ABLATION_GRID
+    ):
         t_profile_setting = _T_SETTING_ABLATION_GRID[int(t_setting_idx)]
     if triple is not None and round_name in t_layers_ablation:
         for aod in aods:
@@ -1803,47 +2068,203 @@ def _plot_star_t_runtime_profile_figure(
         print(f"Saved: {out_path}")
 
 
-def _star_grouped_aod_col_based_at_distance(
+def _star_grouped_aod_at_distance(
     dfs_dict_aod: dict[str, pd.DataFrame],
     setting: tuple,
     code_distance: int,
 ) -> pd.DataFrame | None:
-    agg_data: dict[str, pd.DataFrame] = {}
-    for round_name, df in dfs_dict_aod.items():
-        df_col = df.loc[_setting_filter(df, setting)].copy()
-        if df_col.empty:
-            continue
-        df_col["n_aods"] = df_col["n_aods"].astype(int)
-        if "code_distance" in df_col.columns:
-            df_col["code_distance"] = pd.to_numeric(
-                df_col["code_distance"], errors="coerce"
-            )
-        group_cols = ["placement", "n_aods", "n_qubits"]
-        if "code_distance" in df_col.columns:
-            group_cols.insert(0, "code_distance")
-        grouped = (
-            df_col.groupby(group_cols)[["total_time"]]
-            .agg(["mean", "std", "min", "max"])
-            .reset_index()
-        )
-        grouped.columns = [
-            "_".join(c).strip("_") if isinstance(c, tuple) else c
-            for c in grouped.columns
-        ]
-        if not grouped.empty:
-            agg_data[round_name] = grouped
-    if "full_trotter" not in agg_data:
+    """Per (n_aods, n_qubits) mean/std for one compile setting at *code_distance*."""
+    round_name = "full_trotter"
+    if round_name not in dfs_dict_aod:
         return None
-    grouped = agg_data["full_trotter"]
-    gd = grouped.loc[
-        pd.to_numeric(grouped["code_distance"], errors="coerce").astype(int)
+    df = (
+        dfs_dict_aod[round_name]
+        .loc[_setting_filter(dfs_dict_aod[round_name], setting)]
+        .copy()
+    )
+    if df.empty:
+        return None
+    if "code_distance" in df.columns:
+        df = df[
+            pd.to_numeric(df["code_distance"], errors="coerce").astype(int)
+            == int(code_distance)
+        ].copy()
+    if df.empty:
+        return None
+    df["n_aods"] = pd.to_numeric(df["n_aods"], errors="coerce").astype(int)
+    grouped = (
+        df.groupby(["n_aods", "n_qubits"])[["total_time"]]
+        .agg(["mean", "std"])
+        .reset_index()
+    )
+    grouped.columns = [
+        "_".join(c).strip("_") if isinstance(c, tuple) else c for c in grouped.columns
+    ]
+    grouped["total_time_std"] = grouped["total_time_std"].fillna(0.0)
+    return grouped if not grouped.empty else None
+
+
+def _t_grouped_aod_at_distance(
+    layer_df: pd.DataFrame,
+    triple: tuple[int, float, int],
+    setting: tuple[str, bool, bool, bool],
+    code_distance: int,
+) -> pd.DataFrame | None:
+    """Per (n_aods, n_qubits) mean/std for one T compile setting at *code_distance*."""
+    work = layer_df.copy()
+    work["placement"] = work["placement"].astype(str).map(_normalize_placement_name)
+    placement, tr, dm, rs = setting
+    work = work[work["placement"] == _normalize_placement_name(placement)].copy()
+    cd_t, ft, fps = triple
+    mask = _mask_t_cultivation_triple(
+        work, cd_t, ft, fps
+    ) & _mask_t_cultivation_compile(work, tr, dm, rs)
+    work = work.loc[mask].copy()
+    if work.empty:
+        return None
+    work = work[
+        pd.to_numeric(work["code_distance"], errors="coerce").astype(int)
         == int(code_distance)
     ].copy()
-    if gd.empty:
+    if work.empty:
         return None
-    gd["placement"] = gd["placement"].astype(str).str.strip()
-    g_cb = gd[gd["placement"] == "col_based"].copy()
-    return g_cb if not g_cb.empty else None
+    work["n_aods"] = pd.to_numeric(work["n_aods"], errors="coerce").astype(int)
+    grouped = (
+        work.groupby(["n_aods", "n_qubits"])[["total_time"]]
+        .agg(["mean", "std"])
+        .reset_index()
+    )
+    grouped.columns = [
+        "_".join(c).strip("_") if isinstance(c, tuple) else c for c in grouped.columns
+    ]
+    grouped["total_time_std"] = grouped["total_time_std"].fillna(0.0)
+    return grouped if not grouped.empty else None
+
+
+def _draw_aod_sweep_on_panel(
+    ax,
+    grouped: pd.DataFrame | None,
+    plot_aods: list[int],
+    aod_colors: dict[int, tuple[float, float, float]],
+    *,
+    linestyle: str = "-",
+    y_clip: tuple[float | None, float | None] | None = None,
+) -> list[int]:
+    x_pts: list[int] = []
+    if grouped is None or grouped.empty:
+        return x_pts
+    clip_lo, clip_hi = (None, None) if y_clip is None else y_clip
+    for aod in plot_aods:
+        sub = grouped[grouped["n_aods"].astype(int) == int(aod)].sort_values("n_qubits")
+        if sub.empty:
+            continue
+        mean_vals = pd.to_numeric(sub["total_time_mean"], errors="coerce")
+        std_vals = pd.to_numeric(sub["total_time_std"], errors="coerce").fillna(0.0)
+        keep = pd.Series(True, index=sub.index)
+        if clip_lo is not None:
+            keep &= mean_vals >= float(clip_lo)
+        if clip_hi is not None:
+            keep &= mean_vals <= float(clip_hi)
+        if not bool(keep.any()):
+            continue
+        sub = sub.loc[keep]
+        mean_vals = mean_vals.loc[keep]
+        std_vals = std_vals.loc[keep]
+        color = aod_colors.get(int(aod), (0.2, 0.2, 0.2))
+        _plot_styled_errorbar(
+            ax,
+            sub["n_qubits"],
+            mean_vals,
+            std_vals,
+            color,
+            linestyle=linestyle,
+        )
+        x_pts.extend(sub["n_qubits"].dropna().astype(int).tolist())
+    return x_pts
+
+
+def _aod_row_style_handle(
+    base_rgb: tuple[float, float, float],
+    *,
+    linestyle: str | tuple = "-",
+) -> Line2D:
+    edge = mcolors.to_rgb(base_rgb)
+    return Line2D(
+        [0],
+        [0],
+        color=edge,
+        linestyle=linestyle,
+        linewidth=2.5,
+        marker="o",
+        markersize=_LINE_MARKERSIZE - 2,
+        markerfacecolor=_marker_facecolor(edge),
+        markeredgecolor=edge,
+        markeredgewidth=_LINE_MARKER_EDGEWIDTH,
+    )
+
+
+def _build_aod_bottom_legend_rows(
+    *,
+    sync_aod_colors: dict[int, tuple[float, float, float]],
+    best_aod_colors: dict[int, tuple[float, float, float]],
+    sync_base_rgb: tuple[float, float, float],
+    best_base_rgb: tuple[float, float, float],
+    sync_label: str = "Sync. execution",
+    best_label: str = "Best strategy",
+) -> list[tuple[list[Line2D], list[str]]]:
+    """One legend row per setting: strategy swatch + AOD 1/2/3/5 markers."""
+    rows: list[tuple[list[Line2D], list[str]]] = []
+    for setting_label, base_rgb, aod_colors, linestyle in (
+        (sync_label, sync_base_rgb, sync_aod_colors, "-"),
+        (best_label, best_base_rgb, best_aod_colors, (0, (5, 2))),
+    ):
+        handles = [_aod_row_style_handle(base_rgb, linestyle=linestyle)]
+        handles.extend(_aod_column_legend_handles(aod_colors))
+        labels = [setting_label] + [str(int(a)) for a in sorted(aod_colors)]
+        rows.append((handles, labels))
+    return rows
+
+
+def _attach_aod_bottom_legend_spec(
+    ax,
+    *,
+    sync_aod_colors: dict[int, tuple[float, float, float]],
+    best_aod_colors: dict[int, tuple[float, float, float]],
+    sync_base_rgb: tuple[float, float, float],
+    best_base_rgb: tuple[float, float, float],
+    sync_label: str = "Sync. execution",
+    best_label: str = "Best strategy",
+) -> None:
+    ax._aod_bottom_legend_rows = _build_aod_bottom_legend_rows(  # type: ignore[attr-defined]
+        sync_aod_colors=sync_aod_colors,
+        best_aod_colors=best_aod_colors,
+        sync_base_rgb=sync_base_rgb,
+        best_base_rgb=best_base_rgb,
+        sync_label=sync_label,
+        best_label=best_label,
+    )
+
+
+def _apply_aod_bottom_legend(fig, ax_aod_parent, *, legend_fs: float) -> None:
+    rows = getattr(ax_aod_parent, "_aod_bottom_legend_rows", None)
+    if not rows:
+        return
+    n_rows = len(rows)
+    for row_idx, (handles, labels) in enumerate(rows):
+        y = AOD_BOTTOM_LEGEND_BASE_Y + (n_rows - 1 - row_idx) * AOD_BOTTOM_LEGEND_ROW_STEP
+        fig.legend(
+            handles=handles,
+            labels=labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, y),
+            ncol=len(handles),
+            fontsize=legend_fs,
+            frameon=True,
+            handlelength=1.4,
+            handletextpad=0.35,
+            columnspacing=0.65,
+            borderpad=0.25,
+        )
 
 
 def _plot_star_t_setting_and_aod_combined_grid(
@@ -1860,13 +2281,14 @@ def _plot_star_t_setting_and_aod_combined_grid(
     bar_trim_extremes: bool = False,
     verbose: bool = True,
 ) -> None:
-    """STAR and T-cultivation figures: setting-study bars and AOD 1–5.
+    """STAR and T-cultivation figures: setting-study bars and AOD comparison.
 
     Writes one PDF per entry in *setting_charts* (default: ``_bars`` and
     ``_bars_aod1_aod5`` for overlapping AOD = 1 vs 5 bars).
     When *bar_trim_extremes* is True, single-AOD bar panels drop min/max samples.
-    The AOD comparison panel uses the col_based setting with the best mean runtime
-    (picked at runtime); AOD=1/5 are rendered in a consistent grayscale ramp.
+    Setting-study bars use distinct green/blue/red hues per strategy. The AOD panel
+    plots sync and best at AOD = 1, 2, 3, 5; each strategy uses a light→dark ramp of
+    its own setting color (AOD 1 lightest, AOD 5 darkest).
     """
     os.makedirs(output_dir, exist_ok=True)
     cd = int(
@@ -1877,17 +2299,10 @@ def _plot_star_t_setting_and_aod_combined_grid(
     round_name = "full_trotter"
     aod_setting = int(setting_study_aod)
 
-    setting_cmap = plt.get_cmap("tab10")
     star_study_entries = _star_setting_study_entries()
     t_study_entries = _t_setting_study_entries()
-    star_setting_colors = {
-        setting_idx: setting_cmap(i % 10)
-        for i, (setting_idx, _label) in enumerate(star_study_entries)
-    }
-    t_setting_colors = {
-        setting_idx: setting_cmap(i % 10)
-        for i, (setting_idx, _label) in enumerate(t_study_entries)
-    }
+    star_setting_colors = _setting_study_categorical_colors(star_study_entries)
+    t_setting_colors = _setting_study_categorical_colors(t_study_entries)
 
     star_aod_setting_idx = _pick_best_star_setting_index(
         dfs_dict_micro, cd, star_study_entries
@@ -1898,14 +2313,18 @@ def _plot_star_t_setting_and_aod_combined_grid(
         str(star_aod_setting_idx),
     )
 
-    g_cb = _star_grouped_aod_col_based_at_distance(dfs_dict_aod, star_aod_setting, cd)
-    if g_cb is None:
-        g_cb = pd.DataFrame()
+    g_star_sync = _star_grouped_aod_at_distance(
+        dfs_dict_aod, SETTINGS[STAR_AOD_SYNC_SETTING_INDEX], cd
+    )
+    g_star_best = _star_grouped_aod_at_distance(dfs_dict_aod, star_aod_setting, cd)
 
     triple = _primary_t_triple_for_star_t_grid(cd)
     cd_t, ft, fps = (0, 0.0, 0)
     t_setting_layer = pd.DataFrame()
     t_base = pd.DataFrame()
+    t_aod_layer = pd.DataFrame()
+    g_t_sync: pd.DataFrame | None = None
+    g_t_best: pd.DataFrame | None = None
     t_aod_setting_idx: int = int(RUNTIME_PROFILE_T_SETTING_IDX)
     t_aod_setting_label = ""
     compile_cols = {
@@ -1921,8 +2340,6 @@ def _plot_star_t_setting_and_aod_combined_grid(
         cd_t, ft, fps = triple
         t_aod_layer = t_layers[round_name].copy()
         t_setting_layer = t_layers_ablation[round_name].copy()
-        if "placement" in t_aod_layer.columns:
-            t_aod_layer = _filter_col_based(t_aod_layer)
         if compile_cols.issubset(t_aod_layer.columns) and compile_cols.issubset(
             t_setting_layer.columns
         ):
@@ -1939,22 +2356,41 @@ def _plot_star_t_setting_and_aod_combined_grid(
                 ),
                 str(t_aod_setting_idx),
             )
-            t_base = _build_t_aod_base_df(t_aod_layer, triple, cd, t_aod_compile)
+            t_base = _build_t_aod_base_df(
+                _filter_col_based(t_aod_layer.copy()), triple, cd, t_aod_compile
+            )
+            g_t_sync = _t_grouped_aod_at_distance(
+                t_aod_layer,
+                triple,
+                _T_SETTING_ABLATION_GRID[T_AOD_SYNC_SETTING_INDEX],
+                cd,
+            )
+            g_t_best = _t_grouped_aod_at_distance(
+                t_aod_layer,
+                triple,
+                _T_SETTING_ABLATION_GRID[t_aod_setting_idx],
+                cd,
+            )
 
-    aod_candidates = [1, 2, 3, 4, 5]
+    aod_candidates = list(AOD_COMPARISON_AODS)
     star_aods: set[int] = set()
-    if not g_cb.empty:
-        star_aods = set(
-            pd.to_numeric(g_cb["n_aods"], errors="coerce").dropna().astype(int).unique()
-        )
+    for frame in (g_star_sync, g_star_best):
+        if frame is not None and not frame.empty:
+            star_aods.update(
+                pd.to_numeric(frame["n_aods"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+            )
     t_aods: set[int] = set()
-    if not t_base.empty:
-        t_aods = set(
-            pd.to_numeric(t_base["n_aods"], errors="coerce")
-            .dropna()
-            .astype(int)
-            .unique()
-        )
+    for frame in (g_t_sync, g_t_best):
+        if frame is not None and not frame.empty:
+            t_aods.update(
+                pd.to_numeric(frame["n_aods"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+            )
     star_plot_aods = [a for a in aod_candidates if int(a) in star_aods]
     t_plot_aods = [a for a in aod_candidates if int(a) in t_aods]
     if not star_plot_aods and not t_plot_aods:
@@ -1966,46 +2402,73 @@ def _plot_star_t_setting_and_aod_combined_grid(
         print(
             f"  AOD panel (d={cd}): STAR setting idx {star_aod_setting_idx} "
             f"({star_aod_setting_label}); "
-            f"T-cultivation {t_aod_setting_label or t_aod_setting_key}."
+            f"T-cultivation {t_aod_setting_label or t_aod_setting_idx}."
         )
 
-    # AOD lines: keep the best-setting base color and sweep toward darker shades.
-    # For STAR this uses the selected best STAR setting (e.g., Dropout case).
-    star_best_rgb = mcolors.to_rgb(star_setting_colors[star_aod_setting_idx])
-    star_aod_colors = _build_aod_color_map_from_base(star_best_rgb, star_plot_aods)
-    t_best_rgb = _t_aod_panel_base_rgb(t_setting_colors)
-    t_aod_colors = _build_aod_color_map_from_base(t_best_rgb, t_plot_aods)
-    star_aod_default = star_aod_colors.get(_AOD_COLORBAR_MIN, star_best_rgb)
-    t_aod_default = t_aod_colors.get(_AOD_COLORBAR_MIN, t_best_rgb)
+    star_sync_base = mcolors.to_rgb(star_setting_colors[STAR_AOD_SYNC_SETTING_INDEX])
+    star_best_base = mcolors.to_rgb(star_setting_colors[star_aod_setting_idx])
+    star_sync_aod_colors = _build_aod_color_map_from_base(
+        star_sync_base, star_plot_aods
+    )
+    star_best_aod_colors = _build_aod_color_map_from_base(
+        star_best_base, star_plot_aods
+    )
 
-    def _finalize_panel(
+    t_sync_base = mcolors.to_rgb(t_setting_colors[T_AOD_SYNC_SETTING_INDEX])
+    t_best_base = mcolors.to_rgb(t_setting_colors[t_aod_setting_idx])
+    t_sync_aod_colors = _build_aod_color_map_from_base(t_sync_base, t_plot_aods)
+    t_best_aod_colors = _build_aod_color_map_from_base(t_best_base, t_plot_aods)
+    star_shared_y_break: float | None = None
+    star_shared_panel_hi: float | None = None
+
+    def _apply_theory_line(
         ax,
         x_points: list[int],
         *,
         theory: str,
         x_positions: dict[int, float] | None = None,
+        y_clip: tuple[float | None, float | None] | None = None,
     ) -> None:
         x_u = sorted(set(int(x) for x in x_points))
-        if x_u:
-            if theory == "star":
-                b = _get_theoretical_lower_bound(x_u)
-            else:
-                b = _get_theoretical_lower_bound_t_cultivation(
-                    x_u, code_distance=cd_t, fidelity_target=ft
-                )
-            if x_positions:
-                x_plot = [
-                    float(x_positions[int(x)]) for x in x_u if int(x) in x_positions
-                ]
-            else:
-                x_plot = x_u
-            ax.plot(
-                x_plot,
-                b["full_trotter"][: len(x_plot)],
-                color="black",
-                linestyle="--",
-                linewidth=1.5,
+        if not x_u:
+            return
+        if theory == "star":
+            b = _get_theoretical_lower_bound(x_u)
+        else:
+            b = _get_theoretical_lower_bound_t_cultivation(
+                x_u, code_distance=cd_t, fidelity_target=ft
             )
+        if x_positions:
+            x_plot = [float(x_positions[int(x)]) for x in x_u if int(x) in x_positions]
+            y_theory = [
+                b["full_trotter"][i]
+                for i, x in enumerate(x_u)
+                if int(x) in x_positions
+            ]
+        else:
+            x_plot = [float(x) for x in x_u]
+            y_theory = [float(y) for y in b["full_trotter"][: len(x_plot)]]
+        if y_clip is not None:
+            clip_lo, clip_hi = y_clip
+            filtered: list[tuple[float, float]] = []
+            for x_val, y_val in zip(x_plot, y_theory):
+                if clip_lo is not None and float(y_val) < float(clip_lo):
+                    continue
+                if clip_hi is not None and float(y_val) > float(clip_hi):
+                    continue
+                filtered.append((float(x_val), float(y_val)))
+            if len(filtered) < 2:
+                return
+            x_plot, y_theory = zip(*filtered)
+        ax.plot(
+            x_plot,
+            y_theory,
+            color="black",
+            linestyle="--",
+            linewidth=1.5,
+        )
+
+    def _apply_panel_style(ax) -> None:
         ax.set_axisbelow(True)
         ax.grid(True, alpha=0.3)
         ax.relim(visible_only=True)
@@ -2014,7 +2477,111 @@ def _plot_star_t_setting_and_aod_combined_grid(
         if y_hi > 0.0:
             ax.set_ylim(0.0, y_hi)
 
+    def _finalize_panel(
+        ax,
+        x_points: list[int],
+        *,
+        theory: str,
+        x_positions: dict[int, float] | None = None,
+    ) -> None:
+        _apply_theory_line(ax, x_points, theory=theory, x_positions=x_positions)
+        _apply_panel_style(ax)
+
+    def _draw_star_aod_curves(
+        ax,
+        *,
+        y_clip: tuple[float | None, float | None] | None = None,
+    ) -> list[int]:
+        x_pts: list[int] = []
+        x_pts.extend(
+            _draw_aod_sweep_on_panel(
+                ax,
+                g_star_sync,
+                star_plot_aods,
+                star_sync_aod_colors,
+                linestyle="-",
+                y_clip=y_clip,
+            )
+        )
+        x_pts.extend(
+            _draw_aod_sweep_on_panel(
+                ax,
+                g_star_best,
+                star_plot_aods,
+                star_best_aod_colors,
+                linestyle=(0, (5, 2)),
+                y_clip=y_clip,
+            )
+        )
+        return x_pts
+
+    def _draw_star_aod_panel(ax) -> None:
+        nonlocal star_shared_y_break, star_shared_panel_hi
+        sync_extent = _grouped_aod_y_extent(g_star_sync)
+        best_extent = _grouped_aod_y_extent(g_star_best)
+        sync_hi = sync_extent[1]
+        best_hi = best_extent[1]
+        panel_hi = max(sync_hi, best_hi)
+
+        use_break = star_shared_y_break is not None or _star_aod_broken_axis_needed(
+            sync_extent, best_extent
+        )
+        if use_break:
+            if star_shared_y_break is not None:
+                y_break = float(star_shared_y_break)
+                panel_hi = float(star_shared_panel_hi or panel_hi)
+            else:
+                y_break = _compute_star_aod_break_y(sync_extent, best_extent)
+            y_pad = 0.06 * max(panel_hi - y_break, 1e-9)
+            y_top_hi = panel_hi + y_pad
+            clip_margin = max(
+                y_break * STAR_BROKEN_CLIP_MARGIN_FRAC,
+                0.01 * max(panel_hi - y_break, 1.0),
+            )
+            bot_clip = (None, y_break - clip_margin)
+            top_clip = (y_break + clip_margin, None)
+
+            ax_top, ax_bot = _create_star_aod_broken_axes(ax)
+            x_pts = _draw_star_aod_curves(ax_bot, y_clip=bot_clip)
+            x_pts.extend(_draw_star_aod_curves(ax_top, y_clip=top_clip))
+
+            _apply_broken_bot_y_ticks(ax_bot, y_break)
+            _apply_broken_top_y_ticks(ax_top, y_break, y_top_hi)
+
+            _apply_theory_line(ax_bot, x_pts, theory="star", y_clip=bot_clip)
+            _apply_theory_line(ax_top, x_pts, theory="star", y_clip=top_clip)
+            _draw_axis_break_between(ax_top, ax_bot)
+
+            for _ax in (ax_top, ax_bot):
+                _ax.set_axisbelow(True)
+                _ax.grid(True, alpha=0.3)
+
+            _attach_aod_bottom_legend_spec(
+                ax,
+                sync_aod_colors=star_sync_aod_colors,
+                best_aod_colors=star_best_aod_colors,
+                sync_base_rgb=star_sync_base,
+                best_base_rgb=star_best_base,
+                sync_label="Sync. execution",
+                best_label=star_aod_setting_label or "Best strategy",
+            )
+            return
+
+        x_pts = _draw_star_aod_curves(ax)
+        _finalize_panel(ax, x_pts, theory="star")
+        _apply_panel_y_ticks(ax, nbins=STAR_AOD_COMPARISON_Y_NBINS)
+        _attach_aod_bottom_legend_spec(
+            ax,
+            sync_aod_colors=star_sync_aod_colors,
+            best_aod_colors=star_best_aod_colors,
+            sync_base_rgb=star_sync_base,
+            best_base_rgb=star_best_base,
+            sync_label="Sync. execution",
+            best_label=star_aod_setting_label or "Best strategy",
+        )
+
     def _draw_star_setting_panel(ax, *, setting_chart: str) -> None:
+        nonlocal star_shared_y_break, star_shared_panel_hi
         prepared: list[tuple[int, str, pd.DataFrame]] = []
         y_extents: dict[int, tuple[float, float]] = {}
         trim_bars = bool(bar_trim_extremes and setting_chart == "bar")
@@ -2077,22 +2644,15 @@ def _plot_star_t_setting_and_aod_combined_grid(
                 if dual_top_hi <= 0.0:
                     dual_top_hi = max(float(_hi) for (_lo, _hi) in y_extents.values())
 
-                # STAR: the dual-AOD bars can be dominated by the largest qubit counts.
-                # Add a y-axis “skip point” via a broken-axis split so smaller bars
-                # remain readable.
                 y_break = _compute_star_setting_break_y(
                     y_extents, vanilla_idx=vanilla_idx
                 )
-                # Ensure the top panel still shows bar tops for the next tallest
-                # strategies (e.g., blue/orange at large qubit count), not only
-                # the single tallest series.
                 y_hi_sorted = sorted(
                     [float(_hi) for (_lo, _hi) in y_extents.values()],
                     reverse=True,
                 )
                 if len(y_hi_sorted) >= 2:
                     y_break = min(y_break, y_hi_sorted[1] * 0.985)
-                # Keep split below the highest bar top from the dual-AOD data.
                 y_break = min(y_break, dual_top_hi * 0.985)
                 ax_top, ax_bot = _create_star_setting_broken_axes(ax)
                 x_pts = _draw_setting_study_dual_aod_bars(ax_top, dual_series)
@@ -2102,6 +2662,8 @@ def _plot_star_t_setting_and_aod_combined_grid(
                 y_pad = 0.08 * max(y_top_hi - y_break, 1e-9)
                 ax_bot.set_ylim(0.0, y_break)
                 ax_top.set_ylim(y_break, y_top_hi + y_pad)
+                star_shared_y_break = float(y_break)
+                star_shared_panel_hi = float(y_top_hi + y_pad)
 
                 x_u = sorted(set(int(x) for x in x_pts))
                 if x_u:
@@ -2125,6 +2687,39 @@ def _plot_star_t_setting_and_aod_combined_grid(
                 (star_setting_colors[setting_idx], label, grouped)
                 for setting_idx, label, grouped in prepared
             ]
+            if vanilla_idx in y_extents and _star_setting_broken_axis_needed(y_extents):
+                y_break = _compute_star_setting_break_y(
+                    y_extents, vanilla_idx=vanilla_idx
+                )
+                y_hi_sorted = sorted(
+                    [float(_hi) for (_lo, _hi) in y_extents.values()],
+                    reverse=True,
+                )
+                if len(y_hi_sorted) >= 2:
+                    y_break = min(y_break, y_hi_sorted[1] * 0.985)
+                y_top_hi = float(y_extents[vanilla_idx][1])
+                ax_top, ax_bot = _create_star_setting_broken_axes(ax)
+                x_pts = _draw_setting_study_grouped_bars(ax_top, bar_series)
+                _draw_setting_study_grouped_bars(ax_bot, bar_series)
+                y_pad = 0.08 * max(y_top_hi - y_break, 1e-9)
+                ax_bot.set_ylim(0.0, y_break)
+                ax_top.set_ylim(y_break, y_top_hi + y_pad)
+                star_shared_y_break = float(y_break)
+                star_shared_panel_hi = float(y_top_hi + y_pad)
+                x_u = sorted(set(int(x) for x in x_pts))
+                if x_u:
+                    b = _get_theoretical_lower_bound(x_u)
+                    x_pos = {int(nq): float(i) for i, nq in enumerate(x_u)}
+                    for _ax in (ax_top, ax_bot):
+                        _ax.plot(
+                            [x_pos[int(nq)] for nq in x_u],
+                            b["full_trotter"],
+                            color="black",
+                            linestyle="--",
+                            linewidth=1.5,
+                        )
+                _draw_axis_break_between(ax_top, ax_bot)
+                return
             x_pts = _draw_setting_study_grouped_bars(ax, bar_series)
             x_pos = {int(nq): float(i) for i, nq in enumerate(x_pts)}
         else:
@@ -2194,52 +2789,37 @@ def _plot_star_t_setting_and_aod_combined_grid(
             )
         _finalize_panel(ax, x_pts, theory="t", x_positions=x_pos)
 
-    def _draw_star_aod_panel(ax) -> None:
-        x_pts: list[int] = []
-        for aod in star_plot_aods:
-            sub = g_cb[g_cb["n_aods"] == int(aod)].sort_values("n_qubits")
-            if sub.empty:
-                continue
-            mean_vals = sub["total_time_mean"]
-            min_vals = sub["total_time_min"]
-            max_vals = sub["total_time_max"]
-            ax.errorbar(
-                sub["n_qubits"],
-                mean_vals,
-                yerr=[mean_vals - min_vals, max_vals - mean_vals],
-                marker="o",
-                capsize=3,
-                linewidth=1.8,
-                color=star_aod_colors.get(int(aod), star_aod_default),
-            )
-            x_pts.extend(sub["n_qubits"].dropna().astype(int).tolist())
-        _finalize_panel(ax, x_pts, theory="star")
-        _apply_panel_y_ticks(ax, nbins=STAR_AOD_COMPARISON_Y_NBINS)
-
     def _draw_t_aod_panel(ax) -> None:
         x_pts: list[int] = []
-        for aod in t_plot_aods:
-            t_a = t_base[t_base["n_aods"] == int(aod)].copy()
-            summ = _summarize_execution_by_qubits(
-                t_a, method="T cultivation"
-            ).sort_values("n_qubits")
-            if summ.empty:
-                continue
-            mean_vals = summ["execution_time_mean"]
-            min_vals = summ["execution_time_min"]
-            max_vals = summ["execution_time_max"]
-            ax.errorbar(
-                summ["n_qubits"],
-                mean_vals,
-                yerr=[mean_vals - min_vals, max_vals - mean_vals],
-                marker="o",
-                capsize=3,
-                linewidth=1.8,
-                color=t_aod_colors.get(int(aod), t_aod_default),
+        x_pts.extend(
+            _draw_aod_sweep_on_panel(
+                ax,
+                g_t_sync,
+                t_plot_aods,
+                t_sync_aod_colors,
+                linestyle="-",
             )
-            x_pts.extend(summ["n_qubits"].dropna().astype(int).tolist())
+        )
+        x_pts.extend(
+            _draw_aod_sweep_on_panel(
+                ax,
+                g_t_best,
+                t_plot_aods,
+                t_best_aod_colors,
+                linestyle=(0, (5, 2)),
+            )
+        )
         _finalize_panel(ax, x_pts, theory="t")
         _apply_panel_y_ticks(ax, nbins=T_CULTIVATION_Y_NBINS)
+        _attach_aod_bottom_legend_spec(
+            ax,
+            sync_aod_colors=t_sync_aod_colors,
+            best_aod_colors=t_best_aod_colors,
+            sync_base_rgb=t_sync_base,
+            best_base_rgb=t_best_base,
+            sync_label="Sync. execution",
+            best_label=t_aod_setting_label or "Best strategy",
+        )
 
     plot_star = "full_trotter" in dfs_dict_micro
     plot_t = triple is not None and not t_setting_layer.empty
@@ -2306,13 +2886,13 @@ def _plot_star_t_setting_and_aod_combined_grid(
                 draw_aod=_draw_star_aod_panel,
                 setting_legend_handles=star_setting_legend_handles,
                 aod_legend_handles=aod_legend_handles,
-                aod_color_map=star_aod_colors,
+                show_aod_colorbar=False,
                 figure_title="STAR architecture",
                 out_path=star_path,
                 xlabel="Number of Qubits/Factories",
                 legend_y_blend=0.72,
-                panel_hspace=0.8,
-                bottom_axis_y_shift=0.14,
+                panel_hspace=0.48,
+                bottom_axis_y_shift=0.04,
                 column_titles=star_column_titles,
             )
             if verbose:
@@ -2328,7 +2908,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
                 draw_aod=_draw_t_aod_panel,
                 setting_legend_handles=t_setting_legend_handles,
                 aod_legend_handles=aod_legend_handles,
-                aod_color_map=t_aod_colors,
+                show_aod_colorbar=False,
                 figure_title="T-cultivation",
                 out_path=t_path,
                 xlabel="Number of Qubits/Factories",
