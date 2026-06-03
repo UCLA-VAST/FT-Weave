@@ -10,7 +10,13 @@ import pandas as pd
 from matplotlib.cm import ScalarMappable
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.ticker import FixedFormatter, FixedLocator, FuncFormatter, MaxNLocator
+from matplotlib.ticker import (
+    FixedFormatter,
+    FixedLocator,
+    FuncFormatter,
+    LogLocator,
+    MaxNLocator,
+)
 from matplotlib.transforms import Bbox
 from src.t_cultivation.config import STAGE_1_SUCCESS_RATE
 
@@ -834,6 +840,46 @@ def _apply_panel_y_ticks(ax, *, nbins: int = STAR_AOD_COMPARISON_Y_NBINS) -> Non
     ax.yaxis.set_major_locator(MaxNLocator(nbins=int(nbins), prune="lower"))
 
 
+def _log_scale_tick_values(y_lo: float, y_hi: float) -> list[float]:
+    """Major tick positions for log axes using 1-2-5 spacing per decade."""
+    if y_lo <= 0.0 or y_hi <= y_lo:
+        return []
+    log_lo = int(math.floor(math.log10(y_lo)))
+    log_hi = int(math.ceil(math.log10(y_hi)))
+    ticks: list[float] = []
+    for exp in range(log_lo, log_hi + 1):
+        for mult in (1, 2, 5):
+            v = float(mult) * (10.0**exp)
+            if float(y_lo) <= v <= float(y_hi):
+                ticks.append(v)
+    if len(ticks) < 4:
+        for exp in range(log_lo, log_hi + 1):
+            for mult in range(1, 10):
+                v = float(mult) * (10.0**exp)
+                if float(y_lo) <= v <= float(y_hi) and v not in ticks:
+                    ticks.append(v)
+    return sorted(ticks)
+
+
+def _format_log_tick_value(v: float, _pos) -> str:
+    if abs(v - round(v)) < 1e-6:
+        return str(int(round(v)))
+    return f"{v:g}"
+
+
+def _apply_setting_panel_log_ticks(ax) -> None:
+    """Dense 1-2-5 log ticks on compilation-strategy panels."""
+    y_lo, y_hi = ax.get_ylim()
+    ticks = _log_scale_tick_values(float(y_lo), float(y_hi))
+    if len(ticks) < 2:
+        ax.yaxis.set_major_locator(
+            LogLocator(base=10, subs=(1.0, 2.0, 5.0), numticks=12)
+        )
+        return
+    ax.yaxis.set_major_locator(FixedLocator(ticks))
+    ax.yaxis.set_major_formatter(FuncFormatter(_format_log_tick_value))
+
+
 def _apply_broken_top_y_ticks(
     ax,
     y_lo: float,
@@ -1070,6 +1116,7 @@ def _style_setting_aod_column_pre_layout(
     architecture_label: str,
     xlabel: str,
     y_axis_thousands: bool,
+    setting_panel_log_scale: bool = False,
 ) -> None:
     panel_title_fs = _FIG_FONT_SIZE - 1
     ax_setting_top = resolved["setting_top"]
@@ -1091,9 +1138,15 @@ def _style_setting_aod_column_pre_layout(
     elif aod_axes and aod_title_ax is not ax_aod_top:
         ax_aod_top.set_title("")
 
-    y_label = "Execution time (×10³)" if y_axis_thousands else "Execution time"
+    if setting_panel_log_scale:
+        setting_y_label = "Execution time (log)"
+    elif y_axis_thousands:
+        setting_y_label = "Execution time (×10³)"
+    else:
+        setting_y_label = "Execution time"
+    aod_y_label = "Execution time (×10³)" if y_axis_thousands else "Execution time"
     ax_setting_bot.set_ylabel(
-        y_label, fontsize=_FIG_FONT_SIZE, labelpad=2, color=_FIG_AXIS_DARK
+        setting_y_label, fontsize=_FIG_FONT_SIZE, labelpad=2, color=_FIG_AXIS_DARK
     )
     twin_style = getattr(resolved["aod_parent"], "_star_aod_twin_style", None)
     twin_ylabel = getattr(resolved["aod_parent"], "_star_aod_twin_ylabel", None)
@@ -1110,16 +1163,24 @@ def _style_setting_aod_column_pre_layout(
         aod_twin_right.tick_params(axis="y", colors=best_rgb)
     elif aod_twin_right is not None:
         ax_aod_bot.set_ylabel(
-            "Execution time", fontsize=_FIG_FONT_SIZE, labelpad=2, color=_FIG_AXIS_DARK
+            aod_y_label, fontsize=_FIG_FONT_SIZE, labelpad=2, color=_FIG_AXIS_DARK
         )
         aod_twin_right.set_ylabel("")
     else:
         ax_aod_bot.set_ylabel(
-            y_label, fontsize=_FIG_FONT_SIZE, labelpad=2, color=_FIG_AXIS_DARK
+            aod_y_label, fontsize=_FIG_FONT_SIZE, labelpad=2, color=_FIG_AXIS_DARK
         )
     if y_axis_thousands:
-        _apply_y_axis_thousands([ax_setting_bot, ax_aod_bot])
-        for _ax in (ax_setting_top, ax_setting_bot, ax_aod_top, ax_aod_bot):
+        _apply_y_axis_thousands([ax_aod_bot])
+        if not setting_panel_log_scale:
+            _apply_y_axis_thousands([ax_setting_bot])
+    for _ax in (ax_aod_top, ax_aod_bot):
+        _apply_panel_y_ticks(_ax, nbins=T_CULTIVATION_Y_NBINS)
+    if setting_panel_log_scale:
+        for _ax in (ax_setting_top, ax_setting_bot):
+            _apply_setting_panel_log_ticks(_ax)
+    else:
+        for _ax in (ax_setting_top, ax_setting_bot):
             _apply_panel_y_ticks(_ax, nbins=T_CULTIVATION_Y_NBINS)
     for _ax in (ax_setting_top, ax_setting_bot, ax_aod_top, ax_aod_bot):
         _ax.tick_params(axis="both", which="major", pad=1)
@@ -1344,6 +1405,7 @@ def _save_star_t_merged_setting_aod_figure(
     legend_handlelength: float = 1.0,
     panel_hspace: float = STAR_SETTING_AOD_PANEL_HSPACE,
     figure_top: float = 0.90,
+    setting_panel_log_scale: bool = False,
 ) -> None:
     """Two columns (STAR left, T-cultivation right), each with setting + AOD rows."""
     fig, axes = plt.subplots(2, 2, figsize=STAR_T_MERGED_FIGSIZE, squeeze=False)
@@ -1362,6 +1424,7 @@ def _save_star_t_merged_setting_aod_figure(
         architecture_label="STAR architecture",
         xlabel=xlabel,
         y_axis_thousands=False,
+        setting_panel_log_scale=setting_panel_log_scale,
     )
     _style_setting_aod_column_pre_layout(
         t_resolved,
@@ -1369,6 +1432,7 @@ def _save_star_t_merged_setting_aod_figure(
         architecture_label="T-cultivation",
         xlabel=xlabel,
         y_axis_thousands=True,
+        setting_panel_log_scale=setting_panel_log_scale,
     )
 
     header_fs = _FIG_FONT_SIZE
@@ -1447,6 +1511,7 @@ def _save_setting_aod_architecture_figure(
     bottom_axis_y_shift: float = 0.0,
     setting_legend_ncol: int = 2,
     figure_top: float = 0.92,
+    setting_panel_log_scale: bool = False,
 ) -> None:
     """Two rows, one column: setting study (top) and AOD sweep (bottom)."""
     fig, axes = plt.subplots(2, 1, figsize=(9.2, 11.5), squeeze=False)
@@ -1461,6 +1526,7 @@ def _save_setting_aod_architecture_figure(
         architecture_label=figure_title,
         xlabel=xlabel,
         y_axis_thousands=y_axis_thousands,
+        setting_panel_log_scale=setting_panel_log_scale,
     )
 
     fig.suptitle(figure_title, fontsize=_FIG_FONT_SIZE + 1, y=0.98)
@@ -1550,8 +1616,7 @@ def _aggregate_total_time_by_qubits(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
     grouped.columns = [
-        "_".join(c).strip("_") if isinstance(c, tuple) else c
-        for c in grouped.columns
+        "_".join(c).strip("_") if isinstance(c, tuple) else c for c in grouped.columns
     ]
     grouped["total_time_std"] = grouped["total_time_std"].fillna(0.0)
     return grouped
@@ -1714,6 +1779,48 @@ def _star_setting_fixed_gap_break_needed(
         return False
     vanilla_hi = float(y_extents[vanilla_idx][1])
     return vanilla_hi > float(gap_hi) or _star_setting_broken_axis_needed(y_extents)
+
+
+def _dual_series_positive_ymin(
+    dual_series: list[tuple], *, margin_frac: float = 0.85
+) -> float:
+    """Smallest positive bar base (mean − std) for log-scale y limits."""
+    lows: list[float] = []
+    for _color, _label, g_back, g_front in dual_series:
+        for g in (g_back, g_front):
+            if g is None or g.empty:
+                continue
+            mean_vals = pd.to_numeric(g["total_time_mean"], errors="coerce")
+            std_vals = pd.to_numeric(
+                g.get("total_time_std", pd.Series(0.0, index=g.index)),
+                errors="coerce",
+            ).fillna(0.0)
+            crest = (mean_vals - std_vals).clip(lower=1e-6)
+            lows.extend(crest.dropna().tolist())
+    if not lows:
+        return 1.0
+    return max(float(min(lows)) * float(margin_frac), 1e-2)
+
+
+def _apply_setting_panel_style(
+    ax, *, log_scale: bool = False, log_ymin: float | None = None
+) -> None:
+    """Grid and y limits for compilation-strategy (setting-study) panels."""
+    ax.set_axisbelow(True)
+    ax.grid(True, alpha=0.3, which="both" if log_scale else "major")
+    ax.relim(visible_only=True)
+    ax.autoscale_view()
+    if log_scale:
+        ax.set_yscale("log")
+        y_lo = float(log_ymin) if log_ymin is not None and log_ymin > 0 else None
+        _cur_lo, y_hi = ax.get_ylim()
+        if y_lo is not None and y_hi > y_lo:
+            ax.set_ylim(y_lo, y_hi)
+        _apply_setting_panel_log_ticks(ax)
+    else:
+        _lo, y_hi = ax.get_ylim()
+        if y_hi > 0.0:
+            ax.set_ylim(0.0, y_hi)
 
 
 def _dual_series_bar_top_hi(dual_series: list[tuple]) -> float:
@@ -3106,11 +3213,13 @@ def _plot_star_t_setting_and_aod_combined_grid(
     code_distance: int | None = None,
     star_setting_index: int = STAR_T_GRID_STAR_SETTING_INDEX,
     setting_study_aod: int = STAR_T_SETTING_STUDY_AOD,
+    setting_panel_log_scale: bool = False,
     verbose: bool = True,
 ) -> None:
     """STAR and T-cultivation figures: setting-study bars and AOD comparison.
 
-    Writes ``*_d{cd}_bars.pdf`` with overlapping AOD = 1 vs 5 bars on the setting panel.
+    Writes ``*_d{cd}_bars.pdf`` (or ``*_bars_log.pdf`` when *setting_panel_log_scale*)
+    with overlapping AOD = 1 vs 5 bars on the setting panel.
     Setting-study bars use distinct green/blue/red hues per strategy. The AOD panel
     plots sync and best at AOD = 1, 2, 3, 5; each strategy uses a light→dark ramp of
     its own setting color (AOD 1 lightest, AOD 5 darkest).
@@ -3331,6 +3440,26 @@ def _plot_star_t_setting_and_aod_combined_grid(
         _apply_theory_line(ax, x_points, theory=theory, x_positions=x_positions)
         _apply_panel_style(ax)
 
+    def _finalize_setting_panel(
+        ax,
+        x_points: list[int],
+        *,
+        theory: str,
+        x_positions: dict[int, float] | None = None,
+        dual_series: list[tuple] | None = None,
+    ) -> None:
+        _apply_theory_line(ax, x_points, theory=theory, x_positions=x_positions)
+        log_ymin = (
+            _dual_series_positive_ymin(dual_series)
+            if setting_panel_log_scale and dual_series
+            else None
+        )
+        _apply_setting_panel_style(
+            ax,
+            log_scale=setting_panel_log_scale,
+            log_ymin=log_ymin,
+        )
+
     def _star_aod_x_positions() -> dict[int, float]:
         if not _star_setting_anchor:
             return {int(nq): float(i) for i, nq in enumerate(SETTING_STUDY_N_QUBITS)}
@@ -3432,7 +3561,12 @@ def _plot_star_t_setting_and_aod_combined_grid(
                 (star_setting_colors[setting_idx], label, g_back, g_front)
             )
         dual_top_hi = _dual_series_bar_top_hi(dual_series)
-        if vanilla_idx in y_extents and _star_setting_fixed_gap_break_needed(y_extents):
+        use_broken_axis = (
+            not setting_panel_log_scale
+            and vanilla_idx in y_extents
+            and _star_setting_fixed_gap_break_needed(y_extents)
+        )
+        if use_broken_axis:
             y_break, y_top_hi = _finalize_star_bar_fixed_gap_limits(
                 y_extents,
                 dual_top_hi=dual_top_hi if dual_top_hi > 0.0 else None,
@@ -3465,7 +3599,13 @@ def _plot_star_t_setting_and_aod_combined_grid(
         x_pts = _draw_setting_study_dual_aod_bars(ax, dual_series)
         x_pos = {int(nq): float(i) for i, nq in enumerate(x_pts)}
         _store_setting_n_qubit_ticks(ax, x_pts)
-        _finalize_panel(ax, x_pts, theory="star", x_positions=x_pos)
+        _finalize_setting_panel(
+            ax,
+            x_pts,
+            theory="star",
+            x_positions=x_pos,
+            dual_series=dual_series,
+        )
 
     def _draw_t_setting_panel(ax) -> None:
         aod_back, aod_front = SETTING_STUDY_DUAL_AODS[0], SETTING_STUDY_DUAL_AODS[1]
@@ -3490,13 +3630,17 @@ def _plot_star_t_setting_and_aod_combined_grid(
             )
             if g_back is None and g_front is None:
                 continue
-            dual_series.append(
-                (t_setting_colors[setting_idx], label, g_back, g_front)
-            )
+            dual_series.append((t_setting_colors[setting_idx], label, g_back, g_front))
         x_pts = _draw_setting_study_dual_aod_bars(ax, dual_series)
         x_pos = {int(nq): float(i) for i, nq in enumerate(x_pts)}
         _store_setting_n_qubit_ticks(ax, x_pts)
-        _finalize_panel(ax, x_pts, theory="t", x_positions=x_pos)
+        _finalize_setting_panel(
+            ax,
+            x_pts,
+            theory="t",
+            x_positions=x_pos,
+            dual_series=dual_series,
+        )
 
     def _t_aod_x_positions() -> dict[int, float]:
         if not _t_setting_anchor:
@@ -3536,7 +3680,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
     setting_column_title = "Compilation Strategies"
     star_column_titles = (setting_column_title, "AOD comparison")
     t_column_titles = (setting_column_title, "AOD comparison")
-    chart_suffix = "_bars"
+    chart_suffix = "_bars_log" if setting_panel_log_scale else "_bars"
     star_setting_legend_handles = _star_setting_study_legend_handles(
         star_setting_colors,
         star_study_entries,
@@ -3584,6 +3728,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
             xlabel="Number of Qubits/Factories",
             panel_hspace=STAR_SETTING_AOD_PANEL_HSPACE,
             figure_top=0.90,
+            setting_panel_log_scale=setting_panel_log_scale,
         )
         if verbose:
             print(f"Saved: {merged_path}")
@@ -3608,6 +3753,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
             setting_legend_ncol=3,
             figure_top=0.90,
             column_titles=star_column_titles,
+            setting_panel_log_scale=setting_panel_log_scale,
         )
         if verbose:
             print(f"Saved: {star_path}")
@@ -3629,6 +3775,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
             y_axis_thousands=True,
             legend_y_blend=T_SETTING_LEGEND_GAP_BLEND,
             column_titles=t_column_titles,
+            setting_panel_log_scale=setting_panel_log_scale,
         )
         if verbose:
             print(f"Saved: {t_path}")
@@ -3642,6 +3789,7 @@ def process_star_t_setting_and_aod_figure(
     include_t_cultivation_d13: bool = False,
     code_distance: int = STAR_T_GRID_COMPARISON_CODE_DISTANCE,
     setting_study_aod: int = STAR_T_SETTING_STUDY_AOD,
+    setting_panel_log_scale: bool = False,
     show_expected_time_line: bool | None = None,
     verbose: bool = True,
 ) -> None:
@@ -3679,6 +3827,7 @@ def process_star_t_setting_and_aod_figure(
             output_dir,
             code_distance=code_distance,
             setting_study_aod=setting_study_aod,
+            setting_panel_log_scale=setting_panel_log_scale,
             verbose=verbose,
         )
         _plot_star_t_runtime_profile_figure(
@@ -3705,6 +3854,11 @@ if __name__ == "__main__":
         default=True,
         help="Omit the expected-time dashed reference line and its legend entry.",
     )
+    parser.add_argument(
+        "--setting-log-y",
+        action="store_true",
+        help="Use log scale on compilation-strategy (setting-study) panel y-axes.",
+    )
     args = parser.parse_args()
 
     star_csv = "output/evaluation/fidelity/star_full_trotter_profiling_results.csv"
@@ -3717,6 +3871,7 @@ if __name__ == "__main__":
             t_csv,
             out_dir,
             show_expected_time_line=not args.no_expected_time_line,
+            setting_panel_log_scale=args.setting_log_y,
             verbose=True,
         )
     else:
