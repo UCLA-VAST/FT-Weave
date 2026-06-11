@@ -63,6 +63,7 @@ def _build_star_profiling_row(
         "return_movement_time": profiling_result["ops"]["return_move"]["circuit_time"],
         "TMR_round": profiling_result["ops"]["Rz"]["circuit_time"],
         "RUS_round": profiling_result["ops"]["CNOT"]["circuit_time"],
+        "n_cnot": int(sum(profiling_result["qubit_cnot_counts"])),
         "max_rus_per_qubit": max(profiling_result["qubit_cnot_counts"]),
         "avg_rus_per_qubit": sum(profiling_result["qubit_cnot_counts"])
         / len(profiling_result["qubit_cnot_counts"]),

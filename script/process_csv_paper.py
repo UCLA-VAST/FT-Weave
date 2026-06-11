@@ -184,6 +184,8 @@ _T_PROFILING_REQUIRED_COLS: tuple[str, ...] = (
 
 _RUNTIME_PROFILE_STACK_RTOL: float = 2.0
 _RUNTIME_PROFILE_STACK_ATOL: float = 2.0
+# Ideal per-leg movement time: half of measured CNOT circuit time per leg.
+_MOVEMENT_OPTIMAL_CNOT_LEG_FRACTION: float = 0.5
 
 SHOW_T_CULTIVATION_D13 = False
 SHOW_EXPECTED_TIME_LINE: bool = False
@@ -793,6 +795,7 @@ def aggregate_full_trotter(df: pd.DataFrame) -> pd.DataFrame:
         "stage2_time",
         "TMR_round",
         "RUS_round",
+        "n_cnot",
     ]
     value_cols_avg = ["max_rus_per_qubit", "avg_rus_per_qubit"]
     agg_spec = {col: "sum" for col in value_cols_sum if col in work.columns}
@@ -911,6 +914,7 @@ def _coerce_result_cols_numeric(df: pd.DataFrame) -> pd.DataFrame:
         "stage2_time",
         "TMR_round",
         "RUS_round",
+        "n_cnot",
         "max_rus_per_qubit",
         "avg_rus_per_qubit",
     ]
@@ -2508,6 +2512,46 @@ def _finalize_runtime_profile_grouped(
     return grouped
 
 
+def _ideal_movement_leg_time(cnot_time: float) -> float:
+    """Ideal forward or return movement time given measured CNOT circuit time."""
+    return float(cnot_time) * _MOVEMENT_OPTIMAL_CNOT_LEG_FRACTION
+
+
+def _movement_optimality_gap(
+    forward_actual: float,
+    return_actual: float,
+    cnot_time: float,
+) -> dict[str, float]:
+    """Ratio of measured movement legs to ideal 0.5 × CNOT circuit time."""
+    cnot_time = float(cnot_time)
+    forward_actual = float(forward_actual)
+    return_actual = float(return_actual)
+    ideal_leg = _ideal_movement_leg_time(cnot_time)
+    actual_total = forward_actual + return_actual
+
+    def _leg_gap(actual: float) -> float:
+        if ideal_leg <= 0.0:
+            return float("nan")
+        return actual / ideal_leg
+
+    movement_gap = (
+        float("nan") if cnot_time <= 0.0 else actual_total / cnot_time
+    )
+
+    return {
+        "cnot_time": cnot_time,
+        "forward_actual": forward_actual,
+        "forward_ideal": ideal_leg,
+        "forward_gap": _leg_gap(forward_actual),
+        "return_actual": return_actual,
+        "return_ideal": ideal_leg,
+        "return_gap": _leg_gap(return_actual),
+        "movement_actual": actual_total,
+        "movement_ideal": cnot_time,
+        "movement_gap": movement_gap,
+    }
+
+
 def _aggregate_star_runtime_profile_by_qubits(
     df: pd.DataFrame, *, context: str = ""
 ) -> pd.DataFrame | None:
@@ -2743,6 +2787,92 @@ def _runtime_profile_aod_legend_handles() -> list:
     return handles
 
 
+def _print_runtime_profile_values(
+    panel: str,
+    profiles_by_aod: dict[int, pd.DataFrame | None],
+    components: list[tuple[str, str, str]],
+    *,
+    code_distance: int,
+    aods: tuple[int, ...] = RUNTIME_PROFILE_AODS,
+    y_axis_thousands: bool = False,
+) -> None:
+    """Log mean execution-time components used in the runtime-profile stacked bars."""
+    available = {
+        int(aod): prof
+        for aod in aods
+        if (prof := profiles_by_aod.get(int(aod))) is not None and not prof.empty
+    }
+    if not available:
+        return
+
+    scale_note = " (y-axis ticks shown as ×10³)" if y_axis_thousands else ""
+    print(f"\n  [Runtime profile — {panel}, d={int(code_distance)}{scale_note}]")
+    for aod in aods:
+        prof = available.get(int(aod))
+        if prof is None:
+            continue
+        print(f"    AOD={int(aod)}:")
+        for _, row in prof.sort_values("n_qubits").iterrows():
+            nq = int(row["n_qubits"])
+            parts = [
+                f"{label}={float(row[col]):.6g}"
+                for col, label, _color in components
+                if col in row.index
+            ]
+            total = float(row["total_mean"])
+            parts.append(f"total={total:.6g}")
+            print(f"      n_qubits={nq}: " + ", ".join(parts))
+
+
+def _print_movement_optimality_gap(
+    panel: str,
+    profiles_by_aod: dict[int, pd.DataFrame | None],
+    *,
+    code_distance: int,
+    aods: tuple[int, ...] = RUNTIME_PROFILE_AODS,
+) -> None:
+    """Log movement ratio vs ideal 0.5 × measured CNOT circuit time per leg."""
+    available = {
+        int(aod): prof
+        for aod in aods
+        if (prof := profiles_by_aod.get(int(aod))) is not None and not prof.empty
+    }
+    if not available:
+        return
+
+    frac = _MOVEMENT_OPTIMAL_CNOT_LEG_FRACTION
+    print(
+        f"\n  [Movement optimality gap — {panel}, d={int(code_distance)}] "
+        f"(ideal leg = {frac:g} × CNOT time; "
+        f"gap = actual / ({frac:g} × CNOT time); 1.0 = optimal)"
+    )
+    for aod in aods:
+        prof = available.get(int(aod))
+        if prof is None or "rus_mean" not in prof.columns:
+            continue
+        print(f"    AOD={int(aod)}:")
+        for _, row in prof.sort_values("n_qubits").iterrows():
+            nq = int(row["n_qubits"])
+            metrics = _movement_optimality_gap(
+                float(row["forward_move_mean"]),
+                float(row["return_move_mean"]),
+                float(row["rus_mean"]),
+            )
+            cnot = metrics["cnot_time"]
+            print(
+                f"      n_qubits={nq}, CNOT={cnot:.6g}: "
+                f"forward={metrics['forward_actual']:.6g}, "
+                f"gap={metrics['forward_gap']:.4g} "
+                f"({metrics['forward_actual']:.6g}/({cnot:.6g}×{frac:g})); "
+                f"return={metrics['return_actual']:.6g}, "
+                f"gap={metrics['return_gap']:.4g} "
+                f"({metrics['return_actual']:.6g}/({cnot:.6g}×{frac:g})); "
+                f"total movement={metrics['movement_actual']:.6g}, "
+                f"gap={metrics['movement_gap']:.4g} "
+                f"({metrics['movement_actual']:.6g}/{cnot:.6g})"
+            )
+
+
 def _plot_star_t_runtime_profile_figure(
     dfs_dict_micro: dict[str, pd.DataFrame],
     t_layers_ablation: dict[str, pd.DataFrame],
@@ -2793,6 +2923,33 @@ def _plot_star_t_runtime_profile_figure(
         if verbose:
             print(f"Skipping runtime profile: no data at d={cd}, AOD in {aods}.")
         return
+
+    if verbose:
+        if _has_profile(star_profiles):
+            _print_runtime_profile_values(
+                "STAR",
+                star_profiles,
+                _RUNTIME_PROFILE_STAR_COMPONENTS,
+                code_distance=cd,
+                aods=aods,
+            )
+        if _has_profile(t_profiles):
+            _print_runtime_profile_values(
+                "T-cultivation",
+                t_profiles,
+                _RUNTIME_PROFILE_T_COMPONENTS,
+                code_distance=cd,
+                aods=aods,
+                y_axis_thousands=True,
+            )
+        if _has_profile(star_profiles):
+            _print_movement_optimality_gap(
+                "STAR", star_profiles, code_distance=cd, aods=aods
+            )
+        if _has_profile(t_profiles):
+            _print_movement_optimality_gap(
+                "T-cultivation", t_profiles, code_distance=cd, aods=aods
+            )
 
     fig, axes = plt.subplots(2, 1, figsize=(10.2, 11.5), squeeze=False)
     legend_fs = _FIG_FONT_SIZE - 4
