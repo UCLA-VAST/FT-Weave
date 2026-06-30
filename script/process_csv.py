@@ -1344,14 +1344,12 @@ def plot_microarch_comp_setting_combined(
         )
         return
 
-    placement_order = ("seperate_region_row", "col_based", "checkerboard")
-    found_placements = {
-        str(placement_name)
-        for grouped in agg_data.values()
-        for placement_name in grouped["placement"].dropna().unique()
-    }
-    placements = [p for p in placement_order if p in found_placements] + sorted(
-        found_placements - set(placement_order)
+    placements = sorted(
+        {
+            str(placement_name)
+            for grouped in agg_data.values()
+            for placement_name in grouped["placement"].dropna().unique()
+        }
     )
     if not placements:
         print(

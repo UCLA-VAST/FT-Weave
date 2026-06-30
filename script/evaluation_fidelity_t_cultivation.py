@@ -489,6 +489,7 @@ if __name__ == "__main__":
 
     # # Ablation study. This includes AOD=1 so compare_fidelity.py can use the
     # # same col-based, one-AOD architecture subset for STAR and T-cultivation.
+    """
     params = {
         **common_params,
         "placement_methods": ["col_based"],
@@ -524,6 +525,21 @@ if __name__ == "__main__":
         "settings": t_settings,
         "trials_per_config": 10,
         "compile_settings": [MAIN_COMPILE_SETTING],
+    }
+    run_evaluation_t_cultivation(
+        params=params,
+        physical_error_model=physical_error_model,
+        analyze_result=True,
+    )
+    """
+
+    params = {
+        **common_params,
+        "placement_methods": ["seperate_region_row"],
+        "n_aods": [1, 5],
+        "settings": t_settings,
+        "trials_per_config": 10,
+        "compile_settings": [COMPILE_SETTINGS[1]],
     }
     run_evaluation_t_cultivation(
         params=params,

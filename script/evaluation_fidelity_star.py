@@ -17,19 +17,19 @@ import csv
 # (placement, prepare_lookahead_angles, trivial_return, consider_skip_rus,
 #  decompose_move, parallel_execution)
 SETTINGS = [
-    ("seperate_region_row", False, True, 0, False, False),  # vanilla
-    ("seperate_region_row", False, False, 0, True, False),  # optimized return
+    ("seperate_region_col", False, True, 0, False, False),  # vanilla
+    ("seperate_region_col", False, False, 0, True, False),  # optimized return
     (
-        "seperate_region_row",
+        "seperate_region_col",
         False,
         False,
         2,
         True,
         False,
     ),  # optimized return + skip whole RUS
-    ("seperate_region_row", True, True, 0, False, False),  # lookahead angles
+    ("seperate_region_col", True, True, 0, False, False),  # lookahead angles
     (
-        "seperate_region_row",
+        "seperate_region_col",
         True,
         False,
         0,
@@ -37,7 +37,7 @@ SETTINGS = [
         False,
     ),  # lookahead angles + optimized return
     (
-        "seperate_region_row",
+        "seperate_region_col",
         True,
         False,
         2,
@@ -67,7 +67,7 @@ SETTINGS = [
     ),  # optimized return + skip whole RUS + asynchronous RUS
     (
         "col_based",
-        False,
+        True,
         False,
         2,
         False,
@@ -79,10 +79,10 @@ MAIN_SETTINGS = [
     ("col_based", False, False, 2, True, False),
 ]
 
-TEMP_SETTINGS = [
-    ("seperate_region_row", False, False, 2, False, True),
-    ("checkerboard", False, False, 2, False, True),
-]
+# TEMP_SETTINGS = [
+#     ("seperate_region_col", False, False, 2, False, True),
+#     ("checkerboard", False, False, 2, False, True),
+# ]
 
 
 # ! only consider 1 trotter for now
@@ -415,8 +415,8 @@ if __name__ == "__main__":
     star_params = {
         "qubit_layout": qubit_layout,
         "tfim": tfim,
-        "n_aods": [1, 2, 3, 4, 5],
-        "settings": TEMP_SETTINGS,
+        "n_aods": [2, 3, 4],
+        "settings": [("seperate_region_row", False, True, 0, False, False)],
         "trials_per_config": 5,
         "logical_se_interval": 10,
     }

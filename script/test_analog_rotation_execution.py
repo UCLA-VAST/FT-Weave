@@ -221,6 +221,7 @@ def test(
             logic_qubit_locations=logic_qubit_locations,
             magic_state_locations=magic_state_locations,
             base_path=pdf_path,
+            style_variant="trap_grid",
         )
 
         logger.info("Visualization complete!")
@@ -342,9 +343,9 @@ if __name__ == "__main__":
     # )
 
     test(
-        n_qubits=1,
-        n_factories=2,
-        qubit_layout=(1, 2),
+        n_qubits=25,
+        n_factories=25,
+        qubit_layout=(5, 5),
         same_angle=True,
         placement="col_based",
         visualize_rus=True,
@@ -354,7 +355,7 @@ if __name__ == "__main__":
         consider_skip_rus=False,
         tmr_assignment_method="matching",
         trivial_return=False,
-        parallel_execution=True,
-        show_logical_qubits=True,
+        parallel_execution=False,
+        show_logical_qubits=False,
         logical_se_interval=100,
     )

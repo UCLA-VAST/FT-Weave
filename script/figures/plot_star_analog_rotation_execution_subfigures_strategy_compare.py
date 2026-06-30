@@ -211,6 +211,7 @@ def main(
         save_path=output_pdf,
         row_time_shades=row_time_shades,
         show_factory_yticks=False,
+        legend_row_index=len(timeline_rows) // 2,
     )
     logging.info("Wrote STAR execution subfigures: %s", output_pdf)
 
