@@ -74,18 +74,21 @@ def build_clifford_layer_log(
     consume dedicated Rz execution logs.
     """
     gate = instruction["gate"]
-    if gate == "H":
+    if gate in ("H", "S", "Sdg", "X", "Y", "Z"):
         return [
             {
                 "start_time": 0.0,
                 "end_time": 1.0,
                 "factories": [],
-                "operation": "H",
+                "operation": gate if gate != "Sdg" else "S",
                 "aod_assignment": None,
                 "targets": list(instruction["targets"]),
                 "move_vecs": None,
             }
         ]
+
+    if gate == "I":
+        return []
 
     if gate != "CNOT":
         return []

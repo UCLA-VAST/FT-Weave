@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from numbers import Real
 from typing import Optional
 
@@ -7,6 +8,7 @@ import numpy as np
 from qiskit.synthesis import gridsynth_rz
 from scipy.optimize import linear_sum_assignment
 
+from src.circuit.rz_params import rz_target_angles
 from src.ds import TFactoryPool, move_duration
 from src.execution_log import write_execution_log
 
@@ -40,15 +42,12 @@ def t_gate_count_per_unique_rz_angle(
     for instr in circuit:
         if not is_rz_gate(instr.get("gate", "")):
             continue
-        theta_raw = instr.get("params", {}).get("theta")
-        if not isinstance(theta_raw, Real):
-            raise ValueError("Rz instruction requires numeric params['theta']")
-        theta = float(theta_raw)
-        key = round(theta, angle_digits)
-        if key in per_angle:
-            continue
-        templates = gridsynth_rz_templates(theta, epsilon=epsilon)
-        per_angle[key] = sum(1 for t in templates if t["gate"] in ("T", "Tdg"))
+        for theta in set(rz_target_angles(instr).values()):
+            key = round(theta, angle_digits)
+            if key in per_angle:
+                continue
+            templates = gridsynth_rz_templates(theta, epsilon=epsilon)
+            per_angle[key] = sum(1 for t in templates if t["gate"] in ("T", "Tdg"))
     return per_angle
 
 
@@ -113,7 +112,7 @@ def expand_multi_target_layers(
     """
     expanded_circuit: list[dict] = []
 
-    rz_templates_by_instruction: dict[int, list[dict]] = {}
+    rz_templates_by_instruction: dict[int, list[tuple[list[dict], list[int]]]] = {}
     for original_index, instr in enumerate(circuit):
         targets = instr.get("targets", [])
         gate_name = instr.get("gate", "")
@@ -124,11 +123,14 @@ def expand_multi_target_layers(
         if is_rz_gate(gate_name):
             if not all(isinstance(target, int) for target in targets):
                 raise ValueError("Rz targets must be a list of qubit indices")
-            theta = instr.get("params", {}).get("theta")
-            if not isinstance(theta, Real):
-                raise ValueError("Rz instruction requires numeric params['theta']")
-            rz_templates = gridsynth_rz_templates(float(theta), epsilon=epsilon)
-            rz_templates_by_instruction[original_index] = rz_templates
+            angles = rz_target_angles(instr)
+            groups: dict[float, list[int]] = defaultdict(list)
+            for qubit, theta in angles.items():
+                groups[float(theta)].append(int(qubit))
+            rz_templates_by_instruction[original_index] = [
+                (gridsynth_rz_templates(theta, epsilon=epsilon), sorted(qubits))
+                for theta, qubits in sorted(groups.items(), key=lambda item: item[0])
+            ]
 
     for original_index, instr in enumerate(circuit):
         targets = instr.get("targets", [])
@@ -138,45 +140,47 @@ def expand_multi_target_layers(
             if not all(isinstance(target, int) for target in targets):
                 raise ValueError("Rz targets must be a list of qubit indices")
 
-            rz_templates = rz_templates_by_instruction.get(original_index)
-            if rz_templates is None:
-                theta = instr.get("params", {}).get("theta")
-                if not isinstance(theta, Real):
-                    raise ValueError("Rz instruction requires numeric params['theta']")
-                rz_templates = gridsynth_rz_templates(float(theta), epsilon=epsilon)
+            expansion_groups = rz_templates_by_instruction.get(original_index)
+            if expansion_groups is None:
+                angles = rz_target_angles(instr)
+                groups: dict[float, list[int]] = defaultdict(list)
+                for qubit, theta in angles.items():
+                    groups[float(theta)].append(int(qubit))
+                expansion_groups = [
+                    (gridsynth_rz_templates(theta, epsilon=epsilon), sorted(qubits))
+                    for theta, qubits in sorted(groups.items(), key=lambda item: item[0])
+                ]
 
-            # Template-major order: for each gridsynth step, either one parallel
-            # layer on all qubits (H/S/…) or individual T/Tdg per qubit (injection).
-            for template in rz_templates:
-                g = template["gate"]
-                params = dict(template.get("params", {}))
-                if g in ("T", "Tdg"):
-                    for target in targets:
+            for rz_templates, group_targets in expansion_groups:
+                for template in rz_templates:
+                    g = template["gate"]
+                    params = dict(template.get("params", {}))
+                    if g in ("T", "Tdg"):
+                        for target in group_targets:
+                            expanded_circuit.append(
+                                {
+                                    "gate": g,
+                                    "targets": [target],
+                                    "params": params,
+                                }
+                            )
+                    elif g == "Rz":
+                        for target in group_targets:
+                            expanded_circuit.append(
+                                {
+                                    "gate": g,
+                                    "targets": [target],
+                                    "params": params,
+                                }
+                            )
+                    else:
                         expanded_circuit.append(
                             {
                                 "gate": g,
-                                "targets": [target],
+                                "targets": list(group_targets),
                                 "params": params,
                             }
                         )
-                elif g == "Rz":
-                    # Rare gridsynth fallback; keep per-qubit Rz for scheduling parity.
-                    for target in targets:
-                        expanded_circuit.append(
-                            {
-                                "gate": g,
-                                "targets": [target],
-                                "params": params,
-                            }
-                        )
-                else:
-                    expanded_circuit.append(
-                        {
-                            "gate": g,
-                            "targets": list(targets),
-                            "params": params,
-                        }
-                    )
             continue
 
         if gate_name in {"T", "Tdg"}:
