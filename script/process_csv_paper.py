@@ -77,6 +77,7 @@ SETTING_STUDY_DUAL_AOD_FRONT_BLEND: float = 0.52
 STAR_AOD_COMPARISON_Y_NBINS: int = 8
 # AOD line panel: sync vs best strategy, AOD = 1, 2, 3, 5.
 AOD_COMPARISON_AODS: tuple[int, ...] = (1, 2, 3, 5)
+AOD_COMPARISON_STEP_PAIRS: tuple[tuple[int, int], ...] = ((1, 2), (2, 3), (3, 5))
 T_AOD_SYNC_SETTING_INDEX: int = 0
 _LINE_MARKERSIZE: float = 13.0
 _LINE_MARKER_EDGEWIDTH: float = 2.0
@@ -1689,6 +1690,78 @@ def _aggregate_t_setting_study(
     return grouped if not grouped.empty else None
 
 
+def _build_star_setting_dual_series(
+    dfs_dict_micro: dict[str, pd.DataFrame],
+    entries: list[tuple[int, str]],
+    setting_colors: dict[int, tuple],
+    code_distance: int,
+    *,
+    compare_aods: tuple[int, ...] = SETTING_STUDY_DUAL_AODS,
+) -> list[tuple]:
+    """(color, label, grouped_aod0, grouped_aod1) for the setting-study bar panel."""
+    if len(compare_aods) < 2:
+        return []
+    aod_back, aod_front = int(compare_aods[0]), int(compare_aods[1])
+    dual_series: list[tuple] = []
+    for setting_idx, label in entries:
+        if setting_idx >= len(SETTINGS):
+            continue
+        g_back = _aggregate_star_setting_study(
+            dfs_dict_micro,
+            SETTINGS[setting_idx],
+            code_distance,
+            aod_back,
+        )
+        g_front = _aggregate_star_setting_study(
+            dfs_dict_micro,
+            SETTINGS[setting_idx],
+            code_distance,
+            aod_front,
+        )
+        if g_back is None and g_front is None:
+            continue
+        dual_series.append((setting_colors[setting_idx], label, g_back, g_front))
+    return dual_series
+
+
+def _build_t_setting_dual_series(
+    layer_df: pd.DataFrame,
+    triple: tuple[int, float, int],
+    entries: list[tuple[int, str]],
+    setting_colors: dict[int, tuple],
+    code_distance: int,
+    *,
+    compare_aods: tuple[int, ...] = SETTING_STUDY_DUAL_AODS,
+) -> list[tuple]:
+    """(color, label, grouped_aod0, grouped_aod1) for the T setting-study bar panel."""
+    if len(compare_aods) < 2:
+        return []
+    aod_back, aod_front = int(compare_aods[0]), int(compare_aods[1])
+    dual_series: list[tuple] = []
+    for setting_idx, label in entries:
+        if setting_idx >= len(_T_SETTING_ABLATION_GRID):
+            continue
+        placement, tr, dm, rs = _T_SETTING_ABLATION_GRID[setting_idx]
+        g_back = _aggregate_t_setting_study(
+            layer_df,
+            triple,
+            (placement, tr, dm, rs),
+            code_distance,
+            aod_back,
+        )
+        g_front = _aggregate_t_setting_study(
+            layer_df,
+            triple,
+            (placement, tr, dm, rs),
+            code_distance,
+            aod_front,
+        )
+        if g_back is None and g_front is None:
+            continue
+        dual_series.append((setting_colors[setting_idx], label, g_back, g_front))
+    return dual_series
+
+
 def _agg_y_extent(grouped: pd.DataFrame) -> tuple[float, float]:
     """Mean ± std extent for y-axis limits."""
     sub = grouped.sort_values("n_qubits")
@@ -2873,6 +2946,130 @@ def _print_movement_optimality_gap(
             )
 
 
+def _mean_pct_improvement_vs_previous(
+    prev_grouped: pd.DataFrame | None,
+    curr_grouped: pd.DataFrame | None,
+    *,
+    eps: float = 1e-15,
+) -> float | None:
+    """Mean % runtime reduction of *curr* vs *prev* on matched ``n_qubits``."""
+    if prev_grouped is None or curr_grouped is None:
+        return None
+    if prev_grouped.empty or curr_grouped.empty:
+        return None
+    prev = (
+        prev_grouped[["n_qubits", "total_time_mean"]]
+        .dropna()
+        .groupby("n_qubits", as_index=True)["total_time_mean"]
+        .mean()
+    )
+    curr = (
+        curr_grouped[["n_qubits", "total_time_mean"]]
+        .dropna()
+        .groupby("n_qubits", as_index=True)["total_time_mean"]
+        .mean()
+    )
+    merged = pd.DataFrame({"prev": prev, "curr": curr}).dropna()
+    if merged.empty:
+        return None
+    base = np.clip(merged["prev"].to_numpy(dtype=float), eps, None)
+    curr_vals = np.clip(merged["curr"].to_numpy(dtype=float), eps, None)
+    return float(np.mean((base - curr_vals) / base) * 100.0)
+
+
+def _print_setting_study_sequential_improvements(
+    panel: str,
+    dual_series: list[tuple],
+    *,
+    code_distance: int,
+    compare_aods: tuple[int, ...] = SETTING_STUDY_DUAL_AODS,
+) -> None:
+    """Log mean % speedup of each strategy vs the immediately previous one."""
+    if not dual_series or len(dual_series) < 2 or len(compare_aods) < 2:
+        return
+
+    print(
+        f"\n  [Setting study — {panel}, d={int(code_distance)}] "
+        "(improvement vs previous setting; positive = faster)"
+    )
+    for aod_idx, aod in enumerate(compare_aods[:2]):
+        print(f"    AOD={int(aod)}:")
+        for i in range(1, len(dual_series)):
+            _color, curr_label, grouped_back, grouped_front = dual_series[i]
+            _color2, prev_label, prev_back, prev_front = dual_series[i - 1]
+            grouped_by_aod = (prev_back, prev_front), (grouped_back, grouped_front)
+            g_prev = grouped_by_aod[0][aod_idx]
+            g_curr = grouped_by_aod[1][aod_idx]
+            pct = _mean_pct_improvement_vs_previous(g_prev, g_curr)
+            if pct is None:
+                print(
+                    f"      {prev_label} → {curr_label}: "
+                    "(no overlapping n_qubits)"
+                )
+            else:
+                print(f"      {prev_label} → {curr_label}: {pct:+.2f}%")
+
+
+def _mean_pct_aod_improvement(
+    grouped: pd.DataFrame | None,
+    prev_aod: int,
+    curr_aod: int,
+    *,
+    eps: float = 1e-15,
+) -> float | None:
+    """Mean % runtime reduction at *curr_aod* vs *prev_aod* on matched ``n_qubits``."""
+    if grouped is None or grouped.empty:
+        return None
+    if "n_aods" not in grouped.columns or "total_time_mean" not in grouped.columns:
+        return None
+    work = grouped.copy()
+    work["n_aods"] = pd.to_numeric(work["n_aods"], errors="coerce")
+    work["n_qubits"] = pd.to_numeric(work["n_qubits"], errors="coerce")
+    prev = (
+        work.loc[work["n_aods"] == int(prev_aod)]
+        .groupby("n_qubits", as_index=True)["total_time_mean"]
+        .mean()
+    )
+    curr = (
+        work.loc[work["n_aods"] == int(curr_aod)]
+        .groupby("n_qubits", as_index=True)["total_time_mean"]
+        .mean()
+    )
+    merged = pd.DataFrame({"prev": prev, "curr": curr}).dropna()
+    if merged.empty:
+        return None
+    base = np.clip(merged["prev"].to_numpy(dtype=float), eps, None)
+    curr_vals = np.clip(merged["curr"].to_numpy(dtype=float), eps, None)
+    return float(np.mean((base - curr_vals) / base) * 100.0)
+
+
+def _print_aod_comparison_improvements(
+    panel: str,
+    strategy_label: str,
+    grouped: pd.DataFrame | None,
+    *,
+    code_distance: int,
+    step_pairs: tuple[tuple[int, int], ...] = AOD_COMPARISON_STEP_PAIRS,
+) -> None:
+    """Log mean % speedup for each consecutive AOD step (2 vs 1, 3 vs 2, 5 vs 3)."""
+    if grouped is None or grouped.empty:
+        return
+
+    print(
+        f"\n  [AOD comparison — {panel}, d={int(code_distance)}, {strategy_label}] "
+        "(improvement vs previous AOD; positive = faster)"
+    )
+    for prev_aod, curr_aod in step_pairs:
+        pct = _mean_pct_aod_improvement(grouped, prev_aod, curr_aod)
+        if pct is None:
+            print(
+                f"    AOD {int(curr_aod)} vs {int(prev_aod)}: "
+                "(no overlapping n_qubits)"
+            )
+        else:
+            print(f"    AOD {int(curr_aod)} vs {int(prev_aod)}: {pct:+.2f}%")
+
+
 def _plot_star_t_runtime_profile_figure(
     dfs_dict_micro: dict[str, pd.DataFrame],
     t_layers_ablation: dict[str, pd.DataFrame],
@@ -3695,28 +3892,12 @@ def _plot_star_t_setting_and_aod_combined_grid(
             y_extents[int(setting_idx)] = _agg_y_extent(grouped)
 
         vanilla_idx = STAR_SETTING_STUDY_VANILLA_IDX
-        aod_back, aod_front = SETTING_STUDY_DUAL_AODS[0], SETTING_STUDY_DUAL_AODS[1]
-        dual_series: list[tuple] = []
-        for setting_idx, label in star_study_entries:
-            if setting_idx >= len(SETTINGS):
-                continue
-            g_back = _aggregate_star_setting_study(
-                dfs_dict_micro,
-                SETTINGS[setting_idx],
-                cd,
-                int(aod_back),
-            )
-            g_front = _aggregate_star_setting_study(
-                dfs_dict_micro,
-                SETTINGS[setting_idx],
-                cd,
-                int(aod_front),
-            )
-            if g_back is None and g_front is None:
-                continue
-            dual_series.append(
-                (star_setting_colors[setting_idx], label, g_back, g_front)
-            )
+        dual_series = _build_star_setting_dual_series(
+            dfs_dict_micro,
+            star_study_entries,
+            star_setting_colors,
+            cd,
+        )
         dual_top_hi = _dual_series_bar_top_hi(dual_series)
         use_broken_axis = (
             not setting_panel_log_scale
@@ -3765,29 +3946,13 @@ def _plot_star_t_setting_and_aod_combined_grid(
         )
 
     def _draw_t_setting_panel(ax) -> None:
-        aod_back, aod_front = SETTING_STUDY_DUAL_AODS[0], SETTING_STUDY_DUAL_AODS[1]
-        dual_series = []
-        for setting_idx, label in t_study_entries:
-            if setting_idx >= len(_T_SETTING_ABLATION_GRID):
-                continue
-            placement, tr, dm, rs = _T_SETTING_ABLATION_GRID[setting_idx]
-            g_back = _aggregate_t_setting_study(
-                t_setting_layer,
-                triple,
-                (placement, tr, dm, rs),
-                cd,
-                int(aod_back),
-            )
-            g_front = _aggregate_t_setting_study(
-                t_setting_layer,
-                triple,
-                (placement, tr, dm, rs),
-                cd,
-                int(aod_front),
-            )
-            if g_back is None and g_front is None:
-                continue
-            dual_series.append((t_setting_colors[setting_idx], label, g_back, g_front))
+        dual_series = _build_t_setting_dual_series(
+            t_setting_layer,
+            triple,
+            t_study_entries,
+            t_setting_colors,
+            cd,
+        )
         x_pts = _draw_setting_study_dual_aod_bars(ax, dual_series)
         x_pos = {int(nq): float(i) for i, nq in enumerate(x_pts)}
         _store_setting_n_qubit_ticks(ax, x_pts)
@@ -3833,6 +3998,57 @@ def _plot_star_t_setting_and_aod_combined_grid(
 
     plot_star = "full_trotter" in dfs_dict_micro
     plot_t = triple is not None and not t_setting_layer.empty
+
+    if verbose:
+        if plot_star:
+            star_dual_series = _build_star_setting_dual_series(
+                dfs_dict_micro,
+                star_study_entries,
+                star_setting_colors,
+                cd,
+            )
+            if star_dual_series:
+                _print_setting_study_sequential_improvements(
+                    "STAR",
+                    star_dual_series,
+                    code_distance=cd,
+                )
+        if plot_t:
+            t_dual_series = _build_t_setting_dual_series(
+                t_setting_layer,
+                triple,
+                t_study_entries,
+                t_setting_colors,
+                cd,
+            )
+            if t_dual_series:
+                _print_setting_study_sequential_improvements(
+                    "T-cultivation",
+                    t_dual_series,
+                    code_distance=cd,
+                )
+        if plot_star:
+            if g_star_sync is not None and not g_star_sync.empty:
+                _print_aod_comparison_improvements(
+                    "STAR",
+                    "Baseline",
+                    g_star_sync,
+                    code_distance=cd,
+                )
+            if g_star_best is not None and not g_star_best.empty:
+                _print_aod_comparison_improvements(
+                    "STAR",
+                    star_aod_setting_label,
+                    g_star_best,
+                    code_distance=cd,
+                )
+        if plot_t and g_t_best is not None and not g_t_best.empty:
+            _print_aod_comparison_improvements(
+                "T-cultivation",
+                t_aod_setting_label,
+                g_t_best,
+                code_distance=cd,
+            )
 
     setting_column_title = "Compilation Strategies"
     star_column_titles = (setting_column_title, "AOD comparison")

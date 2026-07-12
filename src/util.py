@@ -413,7 +413,7 @@ def print_execution_profile(profile: dict[str, Any], top_n_pairs: int = 0) -> No
     timing_ops = {"SE", "SE_q", "SE_stage_1", "SE_stage_2", "H", "S", "Rz", "CNOT"}
     move_ops = {"move", "return_move"}
     # Operations with count only
-    count_only_ops = {"RUS_success", "RUS_fail", "TMR_fail"}
+    count_only_ops = {"RUS_success", "RUS_fail", "TMR_fail", "stage_2_success", "stage_2_fail"}
 
     for op_name in op_order:
         if op_name not in ops:

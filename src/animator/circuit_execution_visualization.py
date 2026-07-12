@@ -875,6 +875,7 @@ def plot_star_execution_subfigures(
     show_factory_yticks: bool = False,
     factory_axis_label: str = "Factories",
     subfig_heading_fontsize: float | None = None,
+    legend_row_index: int | None = None,
 ):
     """Plot multiple horizontal STAR timelines as stacked subfigures (shared time axis).
 
@@ -886,6 +887,8 @@ def plot_star_execution_subfigures(
     highlight_xticks: extra x-axis tick positions (e.g. trap-grid window bounds)
     show_factory_yticks: when False, hide factory-index tick labels but keep *factory_axis_label*
     factory_axis_label: y-axis title when factory tick labels are hidden (default ``Factories``)
+    legend_row_index: stacked-panel index for the legend; default picks the row with most
+        timeline whitespace on the shared x-axis
     Writes *save_path* (with box labels) and a ``_no_text`` sibling (no box labels).
     """
     if not row_plots:
@@ -926,7 +929,15 @@ def plot_star_execution_subfigures(
             _collapse_star_tmr_blocks(execution_log) if collapse_tmr else execution_log
         )
         row_max_end_times.append(max(entry_end(entry) for entry in log))
-    legend_row_index = _subplot_index_with_most_timeline_whitespace(row_max_end_times)
+    resolved_legend_row_index = (
+        legend_row_index
+        if legend_row_index is not None
+        else _subplot_index_with_most_timeline_whitespace(row_max_end_times)
+    )
+    if not 0 <= resolved_legend_row_index < row_count:
+        raise ValueError(
+            f"legend_row_index must be in [0, {row_count}), got {resolved_legend_row_index}"
+        )
 
     max_circuit_length = max(len(execution_log) for _, execution_log, _, _ in row_plots)
     with_text_fig_width = _execution_timeline_fig_width(
@@ -1095,7 +1106,7 @@ def plot_star_execution_subfigures(
         # with that axes stacked above later panels so the box is not covered.
         for ax_idx, ax in enumerate(axes):
             ax.set_zorder(ax_idx + 1)
-        legend_ax = axes[legend_row_index]
+        legend_ax = axes[resolved_legend_row_index]
         legend_ax.set_zorder(len(axes) + 10)
         legend = legend_ax.legend(
             handles=legend_handles,
@@ -2058,6 +2069,9 @@ def _plot_t_cultivation_execution_on_ax(
 
         operation = _canonical_tcult_operation(operation)
 
+        if operation in ("stage_2_success", "stage_2_fail"):
+            continue
+
         duration = max(end_time - start_time, 0.1)
         color = color_map.get(operation, "#95a5a6")
         if operation in {"move", "return_move"}:
@@ -2097,7 +2111,53 @@ def _plot_t_cultivation_execution_on_ax(
                         clip_on=True,
                     )
         qubits = _extract_qubits_from_targets(value)
-        if not factories and qubits:
+        is_circuit_move = (
+            not factories
+            and move_vecs is not None
+            and operation in {"move", "return_move", "CNOT"}
+        )
+        is_circuit_cnot_gate = (
+            not factories
+            and operation == "CNOT"
+            and move_vecs is None
+            and qubits
+        )
+
+        if is_circuit_move and qubits:
+            move_op = operation if operation in {"move", "return_move"} else "move"
+            box_color = _movement_color_for_aod(move_op, aod_assignment)
+            for qubit in qubits:
+                row_name = f"q{qubit}"
+                if row_name not in y_pos:
+                    continue
+                y_coord = y_pos[row_name]
+                rect = mpatches.Rectangle(
+                    (start_time, y_coord - _BOX_Y_OFFSET),
+                    duration,
+                    _BOX_HEIGHT,
+                    facecolor=box_color,
+                    edgecolor="black",
+                    linewidth=resolved_border_width,
+                    alpha=_BOX_ALPHA,
+                )
+                ax.add_patch(rect)
+                if show_box_text:
+                    pair_move_vecs = _resolve_factory_move_vecs(move_vecs, 0)
+                    text = _star_box_label(move_op, None, pair_move_vecs)
+                    if text:
+                        ax.text(
+                            start_time + duration / 2,
+                            y_coord,
+                            text,
+                            ha="center",
+                            va="center",
+                            fontsize=10,
+                            fontweight="bold",
+                            color="black",
+                            linespacing=0.9,
+                            clip_on=True,
+                        )
+        elif is_circuit_cnot_gate:
             for qubit in qubits:
                 row_name = f"q{qubit}"
                 if row_name not in y_pos:

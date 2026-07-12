@@ -149,6 +149,8 @@ def simulate_t_cultivation_circuit_fidelity(
                 "Barrier",
                 "RUS_success",
                 "RUS_fail",
+                "stage_2_success",
+                "stage_2_fail",
                 "X",
                 "Z",
                 "Y",

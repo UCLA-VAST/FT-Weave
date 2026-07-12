@@ -17,6 +17,7 @@ from src.execution_log import (
     execute_movement,
     execute_rus_teleportation,
     write_rus_result_log,
+    write_stage2_result_log,
     clean_up_execution_log,
     LogicalSEScheduler,
 )
@@ -408,7 +409,7 @@ def t_cultivation_execution(
                     execution_log,
                     start_time=gate_start_time,
                     factories=[],
-                    operation=gate,
+                    operation="move",
                     aod_assignment=aod_id,
                     targets=c_qubits,
                     move_vecs=move_vecs,
@@ -438,7 +439,7 @@ def t_cultivation_execution(
                     execution_log,
                     start_time=gate_start_time + move_dur + duration,
                     factories=[],
-                    operation=gate,
+                    operation="return_move",
                     aod_assignment=aod_id,
                     targets=c_qubits,
                     move_vecs=reverse_move_vecs,
@@ -593,6 +594,12 @@ def t_cultivation_execution(
                 factory_list.extend(event["factory_list"])
             success_factory_ids = simulate_stage2_preparation(
                 factory_pool, rng, factory_list
+            )
+            write_stage2_result_log(
+                factory_list,
+                success_factory_ids,
+                local_time,
+                execution_log,
             )
             logger.debug(
                 "Stage 2 complete at t=%.3f success=%s failed=%d",

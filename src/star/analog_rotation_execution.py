@@ -207,6 +207,7 @@ def factory_angle_execution(
         magic_state_locations: (x, y) location for each magic state factory
         facoty_qubit_map: give (x,y) return 0 if no qubit and factory, 1 if qubit, 2 if factory
         n_aods: Number of AODs available for parallel operations
+        tmr_assignment_method: ``"matching"``, ``"naive"``, or ``"stochastic_coverage"``
 
     Returns:
         circuit_moment: Total circuit execution time

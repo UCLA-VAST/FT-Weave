@@ -73,7 +73,7 @@ def factory_angle_execution_parallel(
         column_based_placement: Whether to use column-based placement
         n_aods: Number of AODs available for parallel operations
         consider_skip_rus: RUS skipping strategy (0: no skip, 1: partial, 2: aggressive)
-        tmr_assignment_method: Method for TMR assignment
+        tmr_assignment_method: ``"matching"``, ``"naive"``, or ``"stochastic_coverage"``
         trivial_return: Whether to use trivial return routing
         decompose_move: Whether to decompose return moves
         rng: Random number generator

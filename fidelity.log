@@ -1,0 +1,104 @@
+================================================================================
+FIDELITY COMPARISON PLOTTING
+================================================================================
+Using comparison filters: placement=col_based, n_aods=1, STAR SETTINGS[9]=('col_based', True, False, 2, True, False), T settings=[(7, 1e-08, 2), (9, 1e-08, 2), (13, 1e-08, 4)]
+Loading data...
+Loaded raw=44, star=80, t_cultivation=120
+
+Per-case overall infidelity (1 - fidelity):
+  [Physical]
+    n_qubit=16: mean=7.866085e-02, min=7.866085e-02, max=7.866085e-02, log10(mean)=-1.104
+    n_qubit=36: mean=1.683436e-01, min=1.683436e-01, max=1.683436e-01, log10(mean)=-0.774
+    n_qubit=64: mean=2.794268e-01, min=2.794268e-01, max=2.794268e-01, log10(mean)=-0.554
+    n_qubit=100: mean=4.007307e-01, min=4.007307e-01, max=4.007307e-01, log10(mean)=-0.397
+  [STAR d=7]
+    n_qubit=16: mean=7.210758e-04, min=6.009967e-04, max=9.669192e-04, log10(mean)=-3.142
+    n_qubit=36: mean=1.898702e-03, min=1.488765e-03, max=2.772985e-03, log10(mean)=-2.722
+    n_qubit=64: mean=3.612857e-03, min=2.874024e-03, max=4.450733e-03, log10(mean)=-2.442
+    n_qubit=100: mean=6.128790e-03, min=5.073842e-03, max=7.436950e-03, log10(mean)=-2.213
+  [STAR d=9]
+    n_qubit=16: mean=1.534476e-04, min=6.585192e-05, max=5.534607e-04, log10(mean)=-3.814
+    n_qubit=36: mean=4.666333e-04, min=2.073249e-04, max=1.120570e-03, log10(mean)=-3.331
+    n_qubit=64: mean=7.764103e-04, min=3.361784e-04, max=1.806252e-03, log10(mean)=-3.110
+    n_qubit=100: mean=1.293603e-03, min=7.133239e-04, max=1.962151e-03, log10(mean)=-2.888
+  [T-cultivation d=7]
+    n_qubit=16: mean=1.328261e-02, min=1.319066e-02, max=1.336007e-02, log10(mean)=-1.877
+    n_qubit=36: mean=3.092696e-02, min=3.080060e-02, max=3.111058e-02, log10(mean)=-1.510
+    n_qubit=64: mean=5.786136e-02, min=5.752229e-02, max=5.822702e-02, log10(mean)=-1.238
+    n_qubit=100: mean=9.495204e-02, min=9.437015e-02, max=9.556577e-02, log10(mean)=-1.022
+  [T-cultivation d=9]
+    n_qubit=16: mean=1.228586e-03, min=1.220194e-03, max=1.235656e-03, log10(mean)=-2.911
+    n_qubit=36: mean=2.881713e-03, min=2.869990e-03, max=2.898751e-03, log10(mean)=-2.540
+    n_qubit=64: mean=5.453974e-03, min=5.421702e-03, max=5.488785e-03, log10(mean)=-2.263
+    n_qubit=100: mean=9.102046e-03, min=9.044607e-03, max=9.162648e-03, log10(mean)=-2.041
+  [T-cultivation d=13]
+    n_qubit=16: mean=3.448556e-05, min=3.444661e-05, max=3.453769e-05, log10(mean)=-4.462
+    n_qubit=36: mean=7.820437e-05, min=7.810261e-05, max=7.827560e-05, log10(mean)=-4.107
+    n_qubit=64: mean=1.406841e-04, min=1.404942e-04, max=1.408971e-04, log10(mean)=-3.852
+    n_qubit=100: mean=2.230301e-04, min=2.225617e-04, max=2.232837e-04, log10(mean)=-3.652
+
+Per-case infidelity breakdown (stacked-bar components):
+  [Raw]
+    n_qubit=16: CZ=3.211605e-02, 1Q=3.536492e-02, Move=1.438983e-03, Init=4.789215e-03, Measurement=6.380836e-03, Idle=6.363645e-04, total=8.072636e-02, log10(total)=-1.093
+    n_qubit=36: CZ=7.081455e-02, 1Q=7.781752e-02, Move=3.234799e-03, Init=1.074349e-02, Measurement=1.429966e-02, Idle=1.431251e-03, total=1.783413e-01, log10(total)=-0.749
+    n_qubit=64: CZ=1.224070e-01, 1Q=1.341310e-01, Move=5.743518e-03, Init=1.901968e-02, Measurement=2.528009e-02, Idle=2.543029e-03, total=3.091243e-01, log10(total)=-0.510
+    n_qubit=100: CZ=1.845533e-01, 1Q=2.015107e-01, Move=8.959738e-03, Init=2.955883e-02, Measurement=3.921825e-02, Idle=3.970640e-03, total=4.677715e-01, log10(total)=-0.330
+  [STAR]
+    d=7, n_qubit=16: CNOT=1.919819e-04, H=2.559968e-05, Rz(theta)=8.377285e-05, Teleportation-CNOT=3.689322e-04, Rz-S=0.000000e+00, Idle=5.095868e-05, total=7.212452e-04, log10(total)=-3.142
+    d=9, n_qubit=16: CNOT=1.731309e-05, H=2.308429e-06, Rz(theta)=9.562162e-05, Teleportation-CNOT=3.335447e-05, Rz-S=0.000000e+00, Idle=4.856711e-06, total=1.534543e-04, log10(total)=-3.814
+    d=7, n_qubit=36: CNOT=4.319073e-04, H=5.759835e-05, Rz(theta)=3.423057e-04, Teleportation-CNOT=8.504378e-04, Rz-S=4.379998e-07, Idle=2.172960e-04, total=1.899983e-03, log10(total)=-2.721
+    d=9, n_qubit=36: CNOT=3.895402e-05, H=5.193957e-06, Rz(theta)=3.271982e-04, Teleportation-CNOT=7.622943e-05, Rz-S=3.949582e-08, Idle=1.907142e-05, total=4.666866e-04, log10(total)=-3.331
+    d=7, n_qubit=64: CNOT=7.677063e-04, H=1.023948e-04, Rz(theta)=6.423710e-04, Teleportation-CNOT=1.528530e-03, Rz-S=1.168000e-06, Idle=5.754308e-04, total=3.617601e-03, log10(total)=-2.442
+    d=9, n_qubit=64: CNOT=6.925055e-05, H=9.233683e-06, Rz(theta)=5.117391e-04, Teleportation-CNOT=1.369004e-04, Rz-S=6.582636e-08, Idle=4.938294e-05, total=7.765725e-04, log10(total)=-3.110
+    d=7, n_qubit=100: CNOT=1.199282e-03, H=1.599872e-04, Rz(theta)=1.013968e-03, Teleportation-CNOT=2.410291e-03, Rz-S=1.313999e-06, Idle=1.357823e-03, total=6.142665e-03, log10(total)=-2.212
+    d=9, n_qubit=100: CNOT=1.082019e-04, H=1.442759e-05, Rz(theta)=8.406485e-04, Teleportation-CNOT=2.190425e-04, Rz-S=5.266109e-08, Idle=1.116821e-04, total=1.294055e-03, log10(total)=-2.888
+  [T-cultivation]
+    d=7, n_qubit=16: CNOT=1.919819e-04, H=1.049050e-03, Teleportation-CNOT=7.555325e-03, Rz-S=2.006944e-03, Rz-H=1.049050e-03, T state=2.527968e-05, Rz approx.=6.399998e-07, Idle=2.507969e-03, total=1.438624e-02, log10(total)=-1.842
+    d=9, n_qubit=16: CNOT=1.731309e-05, H=9.464120e-05, Teleportation-CNOT=6.836391e-04, Rz-S=1.811377e-04, Rz-H=9.464120e-05, T state=2.527968e-05, Rz approx.=6.399998e-07, Idle=2.264098e-04, total=1.323702e-03, log10(total)=-2.878
+    d=13, n_qubit=16: CNOT=1.276986e-07, H=6.980854e-07, Teleportation-CNOT=5.044081e-06, Rz-S=1.345474e-06, Rz-H=6.980854e-07, T state=2.527968e-05, Rz approx.=6.399998e-07, Idle=1.350798e-06, total=3.518390e-05, log10(total)=-4.454
+    d=7, n_qubit=36: CNOT=4.319073e-04, H=2.358814e-03, Teleportation-CNOT=1.691926e-02, Rz-S=4.346294e-03, Rz-H=2.358814e-03, T state=5.687838e-05, Rz approx.=1.439999e-06, Idle=7.118123e-03, total=3.359153e-02, log10(total)=-1.474
+    d=9, n_qubit=36: CNOT=3.895402e-05, H=2.129301e-04, Teleportation-CNOT=1.537531e-03, Rz-S=3.926956e-04, Rz-H=2.129301e-04, T state=5.687838e-05, Rz approx.=1.439999e-06, Idle=6.439513e-04, total=3.097310e-03, log10(total)=-2.509
+    d=13, n_qubit=36: CNOT=2.873218e-07, H=1.570692e-06, Teleportation-CNOT=1.134915e-05, Rz-S=2.888844e-06, Rz-H=1.570692e-06, T state=5.687838e-05, Rz approx.=1.439999e-06, Idle=3.791351e-06, total=7.977643e-05, log10(total)=-4.098
+    d=7, n_qubit=64: CNOT=7.677063e-04, H=4.189600e-03, Teleportation-CNOT=2.988053e-02, Rz-S=7.574704e-03, Rz-H=4.189600e-03, T state=1.011149e-04, Rz approx.=2.559997e-06, Idle=1.645627e-02, total=6.316208e-02, log10(total)=-1.200
+    d=9, n_qubit=64: CNOT=6.925055e-05, H=3.785111e-04, Teleportation-CNOT=2.731753e-03, Rz-S=6.853992e-04, Rz-H=3.785111e-04, T state=1.011149e-04, Rz approx.=2.559997e-06, Idle=1.495141e-03, total=5.842241e-03, log10(total)=-2.233
+    d=13, n_qubit=64: CNOT=5.107942e-07, H=2.792339e-06, Teleportation-CNOT=2.017617e-05, Rz-S=5.038138e-06, Rz-H=2.792339e-06, T state=1.011149e-04, Rz approx.=2.559997e-06, Idle=8.496310e-06, total=1.434810e-04, log10(total)=-3.843
+    d=7, n_qubit=100: CNOT=1.199282e-03, H=6.538531e-03, Teleportation-CNOT=4.629423e-02, Rz-S=1.162851e-02, Rz-H=6.538531e-03, T state=1.579875e-04, Rz approx.=3.999992e-06, Idle=3.221819e-02, total=1.045793e-01, log10(total)=-0.981
+    d=9, n_qubit=100: CNOT=1.082019e-04, H=5.913606e-04, Teleportation-CNOT=4.265084e-03, Rz-S=1.054167e-03, Rz-H=5.913606e-04, T state=1.579875e-04, Rz approx.=3.999992e-06, Idle=2.948695e-03, total=9.720856e-03, log10(total)=-2.012
+    d=13, n_qubit=100: CNOT=7.981158e-07, H=4.363026e-06, Teleportation-CNOT=3.152509e-05, Rz-S=7.793548e-06, Rz-H=4.363026e-06, T state=1.579875e-04, Rz approx.=3.999992e-06, Idle=1.657452e-05, total=2.274048e-04, log10(total)=-3.643
+
+Pairwise infidelity improvement between overall curves:
+  STAR d=7 is 83.63x lower infidelity than Physical (common n=16, 36, 64, 100)
+  STAR d=9 is 378.93x lower infidelity than Physical (common n=16, 36, 64, 100)
+  T-cultivation d=13 is 2045.97x lower infidelity than Physical (common n=16, 36, 64, 100)
+  T-cultivation d=7 is 5.06x lower infidelity than Physical (common n=16, 36, 64, 100)
+  T-cultivation d=9 is 53.89x lower infidelity than Physical (common n=16, 36, 64, 100)
+  STAR d=9 is 4.53x lower infidelity than STAR d=7 (common n=16, 36, 64, 100)
+  T-cultivation d=13 is 24.47x lower infidelity than STAR d=7 (common n=16, 36, 64, 100)
+  STAR d=7 is 16.52x lower infidelity than T-cultivation d=7 (common n=16, 36, 64, 100)
+  STAR d=7 is 1.55x lower infidelity than T-cultivation d=9 (common n=16, 36, 64, 100)
+  T-cultivation d=13 is 5.40x lower infidelity than STAR d=9 (common n=16, 36, 64, 100)
+  STAR d=9 is 74.85x lower infidelity than T-cultivation d=7 (common n=16, 36, 64, 100)
+  STAR d=9 is 7.03x lower infidelity than T-cultivation d=9 (common n=16, 36, 64, 100)
+  T-cultivation d=13 is 404.12x lower infidelity than T-cultivation d=7 (common n=16, 36, 64, 100)
+  T-cultivation d=13 is 37.96x lower infidelity than T-cultivation d=9 (common n=16, 36, 64, 100)
+  T-cultivation d=9 is 10.65x lower infidelity than T-cultivation d=7 (common n=16, 36, 64, 100)
+
+1. Plot raw stacked fidelity breakdown...
+Saved: output/evaluation/fidelity/comparison/raw_fidelity_breakdown_stacked.pdf
+
+2. Plot STAR stacked fidelity breakdown...
+Saved: output/evaluation/fidelity/comparison/star_fidelity_breakdown_stacked.pdf
+
+3. Plot T-cultivation stacked fidelity breakdown...
+Saved: output/evaluation/fidelity/comparison/t_cultivation_fidelity_breakdown_stacked.pdf
+
+4. Plot overall fidelity (with raw line)...
+Saved: output/evaluation/fidelity/comparison/overall_fidelity_comparison.pdf
+
+5. Plot overall fidelity (no raw line)...
+Saved: output/evaluation/fidelity/comparison/overall_fidelity_comparison_no_raw.pdf
+
+5a. Plot overall infidelity (log y, with raw line)...
+Saved: output/evaluation/fidelity/comparison/overall_infidelity_comparison.pdf
+
+Done.

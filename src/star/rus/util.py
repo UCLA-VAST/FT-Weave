@@ -59,6 +59,10 @@ def check_teleportation_worthiness(
     """
     THRESHOLD_HIGH_TMR = 0.1 * total_qubits
     THRESHOLD_HIGH_RUS = THRESHOLD_HIGH_TMR
+    # THRESHOLD_HIGH_TMR = 0
+    # print(f"Total qubits: {total_qubits}")
+    THRESHOLD_HIGH_TMR = 0  # 0.1 * total_qubits
+    THRESHOLD_HIGH_RUS = 0.1 * total_qubits
 
     def _has_better_idle_factory_for_batch(batch) -> bool:
         """Return True if every qubit in batch has at least one better idle factory nearby.

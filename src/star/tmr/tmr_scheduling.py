@@ -1,4 +1,5 @@
 from .angle_collection import get_angles_for_preparation
+from .factory_angle_assignment.integration import optimize_factory_angle_assignment
 from .tmr_assignment import assign_factories_for_batch
 from src.ds import FactoryPool, QubitAngleTracker, Factory
 
@@ -23,6 +24,23 @@ def schedule_tmr_round(
         ]
     if not factories_ready_for_rz or not qubit_trackers:
         return []
+
+    if tmr_assignment_method == "stochastic_coverage":
+        assignment = optimize_factory_angle_assignment(
+            factories_ready_for_rz,
+            factory_pool,
+            qubit_trackers,
+            logic_qubit_locations,
+            code_distance,
+            include_lookahead=prepare_lookahead_angles,
+            allocation_level_range=allocation_level_range,
+        )
+        if assignment is None:
+            return []
+        return factories_ready_for_rz
+
+    if tmr_assignment_method not in ("matching", "naive"):
+        raise ValueError(f"Unknown tmr_assignment_method: {tmr_assignment_method}")
 
     # Get angles to prepare
     batch_angles = get_angles_for_preparation(

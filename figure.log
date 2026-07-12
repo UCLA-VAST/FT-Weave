@@ -1,0 +1,88 @@
+  AOD panel (d=9): STAR setting idx 3 (High parallelism exec.); T-cultivation  + Check-stage patch redist..
+
+  [Setting study — STAR, d=9] (improvement vs previous setting; positive = faster)
+    AOD=1: 
+      Baseline →  + Routing opt.: +15.05%
+       + Routing opt. → Greedy exec.: +60.27%
+      Greedy exec. → High parallelism exec.: +10.20%
+    AOD=5:
+      Baseline →  + Routing opt.: +4.37%
+       + Routing opt. → Greedy exec.: +44.76%
+      Greedy exec. → High parallelism exec.: +0.92%
+
+  [Setting study — T-cultivation, d=9] (improvement vs previous setting; positive = faster)
+    AOD=1:
+      Sync. execution →  + Routing opt.: +15.17%
+       + Routing opt. →  + Microarch. opt.: +53.74%
+       + Microarch. opt. →  + Check-stage patch redist.: +7.83%
+    AOD=5:
+      Sync. execution →  + Routing opt.: +7.0753%
+       + Routing opt. →  + Microarch. opt.: +35.68%
+       + Microarch. opt. →  + Check-stage patch redist.: +8.36%
+
+  [AOD comparison — STAR, d=9, Baseline] (improvement vs previous AOD; positive = faster)
+    AOD 2 vs 1: +35.77%
+    AOD 3 vs 2: +17.70%
+    AOD 5 vs 3: +14.40%
+
+  [AOD comparison — STAR, d=9, High parallelism exec.] (improvement vs previous AOD; positive = faster)
+    AOD 2 vs 1: +15.19%
+    AOD 3 vs 2: +5.38%
+    AOD 5 vs 3: +0.71%
+
+  [AOD comparison — T-cultivation, d=9,  + Check-stage patch redist.] (improvement vs previous AOD; positive = faster)
+    AOD 2 vs 1: +21.48%
+    AOD 3 vs 2: +8.50%
+    AOD 5 vs 3: +5.99%
+Saved: output/prx_quantum/star_t_setting_and_aod_comparison_d9_bars.pdf
+Saved: output/prx_quantum/star_setting_and_aod_comparison_d9_bars.pdf
+Saved: output/prx_quantum/t_cultivation_setting_and_aod_comparison_d9_bars.pdf
+
+  [Runtime profile — STAR, d=9]
+    AOD=1:
+      n_qubits=16: Forward move=61.85, Return move=44.6, TMR=108.6, CNOT=34.2, total=250.05
+      n_qubits=36: Forward move=134.7, Return move=85.6, TMR=123.6, CNOT=43.5, total=388.25
+      n_qubits=64: Forward move=223.5, Return move=123.4, TMR=133.2, CNOT=48.3, total=529.55
+      n_qubits=100: Forward move=346.85, Return move=180.4, TMR=147, CNOT=54.9, total=730.05
+    AOD=5:
+      n_qubits=16: Forward move=39, Return move=36.05, TMR=108.6, CNOT=34.2, total=218.2
+      n_qubits=36: Forward move=69.1, Return move=60.1, TMR=125.4, CNOT=44.3, total=299.95
+      n_qubits=64: Forward move=95.05, Return move=80.7, TMR=133.8, CNOT=49, total=359.9
+      n_qubits=100: Forward move=128.95, Return move=104.9, TMR=148.2, CNOT=56, total=439.65
+
+  [Runtime profile — T-cultivation, d=9 (y-axis ticks shown as ×10³)]
+    AOD=1:
+      n_qubits=16: Forward move=1854.3, Return move=1162.1, Check Stage=5067.5, Escape Stage=202.7, CNOT=597.1, total=9742.8
+      n_qubits=36: Forward move=3699.7, Return move=2111.4, Check Stage=4997.5, Escape Stage=199.9, CNOT=614.9, total=12550.6
+      n_qubits=64: Forward move=6239.9, Return move=3314.5, Check Stage=5037.5, Escape Stage=201.5, CNOT=624.6, total=16371.3
+      n_qubits=100: Forward move=9227.45, Return move=4560.6, Check Stage=5045, Escape Stage=201.8, CNOT=627.7, total=20626.3
+    AOD=5:
+      n_qubits=16: Forward move=1046.85, Return move=721.45, Check Stage=5067.5, Escape Stage=202.7, CNOT=597.1, total=8445.7
+      n_qubits=36: Forward move=1449.35, Return move=993.2, Check Stage=4997.5, Escape Stage=199.9, CNOT=614.9, total=9161.15
+      n_qubits=64: Forward move=1904.1, Return move=1279.6, Check Stage=5037.5, Escape Stage=201.5, CNOT=624.6, total=9986.2
+      n_qubits=100: Forward move=2447, Return move=1559.25, Check Stage=5045, Escape Stage=201.8, CNOT=627.7, total=10832.6
+
+  [Movement optimality gap — STAR, d=9] (ideal leg = 0.5 × CNOT time; gap = actual / (0.5 × CNOT time); 1.0 = optimal)
+    AOD=1:
+      n_qubits=16, CNOT=34.2: forward=61.85, gap=3.617 (61.85/(34.2×0.5)); return=44.6, gap=2.608 (44.6/(34.2×0.5)); total movement=106.45, gap=3.113 (106.45/34.2)
+      n_qubits=36, CNOT=43.5: forward=134.7, gap=6.193 (134.7/(43.5×0.5)); return=85.6, gap=3.936 (85.6/(43.5×0.5)); total movement=220.3, gap=5.064 (220.3/43.5)
+      n_qubits=64, CNOT=48.3: forward=223.5, gap=9.255 (223.5/(48.3×0.5)); return=123.4, gap=5.11 (123.4/(48.3×0.5)); total movement=346.9, gap=7.182 (346.9/48.3)
+      n_qubits=100, CNOT=54.9: forward=346.85, gap=12.64 (346.85/(54.9×0.5)); return=180.4, gap=6.572 (180.4/(54.9×0.5)); total movement=527.25, gap=9.604 (527.25/54.9)
+    AOD=5:
+      n_qubits=16, CNOT=34.2: forward=39, gap=2.281 (39/(34.2×0.5)); return=36.05, gap=2.108 (36.05/(34.2×0.5)); total movement=75.05, gap=2.194 (75.05/34.2)
+      n_qubits=36, CNOT=44.3: forward=69.1, gap=3.12 (69.1/(44.3×0.5)); return=60.1, gap=2.713 (60.1/(44.3×0.5)); total movement=129.2, gap=2.916 (129.2/44.3)
+      n_qubits=64, CNOT=49: forward=95.05, gap=3.88 (95.05/(49×0.5)); return=80.7, gap=3.294 (80.7/(49×0.5)); total movement=175.75, gap=3.587 (175.75/49)
+      n_qubits=100, CNOT=56: forward=128.95, gap=4.605 (128.95/(56×0.5)); return=104.9, gap=3.746 (104.9/(56×0.5)); total movement=233.85, gap=4.176 (233.85/56)
+
+  [Movement optimality gap — T-cultivation, d=9] (ideal leg = 0.5 × CNOT time; gap = actual / (0.5 × CNOT time); 1.0 = optimal)
+    AOD=1:
+      n_qubits=16, CNOT=597.1: forward=1854.3, gap=6.211 (1854.3/(597.1×0.5)); return=1162.1, gap=3.892 (1162.1/(597.1×0.5)); total movement=3016.4, gap=5.052 (3016.4/597.1)
+      n_qubits=36, CNOT=614.9: forward=3699.7, gap=12.03 (3699.7/(614.9×0.5)); return=2111.4, gap=6.867 (2111.4/(614.9×0.5)); total movement=5811.1, gap=9.45 (5811.1/614.9)
+      n_qubits=64, CNOT=624.6: forward=6239.9, gap=19.98 (6239.9/(624.6×0.5)); return=3314.5, gap=10.61 (3314.5/(624.6×0.5)); total movement=9554.4, gap=15.3 (9554.4/624.6)
+      n_qubits=100, CNOT=627.7: forward=9227.45, gap=29.4 (9227.45/(627.7×0.5)); return=4560.6, gap=14.53 (4560.6/(627.7×0.5)); total movement=13788.1, gap=21.97 (13788.1/627.7)
+    AOD=5:
+      n_qubits=16, CNOT=597.1: forward=1046.85, gap=3.506 (1046.85/(597.1×0.5)); return=721.45, gap=2.417 (721.45/(597.1×0.5)); total movement=1768.3, gap=2.961 (1768.3/597.1)
+      n_qubits=36, CNOT=614.9: forward=1449.35, gap=4.714 (1449.35/(614.9×0.5)); return=993.2, gap=3.23 (993.2/(614.9×0.5)); total movement=2442.55, gap=3.972 (2442.55/614.9)
+      n_qubits=64, CNOT=624.6: forward=1904.1, gap=6.097 (1904.1/(624.6×0.5)); return=1279.6, gap=4.097 (1279.6/(624.6×0.5)); total movement=3183.7, gap=5.097 (3183.7/624.6)
+      n_qubits=100, CNOT=627.7: forward=2447, gap=7.797 (2447/(627.7×0.5)); return=1559.25, gap=4.968 (1559.25/(627.7×0.5)); total movement=4006.25, gap=6.382 (4006.25/627.7)
+Saved: output/prx_quantum/runtime_profile_star_vs_t_cultivation_d9.pdf

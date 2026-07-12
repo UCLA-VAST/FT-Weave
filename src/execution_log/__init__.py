@@ -4,6 +4,7 @@ from .util import (
     execute_rus_teleportation,
     insert_s_gate,
     write_rus_result_log,
+    write_stage2_result_log,
     clean_up_execution_log,
     validate_execution_log,
 )

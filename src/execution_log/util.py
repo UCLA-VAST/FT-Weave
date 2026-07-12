@@ -78,6 +78,37 @@ def write_rus_result_log(
     return execution_log
 
 
+def write_stage2_result_log(
+    factory_id_list: list[int],
+    success_factory_ids: list[int],
+    circuit_moment: float,
+    execution_log: list,
+) -> list:
+    """Record which factories pass or fail stage-2 escape checks at *circuit_moment*."""
+    success_set = set(success_factory_ids)
+    factories_success = [fid for fid in factory_id_list if fid in success_set]
+    factories_fail = [fid for fid in factory_id_list if fid not in success_set]
+    if factories_success:
+        write_execution_log(
+            execution_log,
+            circuit_moment,
+            factories_success,
+            "stage_2_success",
+            None,
+            None,
+        )
+    if factories_fail:
+        write_execution_log(
+            execution_log,
+            circuit_moment,
+            factories_fail,
+            "stage_2_fail",
+            None,
+            None,
+        )
+    return execution_log
+
+
 def execute_rus_teleportation(
     qubit_factory_pairs: list[tuple[int, int]],
     circuit_moment: float,
@@ -264,7 +295,7 @@ def validate_execution_log(
         factories = normalize_factories(factories)
 
         # Skip barrier and special operations
-        if operation in ["Barrier", "RUS_success", "RUS_fail"]:
+        if operation in ["Barrier", "RUS_success", "RUS_fail", "stage_2_success", "stage_2_fail"]:
             continue
 
         # Logical-qubit SE events (operation "SE_q", empty factories) ride

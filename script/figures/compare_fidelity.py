@@ -8,7 +8,7 @@ from matplotlib.lines import Line2D
 import pandas as pd
 import numpy as np
 
-_FIG_FONT_SIZE = 18
+_FIG_FONT_SIZE = 22
 
 plt.rcParams.update(
     {
@@ -379,6 +379,209 @@ def _collect_overall_infidelity_series(raw_df, star_df, t_cultivation_df):
             series[f"T-cultivation d={d}"] = (1.0 - means).dropna()
 
     return series
+
+
+def _fidelity_to_infidelity(value: float) -> float:
+    return max(0.0, min(1.0, 1.0 - float(value)))
+
+
+def _format_log10_infidelity(infidelity: float) -> str:
+    if infidelity <= 0:
+        return "n/a"
+    return f"{np.log10(infidelity):.3f}"
+
+
+def _fidelity_stats_to_infidelity(stats: pd.DataFrame) -> pd.DataFrame:
+    """Map fidelity mean/min/max to infidelity mean/min/max."""
+    out = stats.copy()
+    out["mean"] = 1.0 - stats["mean"]
+    out["min"] = 1.0 - stats["max"]
+    out["max"] = 1.0 - stats["min"]
+    return out
+
+
+def _print_per_case_overall_infidelity(raw_df, star_df, t_cultivation_df):
+    """Log mean/min/max infidelity and log10(mean) for each plotted overall case."""
+    print("\nPer-case overall infidelity (1 - fidelity):")
+
+    raw_stats = (
+        raw_df.groupby("n_qubit", as_index=True)["fidelity"]
+        .agg(["mean", "min", "max"])
+        .sort_index()
+    )
+    if not raw_stats.empty:
+        inf = _fidelity_stats_to_infidelity(raw_stats)
+        print("  [Physical]")
+        for n_qubit, row in inf.iterrows():
+            print(
+                f"    n_qubit={int(n_qubit)}: "
+                f"mean={row['mean']:.6e}, "
+                f"min={row['min']:.6e}, "
+                f"max={row['max']:.6e}, "
+                f"log10(mean)={_format_log10_infidelity(row['mean'])}"
+            )
+
+    star_data = _select_star_comparison_setting(star_df)
+    if not star_data.empty and "code_distance" in star_data.columns:
+        star_data = star_data.copy()
+        star_data["n_qubit"] = star_data["qubit_layout"].apply(get_n_qubit)
+        star_data["fidelity"] = pd.to_numeric(star_data["fidelity"], errors="coerce")
+        star_data = star_data.dropna(subset=["n_qubit", "fidelity"])
+        for d in sorted(star_data["code_distance"].dropna().astype(int).unique()):
+            sd = star_data[star_data["code_distance"] == d]
+            stats = (
+                sd.groupby("n_qubit", as_index=True)["fidelity"]
+                .agg(["mean", "min", "max"])
+                .sort_index()
+            )
+            if stats.empty:
+                continue
+            inf = _fidelity_stats_to_infidelity(stats)
+            print(f"  [STAR d={d}]")
+            for n_qubit, row in inf.iterrows():
+                print(
+                    f"    n_qubit={int(n_qubit)}: "
+                    f"mean={row['mean']:.6e}, "
+                    f"min={row['min']:.6e}, "
+                    f"max={row['max']:.6e}, "
+                    f"log10(mean)={_format_log10_infidelity(row['mean'])}"
+                )
+
+    if t_cultivation_df is not None and not t_cultivation_df.empty:
+        t_df = _select_t_cultivation_comparison_data(t_cultivation_df)
+        if t_df is not None and not t_df.empty:
+            t_df = t_df.copy()
+            t_df["n_qubit"] = t_df["qubit_layout"].apply(get_n_qubit)
+            t_df["fidelity_total"] = pd.to_numeric(
+                t_df["fidelity_total"], errors="coerce"
+            )
+            t_df = t_df.dropna(subset=["n_qubit", "fidelity_total"])
+            for d in sorted(t_df["code_distance"].dropna().astype(int).unique()):
+                sd = t_df[t_df["code_distance"] == d]
+                stats = (
+                    sd.groupby("n_qubit", as_index=True)["fidelity_total"]
+                    .agg(["mean", "min", "max"])
+                    .sort_index()
+                )
+                if stats.empty:
+                    continue
+                inf = _fidelity_stats_to_infidelity(stats)
+                print(f"  [T-cultivation d={d}]")
+                for n_qubit, row in inf.iterrows():
+                    print(
+                        f"    n_qubit={int(n_qubit)}: "
+                        f"mean={row['mean']:.6e}, "
+                        f"min={row['min']:.6e}, "
+                        f"max={row['max']:.6e}, "
+                        f"log10(mean)={_format_log10_infidelity(row['mean'])}"
+                    )
+
+
+def _mean_component_infidelities(
+    df: pd.DataFrame,
+    components: list[tuple[str, str, str]],
+) -> list[tuple[str, float]]:
+    parts: list[tuple[str, float]] = []
+    for col, label, _color in components:
+        if col not in df.columns:
+            continue
+        vals = pd.to_numeric(df[col], errors="coerce").dropna()
+        if vals.empty:
+            continue
+        mean_inf = float(np.mean([_fidelity_to_infidelity(v) for v in vals]))
+        parts.append((label, mean_inf))
+    return parts
+
+
+def _print_per_case_breakdown_infidelity(raw_df, star_df, t_cultivation_df):
+    """Log stacked-bar component infidelities for each plotted breakdown case."""
+    print("\nPer-case infidelity breakdown (stacked-bar components):")
+
+    raw_components = [
+        ("fidelity_cz", "CZ", "#4C78A8"),
+        ("fidelity_1q", "1Q", "#F58518"),
+        ("fidelity_move", "Move", "#54A24B"),
+        ("fidelity_init", "Init", "#E45756"),
+        ("fidelity_measurement", "Measurement", "#72B7B2"),
+        ("fidelity_idle", "Idle", "#9467BD"),
+    ]
+    print("  [Raw]")
+    for n_qubit in sorted(raw_df["n_qubit"].dropna().astype(int).unique()):
+        sdf = raw_df[raw_df["n_qubit"] == n_qubit]
+        parts = _mean_component_infidelities(sdf, raw_components)
+        total = sum(v for _, v in parts)
+        detail = ", ".join(f"{label}={val:.6e}" for label, val in parts)
+        print(
+            f"    n_qubit={int(n_qubit)}: {detail}, "
+            f"total={total:.6e}, log10(total)={_format_log10_infidelity(total)}"
+        )
+
+    star_components = [
+        ("fidelity_cnot", "CNOT", "#4C78A8"),
+        ("fidelity_1q", "H", "#8C564B"),
+        ("fidelity_of_rz_injection", "Rz(theta)", "#C44E52"),
+        ("fidelity_of_rz_teleportaion", "Teleportation-CNOT", "#F28E2B"),
+        ("fidelity_of_rz_s", "Rz-S", "#59A14F"),
+        ("fidelity_idle", "Idle", "#4DBBD5"),
+    ]
+    star_data = _select_star_comparison_setting(star_df)
+    if not star_data.empty and "code_distance" in star_data.columns:
+        star_data = star_data.copy()
+        star_data["n_qubit"] = star_data["qubit_layout"].apply(get_n_qubit)
+        print("  [STAR]")
+        for n_qubit in sorted(star_data["n_qubit"].dropna().astype(int).unique()):
+            for d in sorted(star_data["code_distance"].dropna().astype(int).unique()):
+                sdf = star_data[
+                    (star_data["n_qubit"] == n_qubit)
+                    & (star_data["code_distance"] == d)
+                ]
+                if sdf.empty:
+                    continue
+                parts = _mean_component_infidelities(sdf, star_components)
+                total = sum(v for _, v in parts)
+                detail = ", ".join(f"{label}={val:.6e}" for label, val in parts)
+                print(
+                    f"    d={int(d)}, n_qubit={int(n_qubit)}: {detail}, "
+                    f"total={total:.6e}, log10(total)={_format_log10_infidelity(total)}"
+                )
+
+    if t_cultivation_df is not None and not t_cultivation_df.empty:
+        t_df = _select_t_cultivation_comparison_data(t_cultivation_df)
+        if t_df is not None and not t_df.empty:
+            t_components = [
+                ("fidelity_cnot", "CNOT", "#4C78A8"),
+                ("fidelity_h", "H", "#8C564B"),
+                ("fidelity_of_rz_teleportaion", "Teleportation-CNOT", "#F58518"),
+                ("fidelity_of_rz_s", "Rz-S", "#54A24B"),
+                ("fidelity_of_rz_h", "Rz-H", "#BCBD22"),
+                ("fidelity_of_t_gate", "T state", "#E45756"),
+                ("fidelity_synthesis", "Rz approx.", "#9467BD"),
+                ("fidelity_idle", "Idle", "#4DBBD5"),
+            ]
+            t_df = t_df.copy()
+            t_df["n_qubit"] = t_df["qubit_layout"].apply(get_n_qubit)
+            print("  [T-cultivation]")
+            for n_qubit in sorted(t_df["n_qubit"].dropna().astype(int).unique()):
+                for d in sorted(t_df["code_distance"].dropna().astype(int).unique()):
+                    sdf = t_df[
+                        (t_df["n_qubit"] == n_qubit) & (t_df["code_distance"] == d)
+                    ]
+                    if sdf.empty:
+                        continue
+                    parts = _mean_component_infidelities(sdf, t_components)
+                    total = sum(v for _, v in parts)
+                    detail = ", ".join(f"{label}={val:.6e}" for label, val in parts)
+                    print(
+                        f"    d={int(d)}, n_qubit={int(n_qubit)}: {detail}, "
+                        f"total={total:.6e}, "
+                        f"log10(total)={_format_log10_infidelity(total)}"
+                    )
+
+
+def _print_infidelity_report(raw_df, star_df, t_cultivation_df):
+    """Log per-case infidelity values used by the comparison figures."""
+    _print_per_case_overall_infidelity(raw_df, star_df, t_cultivation_df)
+    _print_per_case_breakdown_infidelity(raw_df, star_df, t_cultivation_df)
 
 
 def _print_pairwise_infidelity_improvements(raw_df, star_df, t_cultivation_df):
@@ -909,6 +1112,7 @@ def main():
         f"Loaded raw={len(raw_df)}, star={len(star_df)}, "
         f"t_cultivation={0 if t_df is None else len(t_df)}"
     )
+    _print_infidelity_report(raw_df, star_df, t_df)
     _print_pairwise_infidelity_improvements(raw_df, star_df, t_df)
 
     print("\n1. Plot raw stacked fidelity breakdown...")
