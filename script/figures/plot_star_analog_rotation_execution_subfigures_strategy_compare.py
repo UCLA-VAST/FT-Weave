@@ -174,11 +174,11 @@ def main(
             *_run_star_log(optimize_strategy=False, rng=rng),
         ),
         (
-            "Optimized strategy w/o dropout",
+            "Optimized strategy w/o operation rematerialization",
             *_run_star_log(optimize_strategy=True, rng=rng),
         ),
         (
-            "Optimized strategy w/ dropout",
+            "Optimized strategy w/ operation rematerialization",
             *_run_star_log(optimize_strategy=True, consider_skip_rus=2, rng=rng),
         ),
     ]

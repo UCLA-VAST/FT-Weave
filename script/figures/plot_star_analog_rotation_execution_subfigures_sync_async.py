@@ -429,8 +429,8 @@ if __name__ == "__main__":
         help="Movement visualization on trap-grid figures",
     )
     parser.add_argument(
-        "--no-rus-move-shade",
-        action="store_true",
+        "--rus-move-shade",
+        action="store_false",
         help="Disable RUS move/return shading on the synchronous panel",
     )
     parser.add_argument(
@@ -464,7 +464,7 @@ if __name__ == "__main__":
         trap_window_start=args.trap_window_start,
         trap_window_end=args.trap_window_end,
         timeline_xmax=(None if args.timeline_xmax < 0 else float(args.timeline_xmax)),
-        shade_rus_moves=not args.no_rus_move_shade,
+        shade_rus_moves=not args.rus_move_shade,
         sync_rus_shade_rounds=sync_rus_rounds,
         rus_shade_alpha=args.rus_shade_alpha,
     )
