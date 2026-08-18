@@ -417,30 +417,30 @@ def _resolve_star_row_layout(
 def _star_execution_legend_handles():
     return [
         mpatches.Patch(facecolor=color_map["TMR"], edgecolor="black", label="TMR"),
-        mpatches.Patch(facecolor=color_map["SE"], edgecolor="black", label="SE"),
+        # mpatches.Patch(facecolor=color_map["SE"], edgecolor="black", label="SE"),
         mpatches.Patch(facecolor=color_map["CNOT"], edgecolor="black", label="CNOT"),
-        mpatches.Patch(facecolor=color_map["S"], edgecolor="black", label="S gate"),
+        # mpatches.Patch(facecolor=color_map["S"], edgecolor="black", label="S gate"),
         mpatches.Patch(facecolor=color_map["move"], edgecolor="black", label="Move"),
         mpatches.Patch(
             facecolor=color_map["return_move"],
             edgecolor="black",
             label="Return Move",
         ),
-        mpatches.Patch(
-            facecolor=color_map["RUS_success"],
-            edgecolor="black",
-            label="RUS:succsss",
-        ),
-        mpatches.Patch(
-            facecolor=color_map["RUS_fail"],
-            edgecolor="black",
-            label="RUS:fail",
-        ),
-        mpatches.Patch(
-            facecolor=color_map["TMR_fail"],
-            edgecolor="black",
-            label="TMR:fail",
-        ),
+        # mpatches.Patch(
+        #     facecolor=color_map["RUS_success"],
+        #     edgecolor="black",
+        #     label="RUS:succsss",
+        # ),
+        # mpatches.Patch(
+        #     facecolor=color_map["RUS_fail"],
+        #     edgecolor="black",
+        #     label="RUS:fail",
+        # ),
+        # mpatches.Patch(
+        #     facecolor=color_map["TMR_fail"],
+        #     edgecolor="black",
+        #     label="TMR:fail",
+        # ),
     ]
 
 
@@ -1602,11 +1602,12 @@ def plot_star_timeline_movement_combined(
             )
 
         n_handles = len(legend_handles)
-        legend_ncol = min(n_handles, 5) if n_handles <= 6 else (n_handles + 1) // 2
+        # legend_ncol = min(n_handles, 5) if n_handles <= 6 else (n_handles + 1) // 2
+        legend_ncol = min(n_handles, 7) if n_handles <= 7 else (n_handles + 1) // 2
         fig.legend(
             handles=legend_handles,
             loc="lower center",
-            bbox_to_anchor=(content_center, -0.015),
+            bbox_to_anchor=(content_center, 0.0),
             bbox_transform=fig.transFigure,
             ncol=legend_ncol,
             fontsize=legend_fs,
