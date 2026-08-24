@@ -50,9 +50,7 @@ def execute_tmr_preparation_pre_rz(
             targets,
         )
         if logical_se_scheduler is not None:
-            logical_se_scheduler.piggyback(
-                circuit_moment + p, aod_id, execution_log
-            )
+            logical_se_scheduler.piggyback(circuit_moment + p, aod_id, execution_log)
 
     circuit_moment += TMR_P
 

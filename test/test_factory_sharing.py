@@ -10,7 +10,7 @@ Tests cover:
 
 import pytest
 from src.ds import FactoryPool, QubitAngleTracker
-from src.rus import (
+from src.star.rus import (
     AngleFactoryIndex,
     assign_teleportation_with_sharing,
     find_optimal_factory_assignment,
@@ -145,9 +145,15 @@ class TestFactorySharingIntegration:
 
         # Create qubit trackers
         self.qubit_trackers = {
-            0: QubitAngleTracker(qubit_id=0, target_angle=0.5),
-            1: QubitAngleTracker(qubit_id=1, target_angle=0.5),
-            2: QubitAngleTracker(qubit_id=2, target_angle=1.0),
+            0: QubitAngleTracker(
+                qubit_id=0, target_angle=0.5, factory_limit=2, code_distance=7
+            ),
+            1: QubitAngleTracker(
+                qubit_id=1, target_angle=0.5, factory_limit=2, code_distance=7
+            ),
+            2: QubitAngleTracker(
+                qubit_id=2, target_angle=1.0, factory_limit=2, code_distance=7
+            ),
         }
 
         # Add factories to trackers
@@ -176,8 +182,12 @@ class TestAssignmentWithSharing:
 
         # Create qubit trackers with same angle
         self.qubit_trackers = {
-            0: QubitAngleTracker(qubit_id=0, target_angle=0.5),
-            1: QubitAngleTracker(qubit_id=1, target_angle=0.5),
+            0: QubitAngleTracker(
+                qubit_id=0, target_angle=0.5, factory_limit=2, code_distance=7
+            ),
+            1: QubitAngleTracker(
+                qubit_id=1, target_angle=0.5, factory_limit=2, code_distance=7
+            ),
         }
 
         # Qubit 0 has factories 0, 1 for angle 0.5
@@ -200,7 +210,6 @@ class TestAssignmentWithSharing:
         angle_index.add_factory(factory_id=3, angle=0.5, qubit_id=1)
 
         assignments = assign_teleportation_with_sharing(
-            successful_qubits=set(),
             qubit_trackers=self.qubit_trackers,
             factory_pool=self.factory_pool,
             logic_qubit_locations=self.logic_qubit_locations,

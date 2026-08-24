@@ -12,9 +12,7 @@ from src.star.simulation import calculate_success_rate
 from ....ds import QubitAngleTracker
 
 
-def manhattan_distance(
-    loc_a: tuple[int, int], loc_b: tuple[int, int]
-) -> int:
+def manhattan_distance(loc_a: tuple[int, int], loc_b: tuple[int, int]) -> int:
     """Raw Manhattan distance: |col_a - col_b| + |row_a - row_b|."""
     return abs(loc_a[0] - loc_b[0]) + abs(loc_a[1] - loc_b[1])
 
@@ -67,9 +65,7 @@ def build_coverage_terms(
     import numpy as np
 
     if allocation_level_range is None:
-        allocation_level_range = (
-            range(0, 2) if include_lookahead else range(0, 1)
-        )
+        allocation_level_range = range(0, 2) if include_lookahead else range(0, 1)
 
     qubit_index = {qid: idx for idx, qid in enumerate(qubit_ids)}
     terms: list[CoverageTerm] = []
@@ -147,9 +143,7 @@ def build_assignment_problem(
             distances[fi, qi] = abs(fx - qx) + abs(fy - qy)
 
     angles = sorted({term.angle for term in coverage_terms})
-    p_theta = {
-        angle: calculate_success_rate(angle, code_distance) for angle in angles
-    }
+    p_theta = {angle: calculate_success_rate(angle, code_distance) for angle in angles}
 
     terms_by_angle: dict[float, list[int]] = {angle: [] for angle in angles}
     qubits_by_angle: dict[float, list[int]] = {angle: [] for angle in angles}

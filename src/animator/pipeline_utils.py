@@ -102,4 +102,3 @@ def merge_layer_logs_with_global_timeline(
             merged.append(new_entry)
         current_time += (layer_end - layer_start) + inter_layer_gap
     return merged
-

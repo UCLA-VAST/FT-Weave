@@ -170,9 +170,7 @@ def simulate_t_cultivation_circuit_fidelity(
                     if isinstance(factories, (list, tuple))
                     else ([factories] if factories is not None else [])
                 )
-                tgt_list = (
-                    list(targets) if isinstance(targets, (list, tuple)) else []
-                )
+                tgt_list = list(targets) if isinstance(targets, (list, tuple)) else []
                 if not fac_list:
                     if move_vecs is None:
                         n_cnot += len(tgt_list)
@@ -210,11 +208,7 @@ def simulate_t_cultivation_circuit_fidelity(
     n_se_q *= n_trotter_steps
 
     n_rz_decomposition = (
-        sum(
-            len(rz_target_angles(inst))
-            for inst in circuit
-            if inst.get("gate") == "Rz"
-        )
+        sum(len(rz_target_angles(inst)) for inst in circuit if inst.get("gate") == "Rz")
         * n_trotter_steps
     )
 
@@ -241,9 +235,7 @@ def simulate_t_cultivation_circuit_fidelity(
         * fidelity_of_rz_h
         * fidelity_of_t_gate
     )
-    fidelity = (
-        fidelity_of_rz_layer * fidelity_cnot * fidelity_idle * fidelity_synthesis
-    )
+    fidelity = fidelity_of_rz_layer * fidelity_cnot * fidelity_idle * fidelity_synthesis
 
     return {
         "fidelity": fidelity,

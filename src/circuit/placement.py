@@ -11,15 +11,15 @@ def resolve_qubit_layout(
 ) -> tuple[int, int]:
     """Return (cols, rows) for *n_qubits* logical qubits.
 
-  Args:
-        n_qubits: Number of logical qubits in the circuit.
-        layout_override: Optional ``(cols, rows)`` from the CLI.
+    Args:
+          n_qubits: Number of logical qubits in the circuit.
+          layout_override: Optional ``(cols, rows)`` from the CLI.
 
-    Returns:
-        ``(cols, rows)`` with ``cols * rows >= n_qubits``.
+      Returns:
+          ``(cols, rows)`` with ``cols * rows >= n_qubits``.
 
-    Raises:
-        ValueError: invalid override or too-small grid.
+      Raises:
+          ValueError: invalid override or too-small grid.
     """
     if n_qubits < 1:
         raise ValueError(f"n_qubits must be >= 1, got {n_qubits}")
@@ -27,7 +27,9 @@ def resolve_qubit_layout(
     if layout_override is not None:
         cols, rows = layout_override
         if cols < 1 or rows < 1:
-            raise ValueError(f"layout dimensions must be positive, got ({cols}, {rows})")
+            raise ValueError(
+                f"layout dimensions must be positive, got ({cols}, {rows})"
+            )
         if cols * rows < n_qubits:
             raise ValueError(
                 f"layout ({cols}, {rows}) fits {cols * rows} qubits "

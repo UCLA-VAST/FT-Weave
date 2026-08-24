@@ -50,9 +50,7 @@ def _qubit_indices(qc: QuantumCircuit, qubits) -> list[int]:
     return indices
 
 
-def _decompose_one_qubit_to_rz(
-    qc: QuantumCircuit, circuit_instruction
-) -> list[dict]:
+def _decompose_one_qubit_to_rz(qc: QuantumCircuit, circuit_instruction) -> list[dict]:
     """Decompose arbitrary one-qubit gates into H/S/Rz IR instructions."""
     op = circuit_instruction.operation
     qubit = _qubit_indices(qc, circuit_instruction.qubits)[0]
@@ -84,7 +82,11 @@ def _decompose_one_qubit_to_rz(
         dec_name = dec_inst.operation.name.lower()
         dec_qubit = _qubit_indices(mini, dec_inst.qubits)[0]
         if dec_name in _DECOMPOSE_TO_RZ or dec_name in ("u1", "p"):
-            theta = float(dec_inst.operation.params[0]) if dec_inst.operation.params else 0.0
+            theta = (
+                float(dec_inst.operation.params[0])
+                if dec_inst.operation.params
+                else 0.0
+            )
             if dec_name in ("p", "u1"):
                 instructions.append(
                     {"gate": "Rz", "targets": [dec_qubit], "params": {"theta": theta}}
@@ -99,9 +101,7 @@ def _decompose_one_qubit_to_rz(
             params: dict = {}
             if gate == "Rz" and dec_inst.operation.params:
                 params["theta"] = float(dec_inst.operation.params[0])
-            instructions.append(
-                {"gate": gate, "targets": [qubit], "params": params}
-            )
+            instructions.append({"gate": gate, "targets": [qubit], "params": params})
         else:
             raise ValueError(f"Cannot decompose gate {dec_name} from {name}")
     return instructions

@@ -81,7 +81,9 @@ def _build_star_profiling_row(
     }
 
 
-_STAR_CLIFFORD_GATES = frozenset({"CNOT", "H", "S", "Sdg", "X", "Y", "Z", "CZ", "SWAP", "I"})
+_STAR_CLIFFORD_GATES = frozenset(
+    {"CNOT", "H", "S", "Sdg", "X", "Y", "Z", "CZ", "SWAP", "I"}
+)
 
 
 def compile_circuit_star(

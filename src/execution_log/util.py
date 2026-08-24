@@ -295,7 +295,13 @@ def validate_execution_log(
         factories = normalize_factories(factories)
 
         # Skip barrier and special operations
-        if operation in ["Barrier", "RUS_success", "RUS_fail", "stage_2_success", "stage_2_fail"]:
+        if operation in [
+            "Barrier",
+            "RUS_success",
+            "RUS_fail",
+            "stage_2_success",
+            "stage_2_fail",
+        ]:
             continue
 
         # Logical-qubit SE events (operation "SE_q", empty factories) ride

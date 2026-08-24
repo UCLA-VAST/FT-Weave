@@ -1,32 +1,30 @@
 [project]
 name = "transversal-star-compilation"
 version = "0.1.0"
-description = "A Python project for simulating rotation performance in quantum systems."
+description = "Compilation and architectural simulation of magic-state injection (STAR and T-cultivation) on neutral-atom quantum computers."
 authors = [
     { name = "Wan-Hsuan Lin", email = "wanhsuanlin@g.ucla.edu" }
 ]
 readme = "README.md"
-requires-python = ">=3.8"
+# The codebase uses PEP 604 unions (``int | None``) in runtime signatures.
+requires-python = ">=3.10"
 dependencies = [
-    "imageio>=2.35.1",
     "matplotlib>=3.7.5",
     "numpy>=1.24.4",
     "pandas>=2.0.3",
-    "pyqt5>=5.15.11",
-    "pyqtgraph>=0.13.3",
+    # OpenQASM parsing (src/circuit/qasm_loader.py) and gridsynth Rz decomposition
+    # (src/t_cultivation/util.py). ``qiskit.synthesis.gridsynth_rz`` needs Qiskit 2.x;
+    # the committed T-cultivation data was produced with 2.5.
+    "qiskit>=2.5",
     "scipy>=1.10.1",
-    "simpy>=4.1.1",
-    "sortedcontainers>=2.4.0",
-    "stim>=1.15.0",
-    "sympy>=1.13.3",
 ]
 
 [tool.setuptools]
 packages = ["src"]
 
-[project.optional-dependencies]
+# Installed by ``uv sync`` alongside the runtime dependencies.
+[dependency-groups]
 dev = [
     "pytest>=7.0",
     "black>=24.0",
-    "mypy>=1.0"
 ]

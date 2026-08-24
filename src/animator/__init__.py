@@ -6,5 +6,3 @@ from .circuit_execution_visualization import (
     plot_star_t_cultivation_execution_subfigures,
     plot_t_cultivation_execution,
 )
-from .animator_matplotlib import Animator
-from .ft_animator_matplotlib import FTAnimator

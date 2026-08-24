@@ -63,9 +63,7 @@ class StochasticCoverageObjective:
         if not factory_indices:
             return term.weight * float(problem.r_max + 1)
 
-        dists = [
-            int(problem.distances[fi, term.qubit_index]) for fi in factory_indices
-        ]
+        dists = [int(problem.distances[fi, term.qubit_index]) for fi in factory_indices]
         p_theta = problem.p_theta[term.angle]
         return term.weight * expected_distance(dists, p_theta, problem.r_max)
 
@@ -89,8 +87,7 @@ class StochasticCoverageObjective:
 
         factories_by_angle_old = self._factories_by_angle(assignment)
         factories_by_angle_new = {
-            angle: list(indices)
-            for angle, indices in factories_by_angle_old.items()
+            angle: list(indices) for angle, indices in factories_by_angle_old.items()
         }
 
         fi = self.problem.factory_index[factory_id]
@@ -103,9 +100,7 @@ class StochasticCoverageObjective:
 
         affected_term_indices: set[int] = set()
         for angle in (old_angle, new_angle):
-            affected_term_indices.update(
-                self.problem.terms_by_angle.get(angle, [])
-            )
+            affected_term_indices.update(self.problem.terms_by_angle.get(angle, []))
 
         delta = 0.0
         for term_index in affected_term_indices:

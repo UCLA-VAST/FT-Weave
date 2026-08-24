@@ -4,7 +4,7 @@ import sys
 # Ensure repository root is on sys.path so `src` is importable when running tests
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.rus import (
+from src.star.rus import (
     chain_decomposition_matching,
     verify_chain_decomposition,
 )

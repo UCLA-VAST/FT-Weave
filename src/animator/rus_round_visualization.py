@@ -9,7 +9,6 @@ For each round, displays a 2D layout of magic state factories and qubits with:
 - Assignment arrows showing factory-to-qubit connections
 """
 
-from attr import Factory
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
@@ -1548,9 +1547,7 @@ def _trap_grid_scene_extent(
     if not raw_locs:
         return -1.0, 1.0, -1.0, 1.0
 
-    margin = (
-        TRAP_GRID_AXIS_MARGIN if axis_margin is None else float(axis_margin)
-    )
+    margin = TRAP_GRID_AXIS_MARGIN if axis_margin is None else float(axis_margin)
     arrow_off = (
         TRAP_GRID_ARROW_LABEL_OFFSET
         if arrow_label_offset is None

@@ -1,4 +1,8 @@
-from src.circuit.gate_set import GateSetKind, classify_circuit, validate_circuit_for_backend
+from src.circuit.gate_set import (
+    GateSetKind,
+    classify_circuit,
+    validate_circuit_for_backend,
+)
 
 
 def test_classify_clifford_rz():

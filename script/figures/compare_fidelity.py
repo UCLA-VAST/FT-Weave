@@ -24,9 +24,13 @@ plt.rcParams.update(
 )
 
 # Fidelity comparisons use the STAR main compile setting from evaluation_fidelity_star.py.
+# ``script/`` makes that module importable by its bare name; the repo root makes
+# ``src`` importable when this file is run directly.
 _SCRIPT_ROOT = Path(__file__).resolve().parent.parent
-if str(_SCRIPT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_SCRIPT_ROOT))
+_REPO_ROOT = _SCRIPT_ROOT.parent
+for _path in (str(_REPO_ROOT), str(_SCRIPT_ROOT)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 from evaluation_fidelity_star import MAIN_SETTINGS, SETTINGS  # noqa: E402
 

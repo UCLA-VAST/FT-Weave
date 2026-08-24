@@ -12,7 +12,11 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Repo root (two levels up from script/figures/) so ``src`` is importable when
+# this file is run directly, e.g. ``uv run script/figures/<name>.py``.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from src.animator.circuit_execution_visualization import plot_star_execution_subfigures
 from src.animator.rus_round_visualization import (

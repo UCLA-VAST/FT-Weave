@@ -2118,10 +2118,7 @@ def _plot_t_cultivation_execution_on_ax(
             and operation in {"move", "return_move", "CNOT"}
         )
         is_circuit_cnot_gate = (
-            not factories
-            and operation == "CNOT"
-            and move_vecs is None
-            and qubits
+            not factories and operation == "CNOT" and move_vecs is None and qubits
         )
 
         if is_circuit_move and qubits:

@@ -30,7 +30,9 @@ def resolve_indexed(values, idx: int):
     return values
 
 
-def operation_end_time(operation: str, start_time: float, movement_time: float = 0.0) -> float:
+def operation_end_time(
+    operation: str, start_time: float, movement_time: float = 0.0
+) -> float:
     if operation == "SE":
         return start_time + SE_TIME
     if operation == "CNOT":

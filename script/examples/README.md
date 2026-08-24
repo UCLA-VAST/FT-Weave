@@ -1,67 +1,84 @@
 # Examples
 
-Minimal scripts for compiling **general circuits** (not just TFIM) on the T-cultivation architecture.
+Minimal scripts for compiling **general circuits** (not just TFIM) on the two
+magic-state architectures. Start here to see the full path from a circuit to an
+execution log.
 
 ## Files
 
+| File                                | Description                                                     |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `minimal_clifford_rz.qasm`          | Small Clifford+Rz circuit on 4 qubits (STAR input)              |
+| `minimal_clifford_t.qasm`           | Small Clifford+T circuit on 4 qubits (T-cultivation input)      |
+| `compile_star_circuit.py`           | Load QASM (or build IR by hand), compile with STAR              |
+| `compile_t_cultivation_circuit.py`  | Same, for the T-cultivation architecture                        |
 
-| File                                                                   | Description                                                    |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `[minimal_clifford_t.qasm](minimal_clifford_t.qasm)`                   | Small Clifford+T circuit on 4 qubits                           |
-| `[compile_t_cultivation_circuit.py](compile_t_cultivation_circuit.py)` | Load QASM (or build IR by hand), compile, print execution logs |
-
+STAR injects arbitrary-angle rotations directly, so it takes **Clifford+Rz**
+circuits and rejects bare `T`/`Tdg`. T-cultivation prepares `T` states, so it takes
+**Clifford+T** circuits. `validate_circuit_for_backend()` enforces this up front.
 
 ## Quick start
 
 Run from the **repository root**:
 
 ```bash
-# Default: bundled QASM, split-layer compile
-uv run script/examples/compile_t_cultivation_circuit.py
+# STAR: bundled Clifford+Rz QASM
+uv run script/examples/compile_star_circuit.py
 
-# Full scheduler (CNOT through real T-cultivation scheduling)
-uv run script/examples/compile_t_cultivation_circuit.py --no-split-layers
+# STAR: save an execution diagram (data qubits q* + factory qubits f*)
+uv run script/examples/compile_star_circuit.py --plot
 
-# Save execution diagram (data qubits q* + factory qubits f*)
+# STAR: asynchronous (per-factory) execution instead of synchronous
+uv run script/examples/compile_star_circuit.py --parallel-execution --plot
+
+# T-cultivation: full scheduler (CNOT scheduled together with T injection)
 uv run script/examples/compile_t_cultivation_circuit.py --no-split-layers --plot
 
-# Programmatic circuit (no QASM file)
-uv run script/examples/compile_t_cultivation_circuit.py --hand-built --plot
+# Programmatic circuit (no QASM file), either backend
+uv run script/examples/compile_star_circuit.py --hand-built --plot
 
 # Your own QASM file
-uv run script/examples/compile_t_cultivation_circuit.py --qasm path/to/circuit.qasm --plot
+uv run script/examples/compile_star_circuit.py --qasm path/to/circuit.qasm --plot
 ```
 
 Expected output: the layered circuit and a per-log summary (event counts, wall time).
 
-With `--plot`, writes a timeline PDF under `output/circuit_execution/examples/` showing:
-- **q0, q1, …** — logical (data) qubit lanes
-- **f0, f1, …** — T-factory lanes
+With `--plot`, a timeline PDF is written under `output/circuit_execution/examples/`:
 
-`stage_2_success` / `stage_2_fail` entries are written to the execution log (visible in the console op summary) but omitted from the timeline figure.
+- **q0, q1, …** — logical (data) qubit lanes
+- **f0, f1, …** — magic-state factory lanes
 
 Both a labeled version and a `_no_text` variant are saved (see console for paths).
+For T-cultivation, `stage_2_success` / `stage_2_fail` entries appear in the
+execution log (visible in the console op summary) but are omitted from the figure.
 
 ## Compile modes
 
+`compile_star_circuit.py` always partitions the circuit into layers: consecutive
+`Rz` rotations between Clifford blocks are merged, so a whole layer of rotations is
+injected in one STAR round.
+
+`compile_t_cultivation_circuit.py` offers two modes:
 
 | Mode                       | Flag                | Behavior                                                                                                                                      |
 | -------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Split layers** (default) | `--split-layers`    | Each `T` / `Rz` layer runs `t_cultivation_execution`. `H` / `CNOT` get lightweight stub logs (same as TFIM evaluation).                       |
-| **Full scheduler**         | `--no-split-layers` | Entire circuit goes through one `t_cultivation_execution` call. Use this when **CNOT** gates must be scheduled together with **T** injection. |
+| **Split layers** (default) | `--split-layers`    | Each `T` / `Rz` layer runs `t_cultivation_execution`. `H` / `CNOT` get lightweight stub logs (same as the TFIM evaluation).                    |
+| **Full scheduler**         | `--no-split-layers` | The entire circuit goes through one `t_cultivation_execution` call. Use this when **CNOT** gates must be scheduled together with **T** injection. |
 
-
-For circuits with interleaved Clifford and non-Clifford gates, prefer `--no-split-layers`.
+For circuits with interleaved Clifford and non-Clifford gates, prefer
+`--no-split-layers`.
 
 ## Circuit input formats
 
 ### OpenQASM 2.0
 
-Supported native gates include `h`, `t`, `tdg`, `cx`, `rz`, `x`, `y`, `z`, `s`, `sdg`, and common one-qubit rotations (`rx`, `ry`, `u`, …) which are normalized to the internal IR.
+Supported native gates include `h`, `t`, `tdg`, `cx`, `rz`, `x`, `y`, `z`, `s`,
+`sdg`, and common one-qubit rotations (`rx`, `ry`, `u`, …), which are normalized to
+the internal IR.
 
 ### Internal IR (`list[dict]`)
 
-Same format as TFIM generators:
+Same format as the TFIM generators:
 
 ```python
 {"gate": "T",    "targets": [0],      "params": {}}
@@ -69,7 +86,9 @@ Same format as TFIM generators:
 {"gate": "Rz",   "targets": [0, 1],   "params": {"angles": {0: 0.5, 1: 0.3}}}
 ```
 
-For `Rz`, consecutive rotations between Clifford blocks are merged into one layer. Per-qubit angles live in `params["angles"]`; a single shared angle can use `params["theta"]`.
+For `Rz`, consecutive rotations between Clifford blocks are merged into one layer.
+Per-qubit angles live in `params["angles"]`; a single shared angle can use
+`params["theta"]`.
 
 ## Programmatic compile (minimal)
 
@@ -101,35 +120,32 @@ circuit, execution_logs, _ = compile_circuit_t_cultivation(
     placement="col_based",
     code_distance=7,
     config=config,
-    split_layers=True,  # or False for full scheduler
+    split_layers=True,  # or False for the full scheduler
 )
 ```
 
+See the top-level [README](../../README.md) for the STAR equivalent and for the
+meaning of each compile-strategy flag.
+
 ## Fidelity evaluation
 
-For compile + logical fidelity + CSV output, use the evaluation CLI:
+These examples stop at the execution log. To go all the way to logical fidelity and
+CSV output, use the evaluation sweeps, which compile a 2D transverse-field Ising
+model Trotter layer across strategies, AOD counts, and code distances:
 
 ```bash
-uv run script/evaluation_fidelity_qasm.py \
-  --qasm script/examples/minimal_clifford_t.qasm \
-  --backend t_cultivation \
-  --no-split-layers \
-  --code-distance 7 \
-  --n-aods 2
+uv run script/evaluation_fidelity_star.py
+uv run script/evaluation_fidelity_t_cultivation.py
 ```
 
-Results are appended to `output/evaluation/qasm/qasm_t_cultivation_fidelity_results.csv`.
-
-For **Clifford+Rz** circuits (no bare `T`/`Tdg`), use `--backend star` or `--backend auto`.
+Results land in `output/evaluation/fidelity/`.
 
 ## Related code
 
-
-| Module                                   | Role                                                  |
-| ---------------------------------------- | ----------------------------------------------------- |
-| `src/circuit/qasm_loader.py`             | QASM → internal IR                                    |
-| `src/circuit/layer_partition.py`         | Merge consecutive `Rz` layers between Clifford blocks |
-| `src/t_cultivation/general_circuit_t.py` | `compile_circuit_t_cultivation()`                     |
-| `script/evaluation_fidelity_qasm.py`     | Full evaluation harness                               |
-
-
+| Module                                     | Role                                                  |
+| ------------------------------------------ | ----------------------------------------------------- |
+| `src/circuit/qasm_loader.py`               | QASM → internal IR                                    |
+| `src/circuit/gate_set.py`                  | Gate-set classification and per-backend validation    |
+| `src/circuit/layer_partition.py`           | Merge consecutive `Rz` layers between Clifford blocks |
+| `src/star/general_circuit_star.py`         | `compile_circuit_star()`                              |
+| `src/t_cultivation/general_circuit_t.py`   | `compile_circuit_t_cultivation()`                     |

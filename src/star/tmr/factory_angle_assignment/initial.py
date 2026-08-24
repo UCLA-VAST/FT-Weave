@@ -22,14 +22,9 @@ def demand_proportional_initial(
         angle_weights[term.angle] += term.weight
 
     if not angle_weights:
-        return {
-            factory_id: problem.angles[0]
-            for factory_id in problem.factory_ids
-        }
+        return {factory_id: problem.angles[0] for factory_id in problem.factory_ids}
 
-    allocation = integer_allocation(
-        problem.n_factories, dict(angle_weights)
-    )
+    allocation = integer_allocation(problem.n_factories, dict(angle_weights))
 
     assignment: dict[int, float] = {}
     available = set(problem.factory_ids)
@@ -87,9 +82,7 @@ def nearest_qubit_angle_initial(
 
         qubit_id = problem.qubit_ids[best_qi]
         angle = next(
-            term.angle
-            for term in problem.coverage_terms
-            if term.qubit_id == qubit_id
+            term.angle for term in problem.coverage_terms if term.qubit_id == qubit_id
         )
         assignment[factory_id] = normalize_angle(angle)
 

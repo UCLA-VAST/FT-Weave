@@ -148,7 +148,9 @@ def expand_multi_target_layers(
                     groups[float(theta)].append(int(qubit))
                 expansion_groups = [
                     (gridsynth_rz_templates(theta, epsilon=epsilon), sorted(qubits))
-                    for theta, qubits in sorted(groups.items(), key=lambda item: item[0])
+                    for theta, qubits in sorted(
+                        groups.items(), key=lambda item: item[0]
+                    )
                 ]
 
             for rz_templates, group_targets in expansion_groups:

@@ -10,9 +10,7 @@ from src.circuit.rz_params import (
 )
 
 
-def _append_or_merge_rz_layer(
-    layers: list[dict], targets: list, params: dict
-) -> None:
+def _append_or_merge_rz_layer(layers: list[dict], targets: list, params: dict) -> None:
     """Merge consecutive Rz gates into a single layer between Clifford blocks."""
     gate_angles = rz_target_angles({"gate": "Rz", "targets": targets, "params": params})
 

@@ -1,88 +1,81 @@
+"""STAR fidelity and runtime evaluation sweep (paper data generator).
+
+Running this module writes the four CSVs consumed by the paper figure scripts:
+
+``output/evaluation/fidelity/raw_fidelity_results.csv``
+    Uncorrected physical-qubit baseline (appendix fidelity figures).
+``output/evaluation/fidelity/star_fidelity_results.csv``
+    End-to-end logical fidelity per STAR compile setting.
+``output/evaluation/fidelity/star_full_trotter_profiling_results.csv``
+    Per-round execution-time profiling (figures 8 and 9).
+
+Reproduce with::
+
+    uv run script/evaluation_fidelity_star.py
+"""
+
+import argparse
+import csv
+import os
+import sys
+
+import numpy as np
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from script.script_utils import reset_csv_files
+from src.error_model import LogicalErrorModel, PhysicalErrorModel
 from src.fidelity_simulation import (
     simluate_trotter_2d_tfim_fidelity,
     simluate_trotter_2d_tfim_fidelity_star,
 )
-from src.error_model import PhysicalErrorModel, LogicalErrorModel
-from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
-import os
 from src.star.config import (
     get_config as get_star_config,
     update_config as update_star_config,
 )
 from src.star.tfim_star import generate_one_layer_2d_tfim_circuit_star
-import numpy as np
-import csv
+from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
 
-
-# (placement, prepare_lookahead_angles, trivial_return, consider_skip_rus,
-#  decompose_move, parallel_execution)
+# A STAR compile setting is
+# ``(placement, prepare_lookahead_angles, trivial_return, consider_skip_rus,
+#    decompose_move, parallel_execution)``:
+#
+# placement                 magic-state microarchitecture (``src.ds.get_microarchitecture``)
+# prepare_lookahead_angles  speculatively prepare the next rotation's angles
+# trivial_return            return magic states along the reverse of the forward path
+# consider_skip_rus         operation rematerialization: 0 = off, 2 = skip whole RUS round
+# decompose_move            split a transfer into independently scheduled AOD legs
+# parallel_execution        asynchronous (per-factory) instead of synchronous execution
+#
+# ``SETTINGS`` is the sweep run by ``__main__``; the first four entries are the
+# compilation strategies compared in figures 8 and 9 (mirrored, in the same
+# order, by ``SETTINGS`` in ``script/process_csv_paper.py``). The fifth is the
+# high-parallelism strategy used for the runtime profile and for every
+# fidelity comparison in the appendix.
 SETTINGS = [
-    ("seperate_region_col", False, True, 0, False, False),  # vanilla
-    ("seperate_region_col", False, False, 0, True, False),  # optimized return
-    (
-        "seperate_region_col",
-        False,
-        False,
-        2,
-        True,
-        False,
-    ),  # optimized return + skip whole RUS
-    ("seperate_region_col", True, True, 0, False, False),  # lookahead angles
-    (
-        "seperate_region_col",
-        True,
-        False,
-        0,
-        True,
-        False,
-    ),  # lookahead angles + optimized return
-    (
-        "seperate_region_col",
-        True,
-        False,
-        2,
-        True,
-        False,
-    ),  # lookahead angles + optimized return + skip whole RUS
-    ("col_based", False, True, 0, False, False),  # vanilla
-    ("col_based", True, True, 0, False, False),  # optimized return
-    ("col_based", True, False, 0, True, False),  # optimized return + skip whole RUS
-    ("col_based", True, False, 2, True, False),  # lookahead angles
-    ("col_based", False, False, 0, True, False),  # lookahead angles + optimized return
-    (
-        "col_based",
-        False,
-        False,
-        2,
-        True,
-        False,
-    ),  # lookahead angles + optimized return + skip whole RUS
-    (
-        "col_based",
-        True,
-        False,
-        2,
-        False,
-        True,
-    ),  # optimized return + skip whole RUS + asynchronous RUS
-    (
-        "col_based",
-        True,
-        False,
-        2,
-        False,
-        True,
-    ),  # lookahead angles + optimized return + skip whole RUS + asynchronous RUS
+    ("seperate_region_row", False, True, 0, False, False),  # Baseline
+    ("seperate_region_row", False, False, 0, True, False),  # + Routing opt.
+    ("col_based", True, False, 2, False, True),  # Greedy exec. (+ microarch. opt.)
+    ("col_based", False, False, 2, True, False),  # High parallelism exec.
+    ("col_based", True, False, 2, True, False),  # Runtime profile / fidelity reference
 ]
+
+# Setting used for every STAR curve in the appendix fidelity figures. Must stay
+# a member of ``SETTINGS``; ``script/figures/compare_fidelity.py`` imports it.
 MAIN_SETTINGS = [
     ("col_based", True, False, 2, True, False),
-    ("col_based", False, False, 2, True, False),
 ]
 
-# TEMP_SETTINGS = [
-#     ("seperate_region_col", False, False, 2, False, True),
-#     ("checkerboard", False, False, 2, False, True),
-# ]
+# Sweep axes shared by the fidelity and profiling CSVs.
+QUBIT_LAYOUTS = [(4, 4), (6, 6), (8, 8), (10, 10)]  # 16, 36, 64, 100 qubits
+CODE_DISTANCES = [7, 9, 13]
+N_AODS = [1, 2, 3, 5]
+TRIALS_PER_CONFIG = 10
+# Logical-qubit syndrome-extraction cadence, in cycles. Drives the ``SE_q``
+# events that the simulator folds into ``fidelity_idle``.
+LOGICAL_SE_INTERVAL = 10
 
 
 # ! only consider 1 trotter for now
@@ -352,77 +345,69 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
 
 
 if __name__ == "__main__":
-    # Define parameter grid
-    qubit_layout = [
-        (4, 4),  # 16 qubits
-        # (5, 5),  # 25 qubits
-        (6, 6),  # 36 qubits
-        # (7, 7),  # 49 qubits
-        (8, 8),  # 64 qubits
-        # (9, 9),  # 81 qubits
-        (10, 10),  # 100 qubits
-    ]
-    physical_error_model: PhysicalErrorModel = PhysicalErrorModel("lookahead")
+    parser = argparse.ArgumentParser(
+        description=(
+            "STAR fidelity + runtime evaluation sweep. Writes the CSVs consumed "
+            "by script/figures/compare_fidelity.py and script/process_csv_paper.py."
+        )
+    )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help=(
+            "Append to existing CSVs instead of rewriting them. Off by default so "
+            "a repeated run reproduces the same data rather than duplicating rows."
+        ),
+    )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=TRIALS_PER_CONFIG,
+        help=f"Trials per configuration (default: {TRIALS_PER_CONFIG})",
+    )
+    args = parser.parse_args()
+
+    output_dir = "output/evaluation/fidelity"
+    os.makedirs(output_dir, exist_ok=True)
+    if not args.append:
+        reset_csv_files(
+            os.path.join(output_dir, "raw_fidelity_results.csv"),
+            os.path.join(output_dir, "star_fidelity_results.csv"),
+            os.path.join(output_dir, "star_full_trotter_profiling_results.csv"),
+        )
+
+    physical_error_model = PhysicalErrorModel("lookahead")
     p_ph = physical_error_model.get_error_rate("p_ph")
-    j_h = [(1.0, 1.0)]  # J, h, dt
+
+    # One second-order Trotter layer of the 2D transverse-field Ising model.
+    # The step size dt is chosen so the Trotter error per step is comparable to
+    # the physical error rate: dt = l1 * alpha * p_ph / omega.
+    l1, alpha, omega = 1, 2, 1
     tfim = []
-    l1 = 1
-    alpha = 2
-    omega = 1
-    for j, h in j_h:
+    for j, h in [(1.0, 1.0)]:
         dt = l1 * alpha * p_ph / omega
-        T = 10 / j
-        n_trotter = int(T / dt)
-        tfim.append((j, h, dt, n_trotter))
+        tfim.append((j, h, dt, int((10 / j) / dt)))
 
-    params = {
-        "qubit_layout": qubit_layout,
-        "tfim": tfim,
-    }
-    # evaluate raw fidelity
-    run_evaluation_raw(params=params, physical_error_model=physical_error_model)
+    # 1. Uncorrected physical baseline (appendix fidelity figures).
+    run_evaluation_raw(
+        params={"qubit_layout": QUBIT_LAYOUTS, "tfim": tfim},
+        physical_error_model=physical_error_model,
+    )
 
+    # 2. STAR sweep over compile strategies x AOD count x code distance.
     logical_error_models = [
-        LogicalErrorModel(physical_model=physical_error_model, code_distance=7),
-        LogicalErrorModel(physical_model=physical_error_model, code_distance=9),
-        LogicalErrorModel(physical_model=physical_error_model, code_distance=13),
+        LogicalErrorModel(physical_model=physical_error_model, code_distance=d)
+        for d in CODE_DISTANCES
     ]
-
-    # star_params = {
-    #     "qubit_layout": qubit_layout,
-    #     "tfim": tfim,
-    #     "n_aods": [1, 5],
-    #     "settings": SETTINGS,
-    #     "trials_per_config": 10,
-    #     "logical_se_interval": 10,
-    # }
-
-    # run_evaluation_star(
-    #     params=star_params,
-    #     logical_error_models=logical_error_models,
-    #     analyze_result=True,
-    # )
-
-    # star_params = {
-    #     "qubit_layout": qubit_layout,
-    #     "tfim": tfim,
-    #     "n_aods": [2, 3, 4],
-    #     "settings": MAIN_SETTINGS,
-    #     "trials_per_config": 5,
-    #     "logical_se_interval": 10,
-    # }
-
-    star_params = {
-        "qubit_layout": qubit_layout,
-        "tfim": tfim,
-        "n_aods": [2, 3, 4],
-        "settings": [("seperate_region_row", False, True, 0, False, False)],
-        "trials_per_config": 5,
-        "logical_se_interval": 10,
-    }
-
     run_evaluation_star(
-        params=star_params,
+        params={
+            "qubit_layout": QUBIT_LAYOUTS,
+            "tfim": tfim,
+            "n_aods": N_AODS,
+            "settings": SETTINGS,
+            "trials_per_config": args.trials,
+            "logical_se_interval": LOGICAL_SE_INTERVAL,
+        },
         logical_error_models=logical_error_models,
         analyze_result=True,
     )

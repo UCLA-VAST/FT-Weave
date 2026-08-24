@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-CLIFFORD_GATES = frozenset(
-    {"H", "S", "Sdg", "X", "Y", "Z", "CNOT", "CZ", "SWAP", "I"}
-)
+CLIFFORD_GATES = frozenset({"H", "S", "Sdg", "X", "Y", "Z", "CNOT", "CZ", "SWAP", "I"})
 RZ_GATES = frozenset({"Rz"})
 T_GATES = frozenset({"T", "Tdg"})
 SUPPORTED_GATES = CLIFFORD_GATES | RZ_GATES | T_GATES
@@ -75,9 +73,7 @@ def validate_circuit_for_backend(
     unsupported = _unsupported_gates(circuit)
 
     if unsupported:
-        raise ValueError(
-            f"Unsupported gate(s) in circuit: {', '.join(unsupported)}"
-        )
+        raise ValueError(f"Unsupported gate(s) in circuit: {', '.join(unsupported)}")
     if kind == GateSetKind.PURE_CLIFFORD:
         raise ValueError(
             "Circuit contains only Clifford gates; nothing to inject via STAR or T-cultivation."

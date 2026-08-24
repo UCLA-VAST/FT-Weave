@@ -2,6 +2,13 @@
 
 import math
 import os
+import sys
+
+# Repo root (one level up from script/) so ``src`` is importable when this file
+# is run directly, e.g. ``uv run script/process_csv_paper.py``.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -2607,9 +2614,7 @@ def _movement_optimality_gap(
             return float("nan")
         return actual / ideal_leg
 
-    movement_gap = (
-        float("nan") if cnot_time <= 0.0 else actual_total / cnot_time
-    )
+    movement_gap = float("nan") if cnot_time <= 0.0 else actual_total / cnot_time
 
     return {
         "cnot_time": cnot_time,
@@ -3003,8 +3008,7 @@ def _print_setting_study_sequential_improvements(
             pct = _mean_pct_improvement_vs_previous(g_prev, g_curr)
             if pct is None:
                 print(
-                    f"      {prev_label} → {curr_label}: "
-                    "(no overlapping n_qubits)"
+                    f"      {prev_label} → {curr_label}: " "(no overlapping n_qubits)"
                 )
             else:
                 print(f"      {prev_label} → {curr_label}: {pct:+.2f}%")

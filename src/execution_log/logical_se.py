@@ -147,4 +147,6 @@ class LogicalSEScheduler:
             if not due_by_time:
                 return
             for due_time in sorted(due_by_time):
-                self._emit_grouped(due_time, aod_id, execution_log, due_by_time[due_time])
+                self._emit_grouped(
+                    due_time, aod_id, execution_log, due_by_time[due_time]
+                )

@@ -34,9 +34,7 @@ def optimize_greedy(
             for candidate_angle in problem.angles:
                 if candidate_angle == current_angle:
                     continue
-                delta = objective.delta_cost(
-                    assignment, factory_id, candidate_angle
-                )
+                delta = objective.delta_cost(assignment, factory_id, candidate_angle)
                 if delta < best_delta:
                     best_delta = delta
                     best_factory_id = factory_id

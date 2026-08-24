@@ -362,9 +362,7 @@ class TestTCultivationLogicalSE:
                 # blocks (it can also coincide with the block end since one cycle
                 # is added on top via SE_TIME).
                 t = entry["start_time"]
-                inside_any = any(
-                    s <= t < e for (s, e, _) in stage_intervals
-                )
+                inside_any = any(s <= t < e for (s, e, _) in stage_intervals)
                 # Logical SE may also be triggered by force_due after the block,
                 # so we only check that *if* it's inside a block, the time is an
                 # integer offset (consistent with per-cycle expansion).

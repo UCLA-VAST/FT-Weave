@@ -1,3 +1,4 @@
+import argparse
 import csv
 import os
 import sys
@@ -14,7 +15,11 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from script.script_utils import add_repo_root_to_syspath, ensure_csv_writer
+from script.script_utils import (
+    add_repo_root_to_syspath,
+    ensure_csv_writer,
+    reset_csv_files,
+)
 
 add_repo_root_to_syspath(__file__)
 
@@ -33,9 +38,14 @@ logging.basicConfig(
 )
 logging.getLogger("src").setLevel(logging.WARNING)
 
-# T-cultivation compile grid: ``(trivial_return, decompose_move,
-# redistribute_stage1_success)``. When ``redistribute_stage1_success`` is False, stage-1
-# outcomes are not patched across factories (see ``complete_stage1_preparation``).
+# A T-cultivation compile setting is ``(trivial_return, decompose_move,
+# redistribute_stage1_success)``:
+#
+# trivial_return               return magic states along the reverse of the forward path
+# decompose_move               split a transfer into independently scheduled AOD legs
+# redistribute_stage1_success  patch check-stage outcomes across factories
+#                              (see ``complete_stage1_preparation``)
+#
 # RUS skip, TMR assignment, and parallel angle execution are STAR-only.
 COMPILE_SETTINGS = [
     (True, False, False),
@@ -44,8 +54,31 @@ COMPILE_SETTINGS = [
 ]
 
 _DEFAULT_COMPILE = (False, True, True)
-# Former main default: ``decompose_move=True`` with stage-1 redistribution on.
+# Best T-cultivation strategy: optimized routing plus check-stage patch
+# redistribution. Used for every T-cultivation curve in the appendix fidelity
+# figures and for the runtime profile.
 MAIN_COMPILE_SETTING = (False, True, True)
+
+# Ablation grid for figures 8 and 9: each entry pairs a microarchitecture with a
+# compile setting, so it cannot be expressed as a plain cross product. Mirrors
+# ``_T_SETTING_ABLATION_GRID`` in ``script/process_csv_paper.py`` (same order).
+#   (placement, trivial_return, decompose_move, redistribute_stage1_success)
+ABLATION_GRID = [
+    ("seperate_region_row", True, False, False),  # Sync. execution
+    ("seperate_region_row", False, True, False),  # + Routing opt.
+    ("col_based", False, True, False),  # + Microarch. opt.
+    ("col_based", False, True, True),  # + Check-stage patch redist.
+]
+
+# Sweep axes shared with the STAR evaluation.
+QUBIT_LAYOUTS = [(4, 4), (6, 6), (8, 8), (10, 10)]  # 16, 36, 64, 100 qubits
+N_AODS = [1, 2, 3, 5]
+TRIALS_PER_CONFIG = 10
+# Logical-qubit syndrome-extraction cadence, in cycles.
+LOGICAL_SE_INTERVAL = 10
+# Gridsynth approximation accuracy (per-Rz target operator distance); the per-Rz
+# state infidelity is ``EPSILON ** 2``.
+EPSILON = 1e-4
 
 
 @dataclass(frozen=True)
@@ -418,131 +451,77 @@ def run_evaluation_t_cultivation(
 
 
 if __name__ == "__main__":
-    qubit_layout = [
-        (4, 4),
-        (6, 6),
-        (8, 8),
-        (10, 10),
-    ]
+    parser = argparse.ArgumentParser(
+        description=(
+            "T-cultivation fidelity + runtime evaluation sweep. Writes the CSVs "
+            "consumed by script/figures/compare_fidelity.py and "
+            "script/process_csv_paper.py."
+        )
+    )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help=(
+            "Append to existing CSVs instead of rewriting them. Off by default so "
+            "a repeated run reproduces the same data rather than duplicating rows."
+        ),
+    )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=TRIALS_PER_CONFIG,
+        help=f"Trials per configuration (default: {TRIALS_PER_CONFIG})",
+    )
+    args = parser.parse_args()
+
+    output_dir = "output/evaluation/fidelity"
+    os.makedirs(output_dir, exist_ok=True)
+    if not args.append:
+        reset_csv_files(
+            os.path.join(output_dir, "t_cultivation_fidelity_results.csv"),
+            os.path.join(output_dir, "t_cultivation_fidelity_profiling_results.csv"),
+        )
+
+    physical_error_model = PhysicalErrorModel("lookahead")
+    p_ph = physical_error_model.get_error_rate("p_ph")
+
+    # One second-order Trotter layer of the 2D transverse-field Ising model,
+    # with the same step size as the STAR evaluation.
+    l1, alpha, omega = 1, 2, 1
+    tfim = []
+    for j, h in [(1.0, 1.0)]:
+        dt = l1 * alpha * p_ph / omega
+        tfim.append((j, h, dt, 1))
+
+    # Cultivation targets: (stage-2 fidelity target, factory patch size, code distance).
     t_settings = [
         TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=7),
         TSetting(fidelity_target=1e-8, factory_physical_size=2, distance=9),
         TSetting(fidelity_target=1e-8, factory_physical_size=4, distance=13),
-        # TSetting(fidelity_target=1e-9, factory_physical_size=4, distance=13),
     ]
 
-    physical_error_model: PhysicalErrorModel = PhysicalErrorModel("lookahead")
-    p_ph = physical_error_model.get_error_rate("p_ph")
-    j_h = [(1.0, 1.0)]
-    tfim = []
-    l1 = 1
-    alpha = 2
-    omega = 1
-    for j, h in j_h:
-        dt = l1 * alpha * p_ph / omega
-        T = 10 / j
-        # n_trotter = int(T / dt)
-        n_trotter = 1
-        tfim.append((j, h, dt, n_trotter))
-
     common_params = {
-        "qubit_layout": qubit_layout,
+        "qubit_layout": QUBIT_LAYOUTS,
         "tfim": tfim,
-        # Gridsynth approximation accuracy (per-Rz target operator distance).
-        # Per-Rz state infidelity is ``epsilon ** 2``.
-        "epsilon": 1e-4,
-        # Logical-qubit SE cadence (in cycles). ``None`` disables the
-        # scheduler; with a value set, ``SE_q`` events are emitted and the
-        # simulator's ``fidelity_idle`` term contributes to the total.
-        "logical_se_interval": 10,
-        # Compilation knobs (see ``MAIN_COMPILE_SETTING``).
-        "compile_settings": [MAIN_COMPILE_SETTING],
-    }
-
-    # Main fidelity/runtime sweep, matching the STAR script structure.
-    # params = {
-    #     **common_params,
-    #     "placement_methods": ["col_based"],
-    #     "n_aods": [2, 3, 4],
-    #     "settings": t_settings,
-    #     "trials_per_config": 5,
-    # }
-    # run_evaluation_t_cultivation(
-    #     params=params,
-    #     physical_error_model=physical_error_model,
-    #     analyze_result=True,
-    # )
-
-    # # Architecture study.
-    # params = {
-    #     **common_params,
-    #     "placement_methods": ["seperate_region_row", "checkerboard"],
-    #     "n_aods": [1, 5],
-    #     "settings": t_settings,
-    #     "trials_per_config": 5,
-    # }
-    # run_evaluation_t_cultivation(
-    #     params=params,
-    #     physical_error_model=physical_error_model,
-    #     analyze_result=True,
-    # )
-
-    # # Ablation study. This includes AOD=1 so compare_fidelity.py can use the
-    # # same col-based, one-AOD architecture subset for STAR and T-cultivation.
-    """
-    params = {
-        **common_params,
-        "placement_methods": ["col_based"],
-        "n_aods": [1, 5],
+        "epsilon": EPSILON,
+        "logical_se_interval": LOGICAL_SE_INTERVAL,
         "settings": t_settings,
-        "trials_per_config": 10,
-        "compile_settings": COMPILE_SETTINGS,
+        "n_aods": N_AODS,
+        "trials_per_config": args.trials,
     }
-    run_evaluation_t_cultivation(
-        params=params,
-        physical_error_model=physical_error_model,
-        analyze_result=True,
-    )
 
-    params = {
-        **common_params,
-        "placement_methods": ["seperate_region_row"],
-        "n_aods": [1, 5],
-        "settings": t_settings,
-        "trials_per_config": 10,
-        "compile_settings": [COMPILE_SETTINGS[0]],
-    }
-    run_evaluation_t_cultivation(
-        params=params,
-        physical_error_model=physical_error_model,
-        analyze_result=True,
-    )
-
-    params = {
-        **common_params,
-        "placement_methods": ["col_based"],
-        "n_aods": [2, 3, 4],
-        "settings": t_settings,
-        "trials_per_config": 10,
-        "compile_settings": [MAIN_COMPILE_SETTING],
-    }
-    run_evaluation_t_cultivation(
-        params=params,
-        physical_error_model=physical_error_model,
-        analyze_result=True,
-    )
-    """
-
-    params = {
-        **common_params,
-        "placement_methods": ["seperate_region_row"],
-        "n_aods": [1, 5],
-        "settings": t_settings,
-        "trials_per_config": 10,
-        "compile_settings": [COMPILE_SETTINGS[1]],
-    }
-    run_evaluation_t_cultivation(
-        params=params,
-        physical_error_model=physical_error_model,
-        analyze_result=True,
-    )
+    # ``ABLATION_GRID`` pairs each microarchitecture with its own compile
+    # setting, so run one sweep per placement rather than a cross product.
+    for placement in sorted({entry[0] for entry in ABLATION_GRID}):
+        compile_settings = [
+            entry[1:] for entry in ABLATION_GRID if entry[0] == placement
+        ]
+        run_evaluation_t_cultivation(
+            params={
+                **common_params,
+                "placement_methods": [placement],
+                "compile_settings": compile_settings,
+            },
+            physical_error_model=physical_error_model,
+            analyze_result=True,
+        )

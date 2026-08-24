@@ -16,14 +16,14 @@ def rz_target_angles(instruction: dict) -> dict[int, float]:
     if "angles" in params:
         raw = params["angles"]
         if not isinstance(raw, dict):
-            raise ValueError("Rz params['angles'] must be a dict mapping qubit -> theta")
+            raise ValueError(
+                "Rz params['angles'] must be a dict mapping qubit -> theta"
+            )
         return {int(q): float(raw[q]) for q in targets}
 
     theta = params.get("theta")
     if not isinstance(theta, Real):
-        raise ValueError(
-            "Rz instruction requires params['theta'] or params['angles']"
-        )
+        raise ValueError("Rz instruction requires params['theta'] or params['angles']")
     angle = float(theta)
     return {int(q): angle for q in targets}
 
@@ -32,7 +32,9 @@ def normalize_rz_angle(theta: float) -> float:
     return math.remainder(theta, 2 * math.pi)
 
 
-def combine_rz_angles(existing: dict[int, float], new: dict[int, float]) -> dict[int, float]:
+def combine_rz_angles(
+    existing: dict[int, float], new: dict[int, float]
+) -> dict[int, float]:
     """Combine consecutive Rz layers on the same qubits by summing angles."""
     merged = dict(existing)
     for qubit, theta in new.items():
