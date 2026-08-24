@@ -39,6 +39,13 @@ _ROW_RUS_MOVE_SHADE_ROUNDS = [
     [5],  # Optimized strategy w/ dropout
 ]
 
+# Middle strategy row: shade the RUS teleportation window replaced by rematerialization
+# in the bottom row (move → CNOT/teleportation → return, roughly t ≈ 60–66).
+_REMATERIALIZATION_SHADE_ROW_INDEX = 1
+_REMATERIALIZATION_TIME_WINDOW = (60.0, 67.0)
+_REMATERIALIZATION_SHADE_COLOR = "#FDAE6B"
+_REMATERIALIZATION_SHADE_LABEL = "Operation rematerialization"
+
 # Trap-grid movement arc/label colors (earlier batch → later batch). Override here or in
 # rus_round_visualization.TRAP_GRID_MOVEMENT_COLOR_* for all callers.
 RUS_TRAP_GRID_MOVEMENT_COLOR_EARLY = TRAP_GRID_MOVEMENT_COLOR_EARLY
@@ -196,12 +203,29 @@ def main(
         os.makedirs(out_dir, exist_ok=True)
 
     timeline_rows = [(label, log, nf, nq) for label, log, nf, nq, *_rest in row_plots]
-    row_time_shades: list[list[dict] | None] | None = None
+    row_time_shades: list[list[dict] | None] = [None] * len(timeline_rows)
     if shade_rus_moves:
-        row_time_shades = []
-        for (_, log, *_rest), rounds in zip(row_plots, row_rus_shade_rounds):
+        for row_idx, ((_, log, *_rest), rounds) in enumerate(
+            zip(row_plots, row_rus_shade_rounds)
+        ):
             specs = build_rus_move_shade_specs(log, rounds, alpha=rus_shade_alpha)
-            row_time_shades.append(specs if specs else None)
+            row_time_shades[row_idx] = specs if specs else None
+
+    remat_t0, remat_t1 = _REMATERIALIZATION_TIME_WINDOW
+    remat_spec = {
+        "time_start": remat_t0,
+        "time_end": remat_t1,
+        "color": _REMATERIALIZATION_SHADE_COLOR,
+        "label": _REMATERIALIZATION_SHADE_LABEL,
+        "alpha": rus_shade_alpha,
+    }
+    remat_row = _REMATERIALIZATION_SHADE_ROW_INDEX
+    existing_shades = row_time_shades[remat_row]
+    if existing_shades is None:
+        row_time_shades[remat_row] = [remat_spec]
+    else:
+        row_time_shades[remat_row] = [*existing_shades, remat_spec]
+
     plot_star_execution_subfigures(
         timeline_rows,
         show_logical_qubits=False,
