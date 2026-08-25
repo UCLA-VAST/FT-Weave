@@ -43,7 +43,7 @@ uv run script/examples/compile_star_circuit.py --qasm path/to/circuit.qasm --plo
 
 Expected output: the layered circuit and a per-log summary (event counts, wall time).
 
-With `--plot`, a timeline PDF is written under `output/circuit_execution/examples/`:
+With `--plot`, a timeline PDF is written under `output/examples/`:
 
 - **q0, q1, …** — logical (data) qubit lanes
 - **f0, f1, …** — magic-state factory lanes

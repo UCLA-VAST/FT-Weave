@@ -175,9 +175,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--output",
-        default=os.path.join(
-            _REPO_ROOT, "output/circuit_execution/examples/minimal_clifford_rz.pdf"
-        ),
+        default=os.path.join(_REPO_ROOT, "output/examples/minimal_clifford_rz.pdf"),
         help="PDF path when --plot is set",
     )
     args = parser.parse_args()

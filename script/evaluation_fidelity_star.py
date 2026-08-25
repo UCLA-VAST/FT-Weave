@@ -51,7 +51,7 @@ from src.tfim_logical import generate_one_layer_2d_tfim_circuit_cz
 #
 # ``SETTINGS`` is the sweep run by ``__main__``; the first four entries are the
 # compilation strategies compared in figures 8 and 9 (mirrored, in the same
-# order, by ``SETTINGS`` in ``script/process_csv_paper.py``). The fifth is the
+# order, by ``SETTINGS`` in ``script/figures/plot_fig08_09_execution_time.py``). The fifth is the
 # high-parallelism strategy used for the runtime profile and for every
 # fidelity comparison in the appendix.
 SETTINGS = [
@@ -63,7 +63,7 @@ SETTINGS = [
 ]
 
 # Setting used for every STAR curve in the appendix fidelity figures. Must stay
-# a member of ``SETTINGS``; ``script/figures/compare_fidelity.py`` imports it.
+# a member of ``SETTINGS``; ``script/figures/plot_fig10_overall_infidelity.py`` imports it.
 MAIN_SETTINGS = [
     ("col_based", True, False, 2, True, False),
 ]
@@ -258,18 +258,7 @@ def run_evaluation_star(params: dict, logical_error_models, analyze_result: bool
                                     config=config,
                                     parallel_execution=parallel_execution,
                                     analyze_result=analyze_result,
-                                    # result_path=log_dir + f"/trial_{trial}.pickle",
                                 )
-                                # print circuit execution diagram
-                                # from src.animator import plot_circuit_execution
-
-                                # for i, log in enumerate(full_logs):
-                                #     plot_circuit_execution(
-                                #         log,
-                                #         n_cols * n_rows,
-                                #         save_path=f"output/evaluation/circuit_execution/star_circuit_execution_{placement}_{trial}_{i}.pdf",
-                                #     )
-                                # assert False
                                 if analyze_result:
                                     if (
                                         profiling_writer is None
@@ -348,7 +337,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=(
             "STAR fidelity + runtime evaluation sweep. Writes the CSVs consumed "
-            "by script/figures/compare_fidelity.py and script/process_csv_paper.py."
+            "by script/figures/plot_fig10_overall_infidelity.py and script/figures/plot_fig08_09_execution_time.py."
         )
     )
     parser.add_argument(

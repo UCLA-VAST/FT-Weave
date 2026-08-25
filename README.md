@@ -111,13 +111,16 @@ src/
 
 script/
   examples/           minimal end-to-end compile examples (start here)
-  figures/            paper figure generators
+  figures/            paper figure generators, one per file: plot_figNN_*.py
   evaluation_fidelity_star.py            STAR evaluation sweep -> CSV
   evaluation_fidelity_t_cultivation.py   T-cultivation evaluation sweep -> CSV
-  process_csv_paper.py                   runtime figures from the profiling CSVs
 
 test/                 pytest suite
-output/               generated data and figures
+
+output/
+  evaluation/fidelity/  evaluation sweep CSVs
+  figures/              paper figures, named figNN_<caption>; supplementary/ for the rest
+  examples/             output of the example scripts (not tracked)
 ```
 
 ---
@@ -156,7 +159,7 @@ uv run script/examples/compile_t_cultivation_circuit.py --no-split-layers --plot
 ```
 
 Each prints the layered circuit and a per-layer event summary, and with `--plot`
-writes a timeline PDF to `output/circuit_execution/examples/`. Both accept
+writes a timeline PDF to `output/examples/`. Both accept
 `--qasm <file>` for your own OpenQASM 2.0 circuit and `--hand-built` to use the
 programmatic IR instead. See [`script/examples/README.md`](script/examples/README.md)
 for the circuit input formats and the compile modes.
@@ -262,19 +265,32 @@ Architectures.**
 
 ### Figure map
 
-| Figure | Script                                                                              | Output                                                                                             |
-| ------ | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 3      | `script/figures/plot_star_t_cultivation_execution_subfigures.py`                    | `output/circuit_execution/star_t_cultivation_1q2f_subfigures.pdf`                                    |
-| 5      | `script/figures/plot_star_analog_rotation_execution_subfigures_strategy_compare.py` | `output/circuit_execution/star_n9f9_optimized_vs_unoptimized_subfigures.pdf`                         |
-| 6      | *(same script)*                                                                     | `output/rus_rounds_detailed/strategy_compare/`                                                       |
-| 7      | `script/figures/plot_star_analog_rotation_execution_subfigures_sync_async.py`        | `output/circuit_execution/star_n9f9_col_based_naod3_synchronous_vs_asynchronous_timeline_movement.pdf`, `output/rus_rounds_detailed/sync_async/` |
-| 8, 9   | `script/process_csv_paper.py`                                                       | `output/prx_quantum/`                                                                                |
-| 10     | `script/figures/compare_fidelity.py`                                                | `output/evaluation/fidelity/comparison/overall_infidelity_comparison.pdf`                            |
+Every generated figure lands in `output/figures/`, named for its number in the
+paper and its caption:
+
+| Figure | Script                                                                              | Output under `output/figures/`                              |
+| ------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| 3      | `script/figures/plot_fig03_execution_abstraction.py`                    | `fig03_execution_abstraction_star_vs_t_cultivation.pdf`       |
+| 5      | `script/figures/plot_fig05_06_compilation_strategies.py` | `fig05_execution_timeline_compilation_strategies.pdf`         |
+| 6      | *(same script)*                                                                     | `fig06_movement_schedules/{baseline,optimized,optimized_with_rematerialization}/round{N}_{move,return}.pdf` |
+| 7      | `script/figures/plot_fig07_synchronous_vs_asynchronous.py`        | `fig07_synchronous_vs_asynchronous_execution.pdf`, plus the right-hand panels alone in `fig07_movement_schedules/{synchronous,asynchronous}/` |
+| 8      | `script/figures/plot_fig08_09_execution_time.py`                                                       | `fig08_compilation_strategies_and_aod_parallelism_d9.pdf`     |
+| 9      | *(same script)*                                                                     | `fig09_runtime_profiles_d9.pdf`                               |
+| 10     | `script/figures/plot_fig10_overall_infidelity.py`                                                | `fig10_overall_execution_infidelity.pdf`                      |
 
 Figures 1, 2, and 4 are hand-drawn conceptual diagrams with no generating script.
 
 Figures 3, 5, 6, and 7 are self-contained: they compile their own examples on the
 fly. Figures 8, 9, and 10 read the evaluation CSVs, so the two sweeps must run first.
+
+`output/figures/supplementary/` holds variants that are useful for inspection but do
+not appear in the paper: per-error-source infidelity breakdowns, linear-scale
+fidelity curves, and single-architecture versions of figure 8.
+
+Figure 6 in the paper is assembled from three of the per-round PDFs — `baseline/`
+round 1, `optimized/` round 1, and `optimized_with_rematerialization/` round 5,
+matching the rounds highlighted in figure 5. The scripts write every round, so you
+can pick different ones.
 
 ### Full reproduction
 
@@ -282,11 +298,11 @@ fly. Figures 8, 9, and 10 read the evaluation CSVs, so the two sweeps must run f
 uv sync
 uv run script/evaluation_fidelity_star.py
 uv run script/evaluation_fidelity_t_cultivation.py
-uv run script/figures/plot_star_t_cultivation_execution_subfigures.py
-uv run script/figures/plot_star_analog_rotation_execution_subfigures_strategy_compare.py
-uv run script/figures/plot_star_analog_rotation_execution_subfigures_sync_async.py
-uv run script/process_csv_paper.py
-uv run script/figures/compare_fidelity.py
+uv run script/figures/plot_fig03_execution_abstraction.py
+uv run script/figures/plot_fig05_06_compilation_strategies.py
+uv run script/figures/plot_fig07_synchronous_vs_asynchronous.py
+uv run script/figures/plot_fig08_09_execution_time.py
+uv run script/figures/plot_fig10_overall_infidelity.py
 ```
 
 The two sweeps take roughly 5–15 minutes each on a laptop; the figure scripts take
@@ -294,44 +310,44 @@ seconds to a couple of minutes.
 
 The execution-timeline scripts (figures 3, 5, 6, 7) each write two PDFs: a labeled
 one and a `_no_text` sibling with the in-box labels stripped, for a layout where the
-labels are set in LaTeX. `process_csv_paper.py` and `compare_fidelity.py` write a
+labels are set in LaTeX. `plot_fig08_09_execution_time.py` and `plot_fig10_overall_infidelity.py` write a
 single PDF per figure.
 
 ### What each figure script does
 
-**Figure 3** — `plot_star_t_cultivation_execution_subfigures.py`. The execution
+**Figure 3** — `plot_fig03_execution_abstraction.py`. The execution
 abstraction shared by both architectures, at minimal scale (one logical qubit, two
 factories): TMR preparation then RUS teleportation for STAR on top, check stage then
 escape stage then teleportation for T-cultivation below.
 
-**Figures 5 and 6** — `plot_star_analog_rotation_execution_subfigures_strategy_compare.py`.
-Identical-angle `Rz` gates on 25 logical qubits with 25 factories, compiled three
-ways: the unoptimized baseline, the coordinated assignment and movement optimizations
-of §IV, and the same plus resource rematerialization. Writes the stacked execution
-timeline (figure 5) and the corresponding movement schedules on a distance-3
-surface-code toy layout (figure 6) under
-`output/rus_rounds_detailed/strategy_compare/`. Figure 6's three columns are the
-teleportation rounds highlighted in figure 5 — round 1 under the unoptimized and
-optimized strategies, and round 5 under the optimized strategy — controlled by
-`--row-rus-shade-rounds` (default `1|1,5|5`).
+**Figures 5 and 6** — `plot_fig05_06_compilation_strategies.py`.
+Identical-angle `Rz` gates on 25 logical qubits with 25 factories and **one AOD**,
+compiled three ways: the unoptimized baseline, the coordinated assignment and
+movement optimizations of §IV, and the same plus resource rematerialization. Writes
+the stacked execution timeline (figure 5) and, per strategy, the
+per-teleportation-round movement schedules on a distance-3 surface-code toy layout
+(figure 6). Which rounds are highlighted on the timeline — and therefore which
+movement schedules the paper shows — is set by `--row-rus-shade-rounds`
+(default `1|1,5|5`).
 
-**Figure 7** — `plot_star_analog_rotation_execution_subfigures_sync_async.py`. The
-same 25-qubit / 25-factory workload under synchronous and asynchronous execution:
-the timeline on the left, the movement schedule for the highlighted window on the
-right, with the realtime-control events each policy requires marked on the timeline.
-The window is set by `--trap-window-start` / `--trap-window-end`.
+**Figure 7** — `plot_fig07_synchronous_vs_asynchronous.py`. The same 25-qubit /
+25-factory workload with **four AODs**, under synchronous and asynchronous
+execution: the timeline on the left, the movement schedule for the highlighted
+window on the right, with the realtime-control events each policy requires marked
+on the timeline. The window is set by `--trap-window-start` /
+`--trap-window-end`.
 
-**Figures 8 and 9** — `process_csv_paper.py`. Reads
+**Figures 8 and 9** — `plot_fig08_09_execution_time.py`. Reads
 `star_full_trotter_profiling_results.csv` and
 `t_cultivation_fidelity_profiling_results.csv` at d = 9. Figure 8 plots the
 cumulative effect of the compilation strategies and the AOD sweep; figure 9
 decomposes end-to-end execution time into preparation and movement components.
 
-**Figure 10** — `compare_fidelity.py`. Overall execution infidelity against qubit
+**Figure 10** — `plot_fig10_overall_infidelity.py`. Overall execution infidelity against qubit
 count for the physical baseline, STAR at d = 7 and 9, and T-cultivation at
 d = 7, 9, and 13, with shaded min/max bands across the 10 trials. The script also
-writes supplementary per-error-source breakdowns for each architecture (not in the
-paper) and prints the per-case infidelity table and pairwise improvement factors.
+writes the supplementary breakdowns described above, and prints the per-case
+infidelity table and pairwise improvement factors.
 
 ### Reproducibility notes
 
@@ -342,12 +358,12 @@ paper) and prints the per-case infidelity table and pairwise improvement factors
   execution vs routing-optimized: **61%** and **46%** (paper: 60% and 44%). The
   remaining step, high-parallelism vs greedy execution, is the smallest effect and
   sits within trial noise.
-- `script/process_csv_paper.py` selects strategies by exact setting tuple. Its
+- `script/figures/plot_fig08_09_execution_time.py` selects strategies by exact setting tuple. Its
   `SETTINGS` list mirrors the first four entries of `SETTINGS` in
   `evaluation_fidelity_star.py`, and `_T_SETTING_ABLATION_GRID` mirrors
   `ABLATION_GRID` in `evaluation_fidelity_t_cultivation.py`. If you change a sweep,
   change both.
-- `script/figures/compare_fidelity.py` imports `MAIN_SETTINGS` directly from
+- `script/figures/plot_fig10_overall_infidelity.py` imports `MAIN_SETTINGS` directly from
   `evaluation_fidelity_star.py`, so the fidelity figures always track the sweep.
 - `qiskit` is a hard dependency: OpenQASM parsing and the Gridsynth `Rz`
   decomposition that sets the T-gate count per rotation. The committed T-cultivation

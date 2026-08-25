@@ -61,7 +61,7 @@ MAIN_COMPILE_SETTING = (False, True, True)
 
 # Ablation grid for figures 8 and 9: each entry pairs a microarchitecture with a
 # compile setting, so it cannot be expressed as a plain cross product. Mirrors
-# ``_T_SETTING_ABLATION_GRID`` in ``script/process_csv_paper.py`` (same order).
+# ``_T_SETTING_ABLATION_GRID`` in ``script/figures/plot_fig08_09_execution_time.py`` (same order).
 #   (placement, trivial_return, decompose_move, redistribute_stage1_success)
 ABLATION_GRID = [
     ("seperate_region_row", True, False, False),  # Sync. execution
@@ -454,8 +454,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=(
             "T-cultivation fidelity + runtime evaluation sweep. Writes the CSVs "
-            "consumed by script/figures/compare_fidelity.py and "
-            "script/process_csv_paper.py."
+            "consumed by script/figures/plot_fig10_overall_infidelity.py and "
+            "script/figures/plot_fig08_09_execution_time.py."
         )
     )
     parser.add_argument(

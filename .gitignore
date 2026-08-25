@@ -216,3 +216,6 @@ __marimo__/
 
 # Local agent/editor config
 .claude/settings.local.json
+
+# Output of the example scripts (regenerate with --plot)
+output/examples/
