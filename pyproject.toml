@@ -1,7 +1,7 @@
 [project]
 name = "transversal-star-compilation"
 version = "0.1.0"
-description = "Compilation and architectural simulation of magic-state injection (STAR and T-cultivation) on neutral-atom quantum computers."
+description = "FT-Weave: a real-time compilation framework for fault-tolerant quantum architectures, instantiated on transversal STAR and T-cultivation."
 authors = [
     { name = "Wan-Hsuan Lin", email = "wanhsuanlin@g.ucla.edu" }
 ]
