@@ -67,7 +67,7 @@ _ROW_OUTPUT_SLUGS = [
 _REMATERIALIZATION_SHADE_ROW_INDEX = 1
 _REMATERIALIZATION_TIME_WINDOW = (60.0, 67.0)
 _REMATERIALIZATION_SHADE_COLOR = "#FDAE6B"
-_REMATERIALIZATION_SHADE_LABEL = "Operation rematerialization"
+_REMATERIALIZATION_SHADE_LABEL = "Resource rematerialization"
 
 # Trap-grid movement arc/label colors (earlier batch → later batch). Override here or in
 # rus_round_visualization.TRAP_GRID_MOVEMENT_COLOR_* for all callers.
@@ -202,11 +202,11 @@ def main(
             *_run_star_log(optimize_strategy=False, rng=rng),
         ),
         (
-            "Optimized strategy w/o operation rematerialization",
+            "Optimized strategy w/o resource rematerialization",
             *_run_star_log(optimize_strategy=True, rng=rng),
         ),
         (
-            "Optimized strategy w/ operation rematerialization",
+            "Optimized strategy w/ resource rematerialization",
             *_run_star_log(optimize_strategy=True, consider_skip_rus=2, rng=rng),
         ),
     ]
