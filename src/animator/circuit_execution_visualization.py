@@ -614,6 +614,43 @@ def _plot_circuit_execution_on_ax(
                             clip_on=True,
                         )
 
+            # Corrective S is logged with empty factories and qubit targets.
+            if (
+                show_logical_qubits
+                and not factories
+                and operation in {"S", "H"}
+            ):
+                qubit_targets = _extract_qubits_from_value(value)
+                for qubit_id in qubit_targets:
+                    row_name = f"q{qubit_id}"
+                    if row_name not in y_pos:
+                        continue
+                    y_coord = y_pos[row_name]
+                    rect = mpatches.Rectangle(
+                        (start_time, y_coord - _BOX_Y_OFFSET),
+                        duration,
+                        _BOX_HEIGHT,
+                        facecolor=color,
+                        edgecolor=border_color,
+                        linewidth=border_width,
+                        zorder=zorder,
+                        alpha=alpha,
+                    )
+                    ax.add_patch(rect)
+                    if show_box_text and operation not in no_text_operations:
+                        ax.text(
+                            start_time + duration / 2,
+                            y_coord,
+                            operation,
+                            ha="center",
+                            va="center",
+                            fontsize=10,
+                            fontweight="bold",
+                            color="black",
+                            linespacing=0.9,
+                            clip_on=True,
+                        )
+
     xmax = shared_xmax if shared_xmax is not None else max_time * 1.01
     ax.set_xlim(0, xmax)
     if show_logical_qubits:
@@ -644,7 +681,7 @@ def _plot_circuit_execution_on_ax(
             show_box_text=show_box_text
         )
     ax.set_xlabel(
-        "Time (circuit moments)",
+        "Time (QEC cycles)",
         fontsize=xlabel_fs,
         fontweight="bold",
     )
@@ -2170,6 +2207,36 @@ def _plot_t_cultivation_execution_on_ax(
                     alpha=_BOX_ALPHA,
                 )
                 ax.add_patch(rect)
+        elif not factories and qubits and operation in {"S", "H"}:
+            # Corrective S (and circuit H) are logged on qubit targets with no factory.
+            for qubit in qubits:
+                row_name = f"q{qubit}"
+                if row_name not in y_pos:
+                    continue
+                y_coord = y_pos[row_name]
+                rect = mpatches.Rectangle(
+                    (start_time, y_coord - _BOX_Y_OFFSET),
+                    duration,
+                    _BOX_HEIGHT,
+                    facecolor=color,
+                    edgecolor="black",
+                    linewidth=resolved_border_width,
+                    alpha=_BOX_ALPHA,
+                )
+                ax.add_patch(rect)
+                if show_box_text:
+                    ax.text(
+                        start_time + duration / 2,
+                        y_coord,
+                        operation,
+                        ha="center",
+                        va="center",
+                        fontsize=10,
+                        fontweight="bold",
+                        color="black",
+                        linespacing=0.9,
+                        clip_on=True,
+                    )
 
         if factories and operation == "CNOT" and qubits:
             t_color = color_map.get("CNOT(T)", color)
@@ -2211,7 +2278,7 @@ def _plot_t_cultivation_execution_on_ax(
         y_tick_base=_FIG_FONT_SIZE - 1,
     )
     ax.set_xlabel(
-        "Time (circuit moments)",
+        "Time (QEC cycles)",
         fontsize=xlabel_fs,
         fontweight="bold",
     )
@@ -2496,10 +2563,12 @@ def plot_star_t_cultivation_execution_subfigures(
                 va="bottom",
             )
 
+        # With-text legend is larger; keep it further right so it clears timeline boxes.
+        legend_x = 1.2
         axes[legend_row_index].legend(
             handles=_combined_star_t_legend_handles(),
             loc="upper right",
-            bbox_to_anchor=(1.06, 1.0),
+            bbox_to_anchor=(legend_x, 1.0),
             ncol=2,
             fontsize=_scaled_font_size(max(10, heading_fs - 2), font_scale),
             frameon=True,

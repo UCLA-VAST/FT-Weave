@@ -403,7 +403,7 @@ if __name__ == "__main__":
         type=float,
         default=17.0,
         dest="trap_window_start",
-        help="Trap-grid / timeline highlight window start (circuit moments)",
+        help="Trap-grid / timeline highlight window start (QEC cycles)",
     )
     parser.add_argument(
         "--trap-window-end",
@@ -411,7 +411,7 @@ if __name__ == "__main__":
         type=float,
         default=18.0,
         dest="trap_window_end",
-        help="Trap-grid / timeline highlight window end (circuit moments)",
+        help="Trap-grid / timeline highlight window end (QEC cycles)",
     )
     parser.add_argument(
         "--timeline-xmax",

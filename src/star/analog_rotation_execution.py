@@ -256,7 +256,7 @@ def factory_angle_execution(
 
     while len(qubit_trackers):
         # print(
-        #     f"Current circuit moment: {circuit_moment:.2f}, Remaining qubits: {len(qubit_trackers)}"
+        #     f"Current QEC cycle: {circuit_moment:.2f}, Remaining qubits: {len(qubit_trackers)}"
         # )
         if circuit_moment > 3000:
             for log in execution_log[-50:]:

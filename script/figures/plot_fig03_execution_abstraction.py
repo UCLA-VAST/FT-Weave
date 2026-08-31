@@ -127,7 +127,6 @@ def main(
     out_dir = os.path.dirname(output_pdf)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-
     plot_star_t_cultivation_execution_subfigures(
         star_log=star_log,
         t_log=t_log,

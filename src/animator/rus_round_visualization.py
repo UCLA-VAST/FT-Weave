@@ -530,7 +530,7 @@ def _draw_time_window_axis(
     ax.set_xticks([t0, t1])
     ax.set_xticklabels([f"{t0:g}", f"{t1:g}"])
     ax.set_yticks([])
-    ax.set_xlabel("Time (circuit moments)", fontsize=10, fontweight="bold")
+    ax.set_xlabel("Time (QEC cycles)", fontsize=10, fontweight="bold")
     for spine in ("top", "right", "left"):
         ax.spines[spine].set_visible(False)
     ax.tick_params(axis="x", labelsize=9)
