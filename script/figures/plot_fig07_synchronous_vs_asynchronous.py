@@ -26,6 +26,7 @@ if _REPO_ROOT not in sys.path:
 
 from src.animator.circuit_execution_visualization import (
     _collapse_star_tmr_blocks,
+    _trap_grid_block_legend_handles,
     plot_star_execution_subfigures,
     plot_star_timeline_movement_combined,
 )
@@ -234,6 +235,7 @@ def main(
     ]
     row_time_markers = None
     marker_line_kwargs = None
+    row_marker_line_kwargs = None
     if add_communication_markers:
         row_time_markers = [
             _sync_realtime_control_markers(sync_log),
@@ -246,6 +248,11 @@ def main(
             "alpha": 0.6,
             "zorder": 80,
         }
+        # Async markers are dense; keep them slightly lighter than sync.
+        row_marker_line_kwargs = [
+            None,
+            {"alpha": 0.4},
+        ]
 
     out_dir = os.path.dirname(output_pdf)
     if out_dir:
@@ -259,21 +266,30 @@ def main(
         row_time_shades = [sync_specs if sync_specs else None, None]
 
     trap_window = (trap_window_start, trap_window_end)
-    combined_kwargs = dict(
+    timeline_kwargs = dict(
         show_logical_qubits=False,
         figure_width=figure_width,
         figure_vertical_stretch=figure_vertical_stretch,
         suptitle=suptitle,
         row_time_markers=row_time_markers,
         marker_line_kwargs=marker_line_kwargs,
-        marker_legend_label="Realtime control event",
+        marker_legend_label="Real-time control event.",
         row_time_windows=[trap_window, trap_window],
         row_time_shades=row_time_shades,
         highlight_xticks=[trap_window_start, trap_window_end],
-        highlight_xtick_labels=[trap_window_start],
         time_window_legend_label="Movement window",
         show_factory_yticks=False,
+    )
+    combined_kwargs = dict(
+        **timeline_kwargs,
+        row_marker_line_kwargs=row_marker_line_kwargs,
+        highlight_xtick_labels=[trap_window_start],
         timeline_xmax=timeline_xmax,
+        movement_column_title=(
+            f"QEC Cycles= {trap_window_start:g}–{trap_window_end:g}."
+        ),
+        panel_labels=["(a)", "(b)", "(c)", "(d)"],
+        extra_legend_handles=_trap_grid_block_legend_handles(),
     )
     plot_star_timeline_movement_combined(
         row_plots,
@@ -296,7 +312,7 @@ def main(
         plot_star_execution_subfigures(
             row_plots,
             save_path=timeline_subfigures_pdf,
-            **combined_kwargs,
+            **timeline_kwargs,
         )
         logging.info(
             "Wrote timeline-only subfigures: %s and %s",

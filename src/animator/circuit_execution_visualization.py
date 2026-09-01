@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.legend_handler import HandlerBase
 from matplotlib.lines import Line2D
 from matplotlib.transforms import ScaledTranslation
 import os
@@ -12,7 +13,14 @@ from src.animator.log_view_helpers import (
     entry_start,
     entry_end,
 )
-from src.animator.rus_round_visualization import draw_trap_grid_time_range_on_axes
+from src.animator.rus_round_visualization import (
+    TRAP_GRID_FACTORY_EDGE,
+    TRAP_GRID_FACTORY_FACE,
+    TRAP_GRID_LOGICAL_EDGE,
+    TRAP_GRID_LOGICAL_FACE,
+    TRAP_GRID_MOVED_FACTORY_COLOR,
+    draw_trap_grid_time_range_on_axes,
+)
 
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
@@ -442,6 +450,132 @@ def _star_execution_legend_handles():
         #     label="TMR:fail",
         # ),
     ]
+
+
+class _TrapGridBlockLegendProxy:
+    """Legend proxy for a colored trap-grid / AOD block with trap dots."""
+
+    def __init__(
+        self,
+        *,
+        facecolor: str,
+        edgecolor: str,
+        filled_trap_color: str,
+        empty_trap_edge: str,
+        label: str,
+    ):
+        self.facecolor = facecolor
+        self.edgecolor = edgecolor
+        self.filled_trap_color = filled_trap_color
+        self.empty_trap_edge = empty_trap_edge
+        self._label = label
+
+    def get_label(self) -> str:
+        return self._label
+
+
+class _HandlerTrapGridBlock(HandlerBase):
+    """Draw a rounded trap-grid block icon matching movement-panel boxes.
+
+    Each site is a left/right trap pair, so columns alternate filled / empty
+    (``B W B W …``), matching the logical and factory blocks in the figure.
+    """
+
+    def create_artists(
+        self,
+        legend,
+        orig_handle,
+        xdescent,
+        ydescent,
+        width,
+        height,
+        fontsize,
+        trans,
+    ):
+        side = min(width * 0.95, max(height * 1.65, fontsize * 1.15))
+        x0 = -xdescent + 0.5 * (width - side)
+        y0 = -ydescent + 0.5 * (height - side * 0.78)
+        box_h = side * 0.78
+        inset = 0.12 * side
+        box = mpatches.FancyBboxPatch(
+            (x0, y0),
+            side,
+            box_h,
+            boxstyle="round,pad=0.012,rounding_size=0.07",
+            facecolor=orig_handle.facecolor,
+            edgecolor=orig_handle.edgecolor,
+            linewidth=max(0.9, fontsize * 0.07),
+            transform=trans,
+        )
+        artists = [box]
+        # Match movement panels: 3 rows × 3 sites × (left filled, right empty).
+        n_rows, n_cols = 3, 6
+        usable_w = side - 2.0 * inset
+        usable_h = box_h - 1.6 * inset
+        # Keep radius small enough that neighboring columns do not overlap.
+        radius = min(usable_w / (n_cols * 3.1), usable_h / (n_rows * 3.0))
+        dots: list[mpatches.Circle] = []
+        for r in range(n_rows):
+            cy = y0 + 0.8 * inset + (n_rows - 0.5 - r) * usable_h / n_rows
+            for c in range(n_cols):
+                cx = x0 + inset + (c + 0.5) * usable_w / n_cols
+                filled = (c % 2) == 0
+                dots.append(
+                    (
+                        filled,
+                        mpatches.Circle(
+                            (cx, cy),
+                            radius,
+                            facecolor=(
+                                orig_handle.filled_trap_color if filled else "#FFFFFF"
+                            ),
+                            edgecolor=(
+                                "#000000"
+                                if filled
+                                and orig_handle.filled_trap_color == "#111111"
+                                else (
+                                    "#8A4F00"
+                                    if filled
+                                    else orig_handle.empty_trap_edge
+                                )
+                            ),
+                            linewidth=max(0.45, fontsize * 0.04),
+                            transform=trans,
+                        ),
+                    )
+                )
+        # Draw filled first, then empty on top so white traps stay visible.
+        artists.extend(dot for filled, dot in dots if filled)
+        artists.extend(dot for filled, dot in dots if not filled)
+        return artists
+
+
+def _trap_grid_block_legend_handles(
+    *,
+    logical_label: str = "Logical program qubit",
+    factory_label: str = "Magic state factory",
+) -> list[_TrapGridBlockLegendProxy]:
+    """Legend entries explaining colored AOD / trap-grid blocks in movement panels."""
+    return [
+        _TrapGridBlockLegendProxy(
+            facecolor=TRAP_GRID_LOGICAL_FACE,
+            edgecolor=TRAP_GRID_LOGICAL_EDGE,
+            filled_trap_color="#111111",
+            empty_trap_edge="#333333",
+            label=logical_label,
+        ),
+        _TrapGridBlockLegendProxy(
+            facecolor=TRAP_GRID_FACTORY_FACE,
+            edgecolor=TRAP_GRID_FACTORY_EDGE,
+            filled_trap_color=TRAP_GRID_MOVED_FACTORY_COLOR,
+            empty_trap_edge="#333333",
+            label=factory_label,
+        ),
+    ]
+
+
+def _trap_grid_legend_handler_map() -> dict:
+    return {_TrapGridBlockLegendProxy: _HandlerTrapGridBlock()}
 
 
 def _plot_circuit_execution_on_ax(
@@ -1304,6 +1438,7 @@ def plot_star_timeline_movement_combined(
     no_text_box_border_width: float | None = None,
     row_time_markers: list[list[float]] | None = None,
     marker_line_kwargs: dict | None = None,
+    row_marker_line_kwargs: list[dict | None] | None = None,
     marker_legend_label: str = "Realtime control event",
     row_time_windows: list[tuple[float, float] | None] | None = None,
     row_time_shades: list[list[dict] | None] | None = None,
@@ -1320,20 +1455,41 @@ def plot_star_timeline_movement_combined(
     highlight_xtick_labels: list[float] | None = None,
     marker_line_ymin: float = -0.01,
     marker_line_ymax: float = 1.0,
+    panel_labels: list[str] | None = None,
+    extra_legend_handles: list | None = None,
+    legend_handler_map: dict | None = None,
 ) -> None:
     """Timeline (left) and trap-grid movement (right) for each execution setting.
 
     One row per setting; writes *save_path* and a ``_no_text`` sibling.
+
+    *panel_labels*: optional labels for panels in row-major order
+    ``[timeline_0, movement_0, timeline_1, movement_1, ...]`` (e.g. ``(a)``–``(d)``),
+    drawn centered below each subplot.
+    *row_marker_line_kwargs*: optional per-row overrides merged on top of
+    *marker_line_kwargs* (useful when async markers need lower opacity).
+    *extra_legend_handles* / *legend_handler_map*: separate legend group placed
+    between the bottom panels and the main operation legend (e.g. trap-grid AOD
+    block icons).
     """
     if not row_plots:
         print("No row plots to render")
         return
     if row_time_markers is not None and len(row_time_markers) != len(row_plots):
         raise ValueError("row_time_markers must have the same length as row_plots")
+    if row_marker_line_kwargs is not None and len(row_marker_line_kwargs) != len(
+        row_plots
+    ):
+        raise ValueError("row_marker_line_kwargs must have the same length as row_plots")
     if row_time_windows is not None and len(row_time_windows) != len(row_plots):
         raise ValueError("row_time_windows must have the same length as row_plots")
     if row_time_shades is not None and len(row_time_shades) != len(row_plots):
         raise ValueError("row_time_shades must have the same length as row_plots")
+    if panel_labels is not None and len(panel_labels) != 2 * len(row_plots):
+        raise ValueError(
+            "panel_labels must have two entries per row "
+            f"(got {len(panel_labels)} for {len(row_plots)} rows)"
+        )
 
     row_count = len(row_plots)
     lane_counts = []
@@ -1408,12 +1564,13 @@ def plot_star_timeline_movement_combined(
             else fig_height * (fig_width / with_text_fig_width)
         )
         fig = plt.figure(figsize=(fig_width, fig_height_plot))
+        row_hspace = 0.22 if panel_labels else 0.14
         gs = fig.add_gridspec(
             row_count,
             2,
             width_ratios=list(timeline_movement_width_ratios),
             height_ratios=row_height_ratios,
-            hspace=0.14,
+            hspace=row_hspace,
             wspace=0.02,
         )
         title_font_scale = (
@@ -1491,6 +1648,10 @@ def plot_star_timeline_movement_combined(
                 }
                 if marker_line_kwargs:
                     line_kwargs.update(marker_line_kwargs)
+                if row_marker_line_kwargs is not None:
+                    row_kwargs = row_marker_line_kwargs[row_idx]
+                    if row_kwargs:
+                        line_kwargs.update(row_kwargs)
                 for marker_t in row_time_markers[row_idx]:
                     t = float(marker_t)
                     if abs(t) < 1e-9:
@@ -1584,8 +1745,11 @@ def plot_star_timeline_movement_combined(
                     row_shade_labels.add(patch.get_label())
                     legend_handles.append(patch)
 
+        # Reserve bottom margin so legends sit clear of the axes / xlabel.
         layout_top = 0.96 if suptitle else 0.97
-        layout_bottom = 0.22
+        layout_bottom = 0.40 if extra_legend_handles else 0.22
+        if panel_labels and not extra_legend_handles:
+            layout_bottom += 0.03
         fig.tight_layout(rect=(0.02, layout_bottom, 0.98, layout_top))
 
         content_right = _layout_combined_timeline_movement_rows(
@@ -1624,6 +1788,39 @@ def plot_star_timeline_movement_combined(
                 transform=fig.transFigure,
             )
 
+        panel_label_ys: dict[int, float] = {}
+        if panel_labels:
+            panel_label_fs = _scaled_font_size(heading_fs + 2, title_font_scale)
+            panel_axes = []
+            for tl_ax, mv_ax in zip(timeline_axes, movement_axes):
+                panel_axes.extend([tl_ax, mv_ax])
+            n_rows = len(timeline_axes)
+            for panel_idx, (label, ax) in enumerate(zip(panel_labels, panel_axes)):
+                pos = ax.get_position()
+                row_idx = panel_idx // 2
+                is_bottom_row = row_idx == n_rows - 1
+                is_timeline = (panel_idx % 2) == 0
+                is_movement = not is_timeline
+                # (b)/(d) sit close under the movement panels; (c) clears xlabel.
+                if is_bottom_row and is_timeline:
+                    y_offset = 0.055
+                elif is_movement:
+                    y_offset = 0.001
+                else:
+                    y_offset = 0.010
+                label_y = pos.y0 - y_offset
+                panel_label_ys[panel_idx] = label_y
+                fig.text(
+                    (pos.x0 + pos.x1) / 2.0,
+                    label_y,
+                    label,
+                    ha="center",
+                    va="top",
+                    fontsize=panel_label_fs,
+                    fontweight="bold",
+                    transform=fig.transFigure,
+                )
+
         if suptitle:
             suptitle_gap = 0.006
             suptitle_line_frac = 0.022
@@ -1639,12 +1836,55 @@ def plot_star_timeline_movement_combined(
             )
 
         n_handles = len(legend_handles)
-        # legend_ncol = min(n_handles, 5) if n_handles <= 6 else (n_handles + 1) // 2
         legend_ncol = min(n_handles, 7) if n_handles <= 7 else (n_handles + 1) // 2
+
+        # Stack legends in the reserved bottom margin:
+        #   panel (d) → AOD legend (right, under (d)) → operation legend (lower).
+        axes_bottom = min(
+            ax.get_position().y0 for ax in [*timeline_axes, *movement_axes]
+        )
+        d_label_y = panel_label_ys.get(
+            2 * (len(timeline_axes) - 1) + 1, axes_bottom - 0.001
+        )
+        mv_pos = movement_axes[-1].get_position()
+        # Tight gap under the (d) caption.
+        below_d_y = d_label_y - 0.02
+
+        if extra_legend_handles:
+            secondary_handler_map = {
+                **_trap_grid_legend_handler_map(),
+                **(legend_handler_map or {}),
+            }
+            # Right side of the figure, directly below panel (d).
+            aod_legend = fig.legend(
+                handles=list(extra_legend_handles),
+                loc="upper right",
+                bbox_to_anchor=(mv_pos.x1, below_d_y),
+                bbox_transform=fig.transFigure,
+                ncol=len(extra_legend_handles),
+                fontsize=legend_fs,
+                frameon=True,
+                framealpha=0.98,
+                columnspacing=1.6,
+                handletextpad=0.5,
+                handlelength=2.8,
+                handleheight=2.4,
+                handler_map=secondary_handler_map,
+            )
+            fig.add_artist(aod_legend)
+            fig.canvas.draw()
+            aod_bbox = aod_legend.get_window_extent(
+                fig.canvas.get_renderer()
+            ).transformed(fig.transFigure.inverted())
+            # Slightly tighter gap down to the main operation legend.
+            main_legend_top = min(0.11, float(aod_bbox.y0) - 0.018)
+        else:
+            main_legend_top = 0.10
+
         fig.legend(
             handles=legend_handles,
-            loc="lower center",
-            bbox_to_anchor=(content_center, 0.0),
+            loc="upper center",
+            bbox_to_anchor=(content_center, main_legend_top),
             bbox_transform=fig.transFigure,
             ncol=legend_ncol,
             fontsize=legend_fs,
@@ -1652,6 +1892,8 @@ def plot_star_timeline_movement_combined(
             framealpha=0.98,
             columnspacing=1.0,
             handletextpad=0.4,
+            handlelength=2.2,
+            handler_map=legend_handler_map,
         )
 
         _shrink_figure_to_content_width(fig, content_right)
@@ -1659,7 +1901,7 @@ def plot_star_timeline_movement_combined(
         out_path = _save_path_for_box_text_variant(
             save_path, show_box_text=show_box_text
         )
-        fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.08)
+        fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.15)
         plt.close(fig)
         print(f"\nSTAR timeline + movement plot saved to: {out_path}")
 

@@ -29,8 +29,6 @@ if _REPO_ROOT not in sys.path:
 
 from src.animator.circuit_execution_visualization import plot_star_execution_subfigures
 from src.animator.rus_round_visualization import (
-    TRAP_GRID_MOVEMENT_COLOR_EARLY,
-    TRAP_GRID_MOVEMENT_COLOR_LATE,
     build_rus_move_shade_specs,
     plot_all_rus_rounds,
 )
@@ -69,10 +67,11 @@ _REMATERIALIZATION_TIME_WINDOW = (60.0, 67.0)
 _REMATERIALIZATION_SHADE_COLOR = "#FDAE6B"
 _REMATERIALIZATION_SHADE_LABEL = "Resource rematerialization"
 
-# Trap-grid movement arc/label colors (earlier batch → later batch). Override here or in
-# rus_round_visualization.TRAP_GRID_MOVEMENT_COLOR_* for all callers.
-RUS_TRAP_GRID_MOVEMENT_COLOR_EARLY = TRAP_GRID_MOVEMENT_COLOR_EARLY
-RUS_TRAP_GRID_MOVEMENT_COLOR_LATE = TRAP_GRID_MOVEMENT_COLOR_LATE
+# Trap-grid movement arc/label colors (earlier batch → later batch). Darker violet so
+# arrows and sequence numbers stay readable over the lightened dashed AOD grid.
+# Override here or in rus_round_visualization.TRAP_GRID_MOVEMENT_COLOR_* for all callers.
+RUS_TRAP_GRID_MOVEMENT_COLOR_EARLY = "#4C1D95"
+RUS_TRAP_GRID_MOVEMENT_COLOR_LATE = "#6D28D9"
 
 
 def _run_star_log(
