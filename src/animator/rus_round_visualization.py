@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 import matplotlib.colors as mcolors
+import matplotlib.patheffects as mpatheffects
 from typing import Dict, List, Literal, Optional, Tuple
 import os
 from src.animator.log_view_helpers import (
@@ -43,19 +44,21 @@ TRAP_GRID_ARRIVE_OVERLAY_ALPHA = 0.42
 # Factory box on logical block shifts right by (left-to-right trap spacing); traps stay put.
 TRAP_GRID_FACTORY_BOX_OFFSET_TRAP_SPACINGS = 2.0
 
-TRAP_GRID_AOD_LINEWIDTH = 0.6
-TRAP_GRID_AOD_SRC_ALPHA_FACTOR = 0.22
-TRAP_GRID_AOD_ALPHA_EARLY = 0.95
-TRAP_GRID_AOD_ALPHA_LATE = 0.40
+# Dashed AOD grids stay light so purple movement arcs/labels remain readable.
+TRAP_GRID_AOD_LINEWIDTH = 0.35
+TRAP_GRID_AOD_SRC_ALPHA_FACTOR = 0.15
+TRAP_GRID_AOD_ALPHA_EARLY = 0.40
+TRAP_GRID_AOD_ALPHA_LATE = 0.18
 
 # Movement arcs/labels: earlier batch → darker, later → lighter (matches execution-timeline AOD move purple).
-TRAP_GRID_MOVEMENT_COLOR_EARLY = "#7E22CE"
-# TRAP_GRID_MOVEMENT_COLOR_LATE =#B274F3 115 249)F3"
-TRAP_GRID_MOVEMENT_COLOR_LATE = "#8C5CC0"
-TRAP_GRID_ARROW_LINEWIDTH = 1.2
-TRAP_GRID_ARROW_MUTATION_SCALE = 14
-TRAP_GRID_ARROW_LABEL_FONTSIZE = 9
+TRAP_GRID_MOVEMENT_COLOR_EARLY = "#4C1D95"
+TRAP_GRID_MOVEMENT_COLOR_LATE = "#6D28D9"
+TRAP_GRID_ARROW_LINEWIDTH = 1.9
+TRAP_GRID_ARROW_MUTATION_SCALE = 18
+TRAP_GRID_ARROW_LABEL_FONTSIZE = 11
 TRAP_GRID_ARROW_LABEL_OFFSET = 0.06
+TRAP_GRID_ARROW_LABEL_STROKE_WIDTH = 2.8
+TRAP_GRID_ARROW_LABEL_STROKE_COLOR = "white"
 
 TRAP_GRID_MOVEMENT_OVERLAY: Literal["both", "arrows_only", "aod_only", "none"] = "both"
 TRAP_GRID_FIGSIZE_SCALE_X = 1.15
@@ -1935,6 +1938,12 @@ def _draw_movement_arrows(
             color=arrow_color,
             fontweight="bold",
             zorder=zorder + 1,
+            path_effects=[
+                mpatheffects.withStroke(
+                    linewidth=TRAP_GRID_ARROW_LABEL_STROKE_WIDTH,
+                    foreground=TRAP_GRID_ARROW_LABEL_STROKE_COLOR,
+                )
+            ],
         )
 
 
