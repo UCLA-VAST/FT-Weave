@@ -216,31 +216,29 @@ def _exclude_t_cultivation_d13(df):
     return out[cd != 13].copy()
 
 
+def _plotted_code_distances(df: pd.DataFrame | None) -> list[int]:
+    if df is None or df.empty or "code_distance" not in df.columns:
+        return []
+    return sorted(
+        pd.to_numeric(df["code_distance"], errors="coerce")
+        .dropna()
+        .astype(int)
+        .unique()
+        .tolist()
+    )
+
+
 def _build_architecture_distance_colors(star_df, t_df):
-    distances: set[int] = set()
-    if "code_distance" in star_df.columns:
-        distances.update(
-            pd.to_numeric(star_df["code_distance"], errors="coerce")
-            .dropna()
-            .astype(int)
-            .tolist()
-        )
-    if t_df is not None and "code_distance" in t_df.columns:
-        distances.update(
-            pd.to_numeric(t_df["code_distance"], errors="coerce")
-            .dropna()
-            .astype(int)
-            .tolist()
-        )
-    ordered_distances = sorted(distances)
+    star_distances = _plotted_code_distances(star_df)
+    t_distances = _plotted_code_distances(t_df)
     return {
         "STAR": {
             d: _STAR_DISTANCE_COLORS[i % len(_STAR_DISTANCE_COLORS)]
-            for i, d in enumerate(ordered_distances)
+            for i, d in enumerate(star_distances)
         },
         "T-cultivation": {
             d: _T_DISTANCE_COLORS[i % len(_T_DISTANCE_COLORS)]
-            for i, d in enumerate(ordered_distances)
+            for i, d in enumerate(t_distances)
         },
     }
 
@@ -295,29 +293,36 @@ def _add_overall_legends(
 
     star_colors = architecture_distance_colors.get("STAR", {})
     t_colors = architecture_distance_colors.get("T-cultivation", {})
-    distances = sorted(set(star_colors))
+    distances = sorted(set(star_colors) | set(t_colors))
     if distances:
-        distance_handles = [
-            (
-                Line2D(
-                    [0],
-                    [0],
-                    color=star_colors[d],
-                    linewidth=2.5,
-                    markersize=9,
-                    **_METHOD_STYLES["STAR"],
-                ),
-                Line2D(
-                    [0],
-                    [0],
-                    color=t_colors[d],
-                    linewidth=2.5,
-                    markersize=9,
-                    **_METHOD_STYLES["T-cultivation"],
-                ),
+        distance_handles = []
+        for d in distances:
+            markers = []
+            if d in star_colors:
+                markers.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color=star_colors[d],
+                        linewidth=2.5,
+                        markersize=9,
+                        **_METHOD_STYLES["STAR"],
+                    )
+                )
+            if d in t_colors:
+                markers.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color=t_colors[d],
+                        linewidth=2.5,
+                        markersize=9,
+                        **_METHOD_STYLES["T-cultivation"],
+                    )
+                )
+            distance_handles.append(
+                markers[0] if len(markers) == 1 else tuple(markers)
             )
-            for d in distances
-        ]
         ax.legend(
             handles=distance_handles,
             labels=[str(d) for d in distances],
