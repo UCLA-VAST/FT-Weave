@@ -1,7 +1,7 @@
 """Paper figures 8 and 9: execution time from the profiling CSVs.
 
 Figure 8 plots the cumulative effect of the compilation strategies and the AOD
-sweep for STAR and T-cultivation at surface-code distance d = 9. Figure 9
+sweep for STAR and T-state cultivation at surface-code distance d = 9. Figure 9
 decomposes end-to-end execution time into resource-preparation and movement
 components over the same data.
 
@@ -33,7 +33,6 @@ from matplotlib.ticker import (
     LogLocator,
     MaxNLocator,
 )
-from matplotlib.transforms import Bbox
 from src.t_cultivation.config import STAGE_1_SUCCESS_RATE
 
 _FIG_FONT_SIZE = 28
@@ -86,9 +85,10 @@ RESULT_COLS = ["total_time", "movement_time", "return_movement_time"]
 STAR_T_GRID_COMPARISON_CODE_DISTANCE: int = 9
 STAR_T_GRID_STAR_SETTING_INDEX: int = 4
 STAR_T_SETTING_STUDY_AOD: int = 5
-# Setting-study dual-AOD bar chart: back = first AOD (full color), front = second (lighter).
+# Setting-study dual-AOD bar chart: back = first AOD (full color), front = second (lighter + hatch).
 SETTING_STUDY_DUAL_AODS: tuple[int, ...] = (1, 5)
 SETTING_STUDY_DUAL_AOD_FRONT_BLEND: float = 0.52
+SETTING_STUDY_DUAL_AOD_HATCH: dict[int, str | None] = {1: None, 5: "///"}
 # Denser y-axis ticks on AOD / execution-time panels.
 STAR_AOD_COMPARISON_Y_NBINS: int = 8
 # AOD line panel: sync vs best strategy, AOD = 1, 2, 3, 5.
@@ -120,20 +120,15 @@ STAR_SETTING_STUDY_Y_CROP_GAP_RATIO: float = 1.25
 STAR_SETTING_STUDY_Y_CROP_PAD_FRAC: float = 0.1
 # STAR AOD twin-axis side labels (figure coords: offset left from panel edge ax_aod_bot.x0).
 # Increase BASELINE to move green "Baseline" further left; increase EXEC_TIME to move black
-# "Execution time" further left (keep EXEC_TIME > BASELINE so black stays left of green).
+# "QEC cycles" further left (keep EXEC_TIME > BASELINE so black stays left of green).
 STAR_AOD_BASELINE_LABEL_X: float = 0.06
 STAR_AOD_EXEC_TIME_LABEL_X: float = 0.082
-# STAR compilation-strategy legend (ncol=3): col0 Baseline/+ Routing, col1 Greedy/High,
-# col2 invisible spacer (width via STAR_COMPILE_LEGEND_COL3_WIDTH_CHARS); microarch = fig.text.
+# STAR compilation-strategy legend (ncol=2): col0 Baseline/+ Routing, col1 Greedy/High.
 STAR_COMPILE_LEGEND_COLUMNSPACING: float = 1.03
-# Invisible col-3 spacer label width (non-breaking spaces) to widen the legend frame.
-STAR_COMPILE_LEGEND_COL3_WIDTH_CHARS: int = 10
 STAR_COMPILE_LEGEND_X_SHIFT: float = (
     0.0  # negative = shift whole legend left after centering
 )
-STAR_COMPILE_MICROARCH_DX: float = 0.18
-STAR_COMPILE_MICROARCH_DY: float = 0.0
-STAR_COMPILE_LEGEND_BORDERPAD: float = 0.55  # larger when microarch fig.text is drawn
+STAR_COMPILE_LEGEND_BORDERPAD: float = 0.35
 STAR_AOD_BREAK_PAD_FRAC: float = 0.03
 STAR_AOD_BREAK_NQUBIT_ANCHOR: int = 64
 STAR_AOD_BREAK_ANCHOR_AOD: int = 5
@@ -220,52 +215,22 @@ _T_SETTING_ABLATION_GRID: list[tuple[str, bool, bool, bool]] = [
     ("col_based", False, True, True),  # + Opt. patch redist.
 ]
 _T_COMPILE_ABLATION_LABELS: list[str] = [
-    "Sync. execution",
+    "Synchronous baseline",
     " + Routing opt.",
     " + Microarch. opt.",
     " + Check-stage patch redist.",
 ]
 
-# _STAR_ABLATION_LABELS = [
-#     "Vanilla",
-#     "(a) Opt. microarch.",
-#     "(b) + Opt. angle assign.",
-#     "(c) + Opt. move",
-#     "(d) + Opt. skip RUS",
-#     "(e) + Async. RUS",
-#     # "(c) - angle assign",
-#     # "(d) - angle assign",
-#     # "(e) - angle assign",
-# ]
-
 _STAR_ABLATION_LABELS = [
     "Baseline",
     " + Routing opt.",
-    "Greedy exec.",
-    "High parallelism exec.",
-    # " + Lookahead angle prep.",  # "(d) + Lookahead angle prep.",
-    # "Async. execution",
+    "Greedy exec. w. microarch. opt.",
+    "High parallelism exec. w. microarch. opt.",
 ]
-# col_based strategies (indices 2–3) both use optimized microarchitecture.
-_STAR_MICROARCH_OPT_SETTING_INDICES: frozenset[int] = frozenset({2, 3})
-_STAR_COMPILE_MICROARCH_NOTE = "+ Microarch. opt."
-_LEGEND_COL3_SPACER_MARKER = (
-    "\u00a0"  # prefix for invisible width-reserving col-3 labels
-)
 
-
-def _star_legend_col3_spacer_label() -> str:
-    """Invisible label text that reserves horizontal space in legend column 3."""
-    n = max(
-        int(STAR_COMPILE_LEGEND_COL3_WIDTH_CHARS),
-        len(_STAR_COMPILE_MICROARCH_NOTE) + 2,
-    )
-    return f"{_LEGEND_COL3_SPACER_MARKER}{'\u00a0' * n}"
-
-
-def _is_legend_col3_spacer_label(label: str) -> bool:
-    return str(label).startswith(_LEGEND_COL3_SPACER_MARKER)
-
+_XLABEL_N_LOGICAL_QUBITS = "Number of logical qubits (= number of factories)."
+_YLABEL_QEC_CYCLES = "QEC cycles"
+_YLABEL_QEC_CYCLES_LOG = "QEC cycles (log)"
 
 # T AOD line panel: emphasize AOD = 5 (light ramp color is easy to miss).
 T_AOD_EMPHASIS_AOD: int = 5
@@ -279,7 +244,13 @@ def _star_setting_study_entries() -> list[tuple[int, str]]:
 
 
 def _star_aod_axis_label(setting_idx: int) -> str:
-    """Short strategy name for the STAR AOD panel twin y-axis (no microarch suffix)."""
+    """Compact strategy name for the STAR AOD twin y-axis (full name is in legends)."""
+    short = {
+        2: "Greedy exec.",
+        3: "High parallelism exec.",
+    }
+    if int(setting_idx) in short:
+        return short[int(setting_idx)]
     if 0 <= int(setting_idx) < len(_STAR_ABLATION_LABELS):
         return _STAR_ABLATION_LABELS[int(setting_idx)]
     return "Best strategy"
@@ -289,7 +260,7 @@ def _star_setting_study_legend_handles(
     star_setting_colors: dict[int, tuple],
     star_study_entries: list[tuple[int, str]],
 ) -> list:
-    """Legend patches for STAR compilation strategies (microarch note placed separately)."""
+    """Legend patches for STAR compilation strategies."""
     return [
         _setting_study_legend_handle(
             color=star_setting_colors[setting_idx],
@@ -302,53 +273,30 @@ def _star_setting_study_legend_handles(
 
 def _star_compile_strategy_legend_cells(
     star_study_entries: list[tuple[int, str]],
-) -> tuple[list[tuple[int | None, str]], int, bool]:
-    """Return (cells, ncol, show_microarch_note).
+) -> tuple[list[tuple[int | None, str]], int]:
+    """Return (cells, ncol).
 
-    Matplotlib fills each column top-to-bottom (index = col * nrows + row). For ncol=3::
+    Matplotlib fills each column top-to-bottom. For ncol=2::
         col0: Baseline, + Routing opt.
-        col1: Greedy exec. (top), High parallelism exec. (bottom)
-        col2: (placeholder), (placeholder)
-    Handle order: [Baseline, + Routing, Greedy, High, _, _].
+        col1: Greedy (top), High parallelism (bottom)
     """
     by_label = {label: int(idx) for idx, label in star_study_entries}
-    show_microarch = bool(
-        _STAR_MICROARCH_OPT_SETTING_INDICES.intersection(by_label.values())
-    )
+    greedy = "Greedy exec. w. microarch. opt."
+    high = "High parallelism exec. w. microarch. opt."
 
-    def _cell(lbl: str | None, *, spacer: bool = False) -> tuple[int | None, str]:
-        if spacer:
-            return (None, _star_legend_col3_spacer_label())
-        if lbl is None or not str(lbl).strip():
-            return (None, _star_legend_col3_spacer_label())
+    def _cell(lbl: str) -> tuple[int | None, str]:
         if lbl in by_label:
             return (by_label[lbl], lbl)
-        return (None, _star_legend_col3_spacer_label())
-
-    if not show_microarch:
-        # ncol=2: [Baseline, + Routing, Greedy, High] → col0 | col1 (Greedy top)
-        return (
-            [
-                _cell("Baseline"),
-                _cell(" + Routing opt."),
-                _cell("Greedy exec."),
-                _cell("High parallelism exec."),
-            ],
-            2,
-            False,
-        )
+        return (None, " ")
 
     return (
         [
             _cell("Baseline"),
             _cell(" + Routing opt."),
-            _cell("Greedy exec."),
-            _cell("High parallelism exec."),
-            _cell(None, spacer=True),
-            _cell(None, spacer=True),
+            _cell(greedy),
+            _cell(high),
         ],
-        3,
-        True,
+        2,
     )
 
 
@@ -358,16 +306,6 @@ def _star_compile_strategy_legend_handle(
     *,
     star_setting_colors: dict[int, tuple],
 ) -> Line2D | Patch:
-    if setting_idx is None and _is_legend_col3_spacer_label(label):
-        return Line2D(
-            [],
-            [],
-            linestyle="None",
-            marker=None,
-            color="none",
-            label=label,
-            alpha=0.0,
-        )
     if setting_idx is None or not label.strip():
         return Line2D(
             [],
@@ -393,10 +331,8 @@ def _apply_star_compile_strategy_legend(
     legend_fs: float,
     legend_handlelength: float,
 ):
-    """STAR strategy legend: 2 rows; microarch fig.text between Greedy and High."""
-    cells, legend_ncol, show_microarch = _star_compile_strategy_legend_cells(
-        star_study_entries
-    )
+    """STAR strategy legend: 2 columns × 2 rows (microarch folded into labels)."""
+    cells, legend_ncol = _star_compile_strategy_legend_cells(star_study_entries)
     handles = [
         _star_compile_strategy_legend_handle(
             setting_idx,
@@ -416,52 +352,12 @@ def _apply_star_compile_strategy_legend(
         handletextpad=0.35,
         labelspacing=0.42,
         columnspacing=float(STAR_COMPILE_LEGEND_COLUMNSPACING),
-        borderpad=float(STAR_COMPILE_LEGEND_BORDERPAD) if show_microarch else 0.35,
+        borderpad=float(STAR_COMPILE_LEGEND_BORDERPAD),
     )
-    for text in leg.get_texts():
-        if _is_legend_col3_spacer_label(text.get_text()):
-            text.set_alpha(0.0)
-    micro_text = None
-    if show_microarch:
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
-        texts = {t.get_text().strip(): t for t in leg.get_texts()}
-        greedy_t = texts.get("Greedy exec.")
-        high_t = texts.get("High parallelism exec.")
-        if greedy_t is not None and high_t is not None:
-            bb_g = greedy_t.get_window_extent(renderer).transformed(
-                fig.transFigure.inverted()
-            )
-            bb_h = high_t.get_window_extent(renderer).transformed(
-                fig.transFigure.inverted()
-            )
-            # Greedy (top) and High (bottom) share column 1; microarch sits between them.
-            micro_x = 0.5 * (float(bb_g.x0) + float(bb_g.x1)) + float(
-                STAR_COMPILE_MICROARCH_DX
-            )
-            micro_y = 0.5 * (float(bb_h.y1) + float(bb_g.y0)) + float(
-                STAR_COMPILE_MICROARCH_DY
-            )
-            micro_text = fig.text(
-                micro_x,
-                micro_y,
-                _STAR_COMPILE_MICROARCH_NOTE,
-                ha="center",
-                va="center",
-                fontsize=legend_fs,
-                color=_FIG_AXIS_DARK,
-                zorder=25,
-            )
-            micro_text.set_clip_on(False)
 
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     bb = leg.get_window_extent(renderer).transformed(fig.transFigure.inverted())
-    if micro_text is not None:
-        bb_txt = micro_text.get_window_extent(renderer).transformed(
-            fig.transFigure.inverted()
-        )
-        bb = Bbox.union([bb, bb_txt])
     delta_x = (
         float(legend_x)
         - 0.5 * (float(bb.x0) + float(bb.x1))
@@ -474,11 +370,7 @@ def _apply_star_compile_strategy_legend(
     leg.set_zorder(2)
     if leg.get_frame() is not None:
         leg.get_frame().set_zorder(2)
-    if micro_text is not None:
-        mx, my = micro_text.get_position()
-        micro_text.set_position((float(mx) + delta_x, float(my)))
-        fig.add_artist(micro_text)
-    return leg, micro_text
+    return leg, None
 
 
 def _t_setting_study_entries() -> list[tuple[int, str]]:
@@ -855,6 +747,42 @@ def _apply_y_axis_thousands(axes: list) -> None:
         ax.yaxis.set_major_formatter(formatter)
 
 
+def _add_y_axis_thousands_offset_label(ax) -> None:
+    """Place ×10³ at the top of the y-axis (ticks already scaled by 1000)."""
+    ax.text(
+        0.0,
+        1.01,
+        r"$\times 10^{3}$",
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=_FIG_FONT_SIZE - 4,
+        color=_FIG_AXIS_DARK,
+        clip_on=False,
+    )
+
+
+def _qec_cycles_ylabel(*, log_scale: bool = False) -> str:
+    return _YLABEL_QEC_CYCLES_LOG if log_scale else _YLABEL_QEC_CYCLES
+
+
+def _add_subplot_panel_label(ax, letter: str) -> None:
+    """Upper-left panel label outside the axes frame to avoid overlapping data."""
+    ax.text(
+        -0.02,
+        1.06,
+        f"({letter})",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=_FIG_FONT_SIZE,
+        fontweight="bold",
+        color=_FIG_AXIS_DARK,
+        clip_on=False,
+        zorder=40,
+    )
+
+
 def _apply_panel_y_ticks(ax, *, nbins: int = STAR_AOD_COMPARISON_Y_NBINS) -> None:
     """Use more y-axis tick marks on execution-time panels."""
     ax.yaxis.set_major_locator(MaxNLocator(nbins=int(nbins), prune="lower"))
@@ -1160,12 +1088,11 @@ def _style_setting_aod_column_pre_layout(
         ax_aod_top.set_title("")
 
     if setting_panel_log_scale:
-        setting_y_label = "Execution time (log)"
-    elif y_axis_thousands:
-        setting_y_label = "Execution time (×10³)"
+        setting_y_label = _qec_cycles_ylabel(log_scale=True)
     else:
-        setting_y_label = "Execution time"
-    aod_y_label = "Execution time (×10³)" if y_axis_thousands else "Execution time"
+        setting_y_label = _qec_cycles_ylabel()
+    aod_shared_log = bool(getattr(resolved["aod_parent"], "_star_aod_shared_log", False))
+    aod_y_label = _qec_cycles_ylabel(log_scale=aod_shared_log)
     ax_setting_bot.set_ylabel(
         setting_y_label, fontsize=_FIG_FONT_SIZE, labelpad=2, color=_FIG_AXIS_DARK
     )
@@ -1193,10 +1120,16 @@ def _style_setting_aod_column_pre_layout(
         )
     if y_axis_thousands:
         _apply_y_axis_thousands([ax_aod_bot])
+        _add_y_axis_thousands_offset_label(ax_aod_bot)
         if not setting_panel_log_scale:
             _apply_y_axis_thousands([ax_setting_bot])
-    for _ax in (ax_aod_top, ax_aod_bot):
-        _apply_panel_y_ticks(_ax, nbins=T_CULTIVATION_Y_NBINS)
+            _add_y_axis_thousands_offset_label(ax_setting_bot)
+    if aod_shared_log:
+        for _ax in (ax_aod_top, ax_aod_bot):
+            _apply_setting_panel_log_ticks(_ax)
+    else:
+        for _ax in (ax_aod_top, ax_aod_bot):
+            _apply_panel_y_ticks(_ax, nbins=T_CULTIVATION_Y_NBINS)
     if setting_panel_log_scale:
         for _ax in (ax_setting_top, ax_setting_bot):
             _apply_setting_panel_log_ticks(_ax)
@@ -1258,7 +1191,7 @@ def _finalize_setting_aod_column_post_layout(
         fig.text(
             aod_pos.x0 - STAR_AOD_EXEC_TIME_LABEL_X,
             y_mid,
-            "Execution time",
+            _YLABEL_QEC_CYCLES,
             rotation=90,
             va="center",
             ha="center",
@@ -1326,7 +1259,7 @@ def _finalize_setting_aod_column_post_layout(
 
     star_legend_meta = getattr(ax_setting_parent, "_star_legend_meta", None)
     if is_star and star_legend_meta is not None:
-        strategy_leg, microarch_text = _apply_star_compile_strategy_legend(
+        strategy_leg, _microarch_text = _apply_star_compile_strategy_legend(
             fig,
             star_setting_colors=star_legend_meta["colors"],
             star_study_entries=star_legend_meta["entries"],
@@ -1346,8 +1279,6 @@ def _finalize_setting_aod_column_post_layout(
             )
             fig.add_artist(strategy_leg)
             fig.add_artist(expected_leg)
-        if microarch_text is not None:
-            fig.add_artist(microarch_text)
     else:
         combined_legend = list(setting_legend_handles)
         if SHOW_EXPECTED_TIME_LINE:
@@ -1422,13 +1353,13 @@ def _save_star_t_merged_setting_aod_figure(
     t_column_titles: tuple[str, str],
     aod_legend_handles: list | None,
     out_path: str,
-    xlabel: str = "Number of Qubits/Factories",
+    xlabel: str = _XLABEL_N_LOGICAL_QUBITS,
     legend_handlelength: float = 1.0,
     panel_hspace: float = STAR_SETTING_AOD_PANEL_HSPACE,
     figure_top: float = 0.90,
     setting_panel_log_scale: bool = False,
 ) -> None:
-    """Two columns (STAR left, T-cultivation right), each with setting + AOD rows."""
+    """Two columns (STAR left, T-state cultivation right), each with setting + AOD rows."""
     fig, axes = plt.subplots(2, 2, figsize=STAR_T_MERGED_FIGSIZE, squeeze=False)
     draw_star_setting(axes[0, 0])
     draw_star_aod(axes[1, 0])
@@ -1450,7 +1381,7 @@ def _save_star_t_merged_setting_aod_figure(
     _style_setting_aod_column_pre_layout(
         t_resolved,
         column_titles=t_column_titles,
-        architecture_label="T-cultivation",
+        architecture_label="T-state cultivation",
         xlabel=xlabel,
         y_axis_thousands=True,
         setting_panel_log_scale=setting_panel_log_scale,
@@ -1460,7 +1391,9 @@ def _save_star_t_merged_setting_aod_figure(
     fig.text(
         0.25, 0.975, "STAR architecture", ha="center", va="top", fontsize=header_fs
     )
-    fig.text(0.75, 0.975, "T-cultivation", ha="center", va="top", fontsize=header_fs)
+    fig.text(
+        0.75, 0.975, "T-state cultivation", ha="center", va="top", fontsize=header_fs
+    )
 
     bottom_margin = _merged_bottom_margin(axes[1, 0], axes[1, 1])
     fig.subplots_adjust(
@@ -1481,7 +1414,7 @@ def _save_star_t_merged_setting_aod_figure(
         legend_handlelength=legend_handlelength,
         is_star=True,
         legend_y_blend=0.72,
-        setting_legend_ncol=3,
+        setting_legend_ncol=2,
         bottom_axis_y_shift=STAR_AOD_BOTTOM_AXIS_Y_SHIFT,
     )
     _align_merged_t_aod_to_star(axes, star_resolved)
@@ -1505,6 +1438,12 @@ def _save_star_t_merged_setting_aod_figure(
         twin_ax=star_resolved.get("aod_twin_right"),
     )
     _commit_aod_x_axis(axes[1, 1], axes[0, 1])
+
+    # Panel labels (a)–(d) on the visible top/left axes of each subplot.
+    _add_subplot_panel_label(star_resolved["setting_top"], "a")
+    _add_subplot_panel_label(t_resolved["setting_top"], "b")
+    _add_subplot_panel_label(star_resolved["aod_bot"], "c")
+    _add_subplot_panel_label(t_resolved["aod_bot"], "d")
 
     _save_prx_figure(fig, out_path)
 
@@ -2450,6 +2389,7 @@ def _draw_setting_study_dual_aod_bars(
             alpha=0.92,
             edgecolor="black",
             linewidth=0.5,
+            hatch=SETTING_STUDY_DUAL_AOD_HATCH.get(aod_back),
             yerr=[err_lo, err_hi],
             capsize=0,
             error_kw={"elinewidth": 1.0, "ecolor": "black"},
@@ -2463,6 +2403,7 @@ def _draw_setting_study_dual_aod_bars(
             alpha=0.95,
             edgecolor="black",
             linewidth=0.45,
+            hatch=SETTING_STUDY_DUAL_AOD_HATCH.get(aod_front),
             zorder=2,
         )
 
@@ -2481,16 +2422,20 @@ def _dual_aod_bar_legend_handles(
     compare_aods: tuple[int, ...] = SETTING_STUDY_DUAL_AODS,
     front_blend: float = SETTING_STUDY_DUAL_AOD_FRONT_BLEND,
 ) -> list:
+    _ = (sample_color, front_blend)
+    aod0, aod1 = int(compare_aods[0]), int(compare_aods[1])
     return [
         Patch(
             facecolor=_AOD_DARK_RGB,
             edgecolor="black",
-            label=f"AOD = {int(compare_aods[0])}",
+            hatch=SETTING_STUDY_DUAL_AOD_HATCH.get(aod0),
+            label="1 AOD" if aod0 == 1 else f"{aod0} AODs",
         ),
         Patch(
             facecolor=_AOD_LIGHT_RGB,
             edgecolor="black",
-            label=f"AOD = {int(compare_aods[1])}",
+            hatch=SETTING_STUDY_DUAL_AOD_HATCH.get(aod1),
+            label="5 AODs" if aod1 == 5 else f"{aod1} AODs",
         ),
     ]
 
@@ -2863,12 +2808,16 @@ def _runtime_profile_aod_legend_handles() -> list:
     handles: list = []
     for aod in RUNTIME_PROFILE_AODS:
         hatch = RUNTIME_PROFILE_AOD_HATCH.get(int(aod))
+        if int(aod) == 1:
+            label = "1 AOD"
+        else:
+            label = f"{int(aod)} AODs"
         handles.append(
             Patch(
                 facecolor="0.75",
                 edgecolor="0.35",
                 hatch=hatch,
-                label=f"AOD = {int(aod)}",
+                label=label,
             )
         )
     return handles
@@ -3169,9 +3118,9 @@ def _plot_star_t_runtime_profile_figure(
         _draw_runtime_profile_grouped_aod_bars(
             axes[0, 0], star_profiles, _RUNTIME_PROFILE_STAR_COMPONENTS, aods=aods
         )
-        axes[0, 0].set_title("STAR", fontsize=panel_title_fs, pad=8)
+        axes[0, 0].set_title("(a) STAR", fontsize=panel_title_fs, pad=8)
     else:
-        axes[0, 0].set_title("STAR\n(no data)", fontsize=panel_title_fs)
+        axes[0, 0].set_title("(a) STAR\n(no data)", fontsize=panel_title_fs)
         axes[0, 0].axis("off")
 
     if _has_profile(t_profiles):
@@ -3182,28 +3131,27 @@ def _plot_star_t_runtime_profile_figure(
             aods=aods,
             y_axis_thousands=True,
         )
-        axes[1, 0].set_title("T-cultivation", fontsize=panel_title_fs, pad=8)
+        axes[1, 0].set_title(
+            r"(b) $T$-state cultivation.", fontsize=panel_title_fs, pad=8
+        )
     else:
-        axes[1, 0].set_title("T-cultivation\n(no data)", fontsize=panel_title_fs)
+        axes[1, 0].set_title(
+            r"(b) $T$-state cultivation." + "\n(no data)", fontsize=panel_title_fs
+        )
         axes[1, 0].axis("off")
 
-    y_label_star = "Execution time"
-    y_label_t = "Execution time (×10³)"
-    axes[0, 0].set_ylabel(y_label_star, fontsize=_FIG_FONT_SIZE, labelpad=2)
-    axes[1, 0].set_ylabel(y_label_t, fontsize=_FIG_FONT_SIZE, labelpad=2)
+    axes[0, 0].set_ylabel(_YLABEL_QEC_CYCLES, fontsize=_FIG_FONT_SIZE, labelpad=2)
+    axes[1, 0].set_ylabel(_YLABEL_QEC_CYCLES, fontsize=_FIG_FONT_SIZE, labelpad=2)
+    if _has_profile(t_profiles):
+        _add_y_axis_thousands_offset_label(axes[1, 0])
     for row in range(2):
         axes[row, 0].tick_params(axis="both", which="major", pad=1)
     axes[1, 0].set_xlabel(
-        "Number of Qubits/Factories", fontsize=_FIG_FONT_SIZE, labelpad=0
+        _XLABEL_N_LOGICAL_QUBITS, fontsize=_FIG_FONT_SIZE, labelpad=0
     )
 
-    fig.suptitle(
-        "Runtime profile",
-        fontsize=_FIG_FONT_SIZE + 1,
-        y=0.98,
-    )
-    fig.tight_layout(rect=(0.08, 0.06, 0.72, 0.94), pad=0.10, h_pad=0.35)
-    fig.subplots_adjust(top=0.9, bottom=0.08, left=0.14, right=0.72, hspace=0.28)
+    fig.tight_layout(rect=(0.08, 0.06, 0.72, 0.96), pad=0.10, h_pad=0.35)
+    fig.subplots_adjust(top=0.94, bottom=0.08, left=0.14, right=0.72, hspace=0.28)
     seen_labels: set[str] = set()
     legend_handles: list = []
     for _components in (
@@ -3451,7 +3399,7 @@ def _build_aod_bottom_legend_rows(
     *,
     aod_colors: dict[int, tuple[float, float, float]],
     base_rgb: tuple[float, float, float] | None = None,
-    strategy_label: str | None = "Sync. execution",
+    strategy_label: str | None = "Synchronous baseline",
     linestyle: str | tuple = "-",
     aod_linestyles: dict[int, str | tuple] | None = None,
 ) -> list[tuple[list[Line2D], list[str]]]:
@@ -3473,7 +3421,7 @@ def _attach_aod_bottom_legend_spec(
     *,
     aod_colors: dict[int, tuple[float, float, float]],
     base_rgb: tuple[float, float, float] | None = None,
-    strategy_label: str | None = "Sync. execution",
+    strategy_label: str | None = "Synchronous baseline",
     linestyle: str | tuple = "-",
     aod_linestyles: dict[int, str | tuple] | None = None,
 ) -> None:
@@ -3581,13 +3529,15 @@ def _plot_star_t_setting_and_aod_combined_grid(
     setting_panel_log_scale: bool = False,
     verbose: bool = True,
 ) -> None:
-    """STAR and T-cultivation figures: setting-study bars and AOD comparison.
+    """STAR and T-state cultivation figures: setting-study bars and AOD comparison.
 
-    Writes ``*_d{cd}_bars.pdf`` (or ``*_bars_log.pdf`` when *setting_panel_log_scale*)
+    Writes ``*_d{cd}.pdf`` (or ``*_log_y.pdf`` when *setting_panel_log_scale*)
     with overlapping AOD = 1 vs 5 bars on the setting panel.
     Setting-study bars use distinct green/blue/red hues per strategy. The AOD panel
     plots sync and best at AOD = 1, 2, 3, 5; each strategy uses a light→dark ramp of
     its own setting color (AOD 1 lightest, AOD 5 darkest).
+    When *setting_panel_log_scale*, the STAR AOD panel uses a shared log y-axis
+    instead of twin linear axes.
     """
     os.makedirs(output_dir, exist_ok=True)
     cd = int(
@@ -3831,50 +3781,90 @@ def _plot_star_t_setting_and_aod_combined_grid(
         return _aod_comparison_x_positions(_star_setting_anchor[0])
 
     def _draw_star_aod_panel(ax) -> None:
-        """AOD line panel: sync on left y-axis, best strategy on right (no broken axis)."""
+        """AOD line panel: twin linear axes, or shared log when *setting_panel_log_scale*."""
         x_positions = _star_aod_x_positions()
-        ax_right = ax.twinx()
-        ax._star_aod_twin_right = ax_right  # type: ignore[attr-defined]
         star_aod_axis_label = _star_aod_axis_label(star_aod_setting_idx)
-        ax._star_aod_twin_style = (  # type: ignore[attr-defined]
-            "Baseline",
-            star_sync_base,
-            star_best_base,
+        star_aod_legend_label = next(
+            (lbl for idx, lbl in star_study_entries if idx == star_aod_setting_idx),
+            star_aod_axis_label,
         )
-        ax._star_aod_twin_ylabel = star_aod_axis_label  # type: ignore[attr-defined]
-
         x_pts: list[int] = []
-        x_pts.extend(
-            _draw_aod_sweep_on_panel(
-                ax,
-                g_star_sync,
-                star_plot_aods,
-                star_sync_aod_colors,
-                linestyle="-",
-                x_positions=x_positions,
-            )
-        )
-        x_pts.extend(
-            _draw_aod_sweep_on_panel(
-                ax_right,
-                g_star_best,
-                star_plot_aods,
-                star_best_aod_colors,
-                linestyle=(0, (5, 2)),
-                x_positions=x_positions,
-            )
-        )
 
-        _apply_aod_series_ylim(ax, _grouped_aod_y_extent(g_star_sync))
-        _apply_aod_series_ylim(ax_right, _grouped_aod_y_extent(g_star_best))
+        if setting_panel_log_scale:
+            # Shared log axis: both sync and best on one comparable scale.
+            ax._star_aod_shared_log = True  # type: ignore[attr-defined]
+            x_pts.extend(
+                _draw_aod_sweep_on_panel(
+                    ax,
+                    g_star_sync,
+                    star_plot_aods,
+                    star_sync_aod_colors,
+                    linestyle="-",
+                    x_positions=x_positions,
+                )
+            )
+            x_pts.extend(
+                _draw_aod_sweep_on_panel(
+                    ax,
+                    g_star_best,
+                    star_plot_aods,
+                    star_best_aod_colors,
+                    linestyle=(0, (5, 2)),
+                    x_positions=x_positions,
+                )
+            )
+            sync_ext = _grouped_aod_y_extent(g_star_sync)
+            best_ext = _grouped_aod_y_extent(g_star_best)
+            positive_los = [v for v in (sync_ext[0], best_ext[0]) if v > 0]
+            y_lo = min(positive_los) if positive_los else 1.0
+            y_hi = max(sync_ext[1], best_ext[1], y_lo * 10.0)
+            ax.set_yscale("log")
+            ax.set_ylim(max(y_lo * 0.85, 1e-2), y_hi * 1.15)
+            _apply_setting_panel_log_ticks(ax)
+            _apply_theory_line(ax, x_pts, theory="star", x_positions=x_positions)
+            ax.set_axisbelow(True)
+            ax.grid(True, alpha=0.3, which="both")
+        else:
+            ax_right = ax.twinx()
+            ax._star_aod_twin_right = ax_right  # type: ignore[attr-defined]
+            ax._star_aod_twin_style = (  # type: ignore[attr-defined]
+                "Baseline",
+                star_sync_base,
+                star_best_base,
+            )
+            ax._star_aod_twin_ylabel = star_aod_axis_label  # type: ignore[attr-defined]
 
-        _apply_theory_line(ax, x_pts, theory="star", x_positions=x_positions)
-        ax.set_axisbelow(True)
-        ax.grid(True, alpha=0.3)
-        ax_right.set_axisbelow(True)
-        ax_right.grid(False)
-        _apply_panel_y_ticks(ax, nbins=STAR_AOD_COMPARISON_Y_NBINS)
-        _apply_panel_y_ticks(ax_right, nbins=STAR_AOD_COMPARISON_Y_NBINS)
+            x_pts.extend(
+                _draw_aod_sweep_on_panel(
+                    ax,
+                    g_star_sync,
+                    star_plot_aods,
+                    star_sync_aod_colors,
+                    linestyle="-",
+                    x_positions=x_positions,
+                )
+            )
+            x_pts.extend(
+                _draw_aod_sweep_on_panel(
+                    ax_right,
+                    g_star_best,
+                    star_plot_aods,
+                    star_best_aod_colors,
+                    linestyle=(0, (5, 2)),
+                    x_positions=x_positions,
+                )
+            )
+
+            _apply_aod_series_ylim(ax, _grouped_aod_y_extent(g_star_sync))
+            _apply_aod_series_ylim(ax_right, _grouped_aod_y_extent(g_star_best))
+
+            _apply_theory_line(ax, x_pts, theory="star", x_positions=x_positions)
+            ax.set_axisbelow(True)
+            ax.grid(True, alpha=0.3)
+            ax_right.set_axisbelow(True)
+            ax_right.grid(False)
+            _apply_panel_y_ticks(ax, nbins=STAR_AOD_COMPARISON_Y_NBINS)
+            _apply_panel_y_ticks(ax_right, nbins=STAR_AOD_COMPARISON_Y_NBINS)
 
         _attach_star_aod_bottom_legend_spec(
             ax,
@@ -3883,7 +3873,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
             sync_base_rgb=star_sync_base,
             best_base_rgb=star_best_base,
             baseline_label="Baseline",
-            best_label=star_aod_axis_label,
+            best_label=star_aod_legend_label,
         )
 
     def _draw_star_setting_panel(ax) -> None:
@@ -4111,7 +4101,7 @@ def _plot_star_t_setting_and_aod_combined_grid(
             t_column_titles=t_column_titles,
             aod_legend_handles=aod_legend_handles,
             out_path=merged_path,
-            xlabel="Number of Qubits/Factories",
+            xlabel=_XLABEL_N_LOGICAL_QUBITS,
             panel_hspace=STAR_SETTING_AOD_PANEL_HSPACE,
             figure_top=0.90,
             setting_panel_log_scale=setting_panel_log_scale,
@@ -4137,11 +4127,11 @@ def _plot_star_t_setting_and_aod_combined_grid(
             show_aod_colorbar=False,
             figure_title="STAR architecture",
             out_path=star_path,
-            xlabel="Number of Qubits/Factories",
+            xlabel=_XLABEL_N_LOGICAL_QUBITS,
             legend_y_blend=0.72,
             panel_hspace=STAR_SETTING_AOD_PANEL_HSPACE,
             bottom_axis_y_shift=STAR_AOD_BOTTOM_AXIS_Y_SHIFT,
-            setting_legend_ncol=3,
+            setting_legend_ncol=2,
             figure_top=0.90,
             column_titles=star_column_titles,
             setting_panel_log_scale=setting_panel_log_scale,
@@ -4161,9 +4151,9 @@ def _plot_star_t_setting_and_aod_combined_grid(
             setting_legend_handles=t_setting_legend_handles,
             aod_legend_handles=aod_legend_handles,
             show_aod_colorbar=False,
-            figure_title="T-cultivation",
+            figure_title="T-state cultivation",
             out_path=t_path,
-            xlabel="Number of Qubits/Factories",
+            xlabel=_XLABEL_N_LOGICAL_QUBITS,
             y_axis_thousands=True,
             legend_y_blend=T_SETTING_LEGEND_GAP_BLEND,
             column_titles=t_column_titles,
@@ -4182,10 +4172,15 @@ def process_star_t_setting_and_aod_figure(
     code_distance: int = STAR_T_GRID_COMPARISON_CODE_DISTANCE,
     setting_study_aod: int = STAR_T_SETTING_STUDY_AOD,
     setting_panel_log_scale: bool = False,
+    also_generate_log_scale: bool = True,
     show_expected_time_line: bool | None = None,
     verbose: bool = True,
 ) -> None:
-    """Load profiling CSVs and write STAR and T-cultivation stacked comparison PDFs."""
+    """Load profiling CSVs and write STAR and T-state cultivation comparison PDFs.
+
+    By default writes the twin-axis fig. 8 and also a log-scale variant
+    (shared log y on the STAR AOD panel; log y on setting-study panels).
+    """
     os.makedirs(output_dir, exist_ok=True)
 
     star_df = pd.read_csv(star_csv_file, engine="python", on_bad_lines="skip")
@@ -4211,17 +4206,22 @@ def process_star_t_setting_and_aod_figure(
             _filter_t_cultivation_main_compile_setting(t_df)
         )
         t_layers = _build_layer_frames(t_df_main)
-        _plot_star_t_setting_and_aod_combined_grid(
-            dfs_star,
-            dfs_star,
-            t_layers,
-            t_layers_ablation,
-            output_dir,
-            code_distance=code_distance,
-            setting_study_aod=setting_study_aod,
-            setting_panel_log_scale=setting_panel_log_scale,
-            verbose=verbose,
-        )
+
+        log_variants = [bool(setting_panel_log_scale)]
+        if also_generate_log_scale and not setting_panel_log_scale:
+            log_variants.append(True)
+        for log_scale in log_variants:
+            _plot_star_t_setting_and_aod_combined_grid(
+                dfs_star,
+                dfs_star,
+                t_layers,
+                t_layers_ablation,
+                output_dir,
+                code_distance=code_distance,
+                setting_study_aod=setting_study_aod,
+                setting_panel_log_scale=log_scale,
+                verbose=verbose,
+            )
         _plot_star_t_runtime_profile_figure(
             dfs_star,
             t_layers_ablation,
@@ -4238,7 +4238,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Plot STAR vs T-cultivation setting/AOD comparison figures."
+        description=(
+            "Plot STAR vs T-state cultivation setting/AOD comparison figures."
+        )
     )
     parser.add_argument(
         "--no-expected-time-line",
@@ -4249,7 +4251,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--setting-log-y",
         action="store_true",
-        help="Use log scale on compilation-strategy (setting-study) panel y-axes.",
+        help=(
+            "Only write the log-scale fig. 8 variant (shared log on STAR AOD; "
+            "log on setting-study panels). Default writes both linear and log."
+        ),
+    )
+    parser.add_argument(
+        "--no-log-y-variant",
+        action="store_true",
+        help="Skip the additional log-scale fig. 8 PDF.",
     )
     args = parser.parse_args()
 
@@ -4264,6 +4274,8 @@ if __name__ == "__main__":
             out_dir,
             show_expected_time_line=not args.no_expected_time_line,
             setting_panel_log_scale=args.setting_log_y,
+            also_generate_log_scale=not args.no_log_y_variant
+            and not args.setting_log_y,
             verbose=True,
         )
     else:
