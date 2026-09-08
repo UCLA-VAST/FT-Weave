@@ -1465,7 +1465,8 @@ def plot_star_timeline_movement_combined(
 
     *panel_labels*: optional labels for panels in row-major order
     ``[timeline_0, movement_0, timeline_1, movement_1, ...]`` (e.g. ``(a)``–``(d)``),
-    drawn centered below each subplot.
+    drawn left-aligned just above each subplot on a shared per-row baseline
+    (between the row subtitle and the axes).
     *row_marker_line_kwargs*: optional per-row overrides merged on top of
     *marker_line_kwargs* (useful when async markers need lower opacity).
     *extra_legend_handles* / *legend_handler_map*: separate legend group placed
@@ -1564,7 +1565,8 @@ def plot_star_timeline_movement_combined(
             else fig_height * (fig_width / with_text_fig_width)
         )
         fig = plt.figure(figsize=(fig_width, fig_height_plot))
-        row_hspace = 0.22 if panel_labels else 0.14
+        # Extra inter-row / top space for row titles with panel labels beneath them.
+        row_hspace = 0.30 if panel_labels else 0.14
         gs = fig.add_gridspec(
             row_count,
             2,
@@ -1746,10 +1748,12 @@ def plot_star_timeline_movement_combined(
                     legend_handles.append(patch)
 
         # Reserve bottom margin so legends sit clear of the axes / xlabel.
-        layout_top = 0.96 if suptitle else 0.97
+        # Leave extra top room for row titles + (a)–(d) when panel labels are used.
+        if panel_labels:
+            layout_top = 0.88 if suptitle else 0.92
+        else:
+            layout_top = 0.96 if suptitle else 0.97
         layout_bottom = 0.40 if extra_legend_handles else 0.22
-        if panel_labels and not extra_legend_handles:
-            layout_bottom += 0.03
         fig.tight_layout(rect=(0.02, layout_bottom, 0.98, layout_top))
 
         content_right = _layout_combined_timeline_movement_rows(
@@ -1759,14 +1763,20 @@ def plot_star_timeline_movement_combined(
         fig.subplots_adjust(right=min(0.98, content_right))
         content_center = (0.065 + content_right) / 2.0
 
-        row_title_offset = 0.008
-        first_row_title_y = timeline_axes[0].get_position().y1 + row_title_offset
+        # Vertical stack above each row: axes → panel labels → row title.
+        panel_label_gap = 0.010
+        row_title_above_labels = 0.032 if panel_labels else 0.008
+        first_row_tl_pos = timeline_axes[0].get_position()
+        first_row_title_y = (
+            first_row_tl_pos.y1 + panel_label_gap + row_title_above_labels
+        )
 
         for row_idx, row_title in enumerate(row_titles):
             pos = timeline_axes[row_idx].get_position()
+            title_y = pos.y1 + panel_label_gap + row_title_above_labels
             fig.text(
                 content_center,
-                pos.y1 + row_title_offset,
+                title_y,
                 row_title,
                 ha="center",
                 va="bottom",
@@ -1777,9 +1787,11 @@ def plot_star_timeline_movement_combined(
 
         if movement_axes:
             mv0 = movement_axes[0].get_position()
+            # Sit just above the movement panel (below the row subtitle / panel labels).
+            movement_title_y = mv0.y1 + 0.006
             fig.text(
                 (mv0.x0 + mv0.x1) / 2.0,
-                mv0.y1 + 0.006,
+                movement_title_y,
                 movement_column_title,
                 ha="center",
                 va="bottom",
@@ -1788,38 +1800,29 @@ def plot_star_timeline_movement_combined(
                 transform=fig.transFigure,
             )
 
-        panel_label_ys: dict[int, float] = {}
         if panel_labels:
             panel_label_fs = _scaled_font_size(heading_fs + 2, title_font_scale)
-            panel_axes = []
-            for tl_ax, mv_ax in zip(timeline_axes, movement_axes):
-                panel_axes.extend([tl_ax, mv_ax])
-            n_rows = len(timeline_axes)
-            for panel_idx, (label, ax) in enumerate(zip(panel_labels, panel_axes)):
-                pos = ax.get_position()
-                row_idx = panel_idx // 2
-                is_bottom_row = row_idx == n_rows - 1
-                is_timeline = (panel_idx % 2) == 0
-                is_movement = not is_timeline
-                # (b)/(d) sit close under the movement panels; (c) clears xlabel.
-                if is_bottom_row and is_timeline:
-                    y_offset = 0.055
-                elif is_movement:
-                    y_offset = 0.001
-                else:
-                    y_offset = 0.010
-                label_y = pos.y0 - y_offset
-                panel_label_ys[panel_idx] = label_y
-                fig.text(
-                    (pos.x0 + pos.x1) / 2.0,
-                    label_y,
-                    label,
-                    ha="center",
-                    va="top",
-                    fontsize=panel_label_fs,
-                    fontweight="bold",
-                    transform=fig.transFigure,
-                )
+            for row_idx, (tl_ax, mv_ax) in enumerate(
+                zip(timeline_axes, movement_axes)
+            ):
+                # Shared baseline from the timeline top so (a)/(b) and (c)/(d)
+                # sit on one horizontal line even if movement axes differ.
+                label_y = tl_ax.get_position().y1 + panel_label_gap
+                row_panel_labels = panel_labels[2 * row_idx : 2 * row_idx + 2]
+                for label, ax in zip(row_panel_labels, (tl_ax, mv_ax)):
+                    pos = ax.get_position()
+                    fig.text(
+                        pos.x0,
+                        label_y,
+                        label,
+                        ha="left",
+                        va="bottom",
+                        fontsize=panel_label_fs,
+                        fontweight="bold",
+                        transform=fig.transFigure,
+                        clip_on=False,
+                        zorder=40,
+                    )
 
         if suptitle:
             suptitle_gap = 0.006
@@ -1839,23 +1842,19 @@ def plot_star_timeline_movement_combined(
         legend_ncol = min(n_handles, 7) if n_handles <= 7 else (n_handles + 1) // 2
 
         # Stack legends in the reserved bottom margin:
-        #   panel (d) → AOD legend (right, under (d)) → operation legend (lower).
+        #   axes bottom → AOD legend (right, under movement panel) → operation legend.
         axes_bottom = min(
             ax.get_position().y0 for ax in [*timeline_axes, *movement_axes]
         )
-        d_label_y = panel_label_ys.get(
-            2 * (len(timeline_axes) - 1) + 1, axes_bottom - 0.001
-        )
         mv_pos = movement_axes[-1].get_position()
-        # Tight gap under the (d) caption.
-        below_d_y = d_label_y - 0.02
+        below_d_y = axes_bottom - 0.02
 
         if extra_legend_handles:
             secondary_handler_map = {
                 **_trap_grid_legend_handler_map(),
                 **(legend_handler_map or {}),
             }
-            # Right side of the figure, directly below panel (d).
+            # Right side of the figure, directly below the bottom movement panel.
             aod_legend = fig.legend(
                 handles=list(extra_legend_handles),
                 loc="upper right",
