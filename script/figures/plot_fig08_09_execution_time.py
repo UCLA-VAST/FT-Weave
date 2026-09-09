@@ -3110,7 +3110,7 @@ def _plot_star_t_runtime_profile_figure(
                 "T-cultivation", t_profiles, code_distance=cd, aods=aods
             )
 
-    fig, axes = plt.subplots(2, 1, figsize=(10.2, 11.5), squeeze=False)
+    fig, axes = plt.subplots(2, 1, figsize=(10.2, 9.6), squeeze=False)
     legend_fs = _FIG_FONT_SIZE - 4
     panel_title_fs = _FIG_FONT_SIZE - 1
 
@@ -3118,9 +3118,11 @@ def _plot_star_t_runtime_profile_figure(
         _draw_runtime_profile_grouped_aod_bars(
             axes[0, 0], star_profiles, _RUNTIME_PROFILE_STAR_COMPONENTS, aods=aods
         )
-        axes[0, 0].set_title("(a) STAR", fontsize=panel_title_fs, pad=8)
+        axes[0, 0].set_title("STAR", loc="left", fontsize=panel_title_fs, pad=8)
     else:
-        axes[0, 0].set_title("(a) STAR\n(no data)", fontsize=panel_title_fs)
+        axes[0, 0].set_title(
+            "STAR (no data)", loc="left", fontsize=panel_title_fs, pad=8
+        )
         axes[0, 0].axis("off")
 
     if _has_profile(t_profiles):
@@ -3132,26 +3134,66 @@ def _plot_star_t_runtime_profile_figure(
             y_axis_thousands=True,
         )
         axes[1, 0].set_title(
-            r"(b) $T$-state cultivation.", fontsize=panel_title_fs, pad=8
+            r"$T$-state cultivation.",
+            loc="left",
+            fontsize=panel_title_fs,
+            pad=8,
         )
     else:
         axes[1, 0].set_title(
-            r"(b) $T$-state cultivation." + "\n(no data)", fontsize=panel_title_fs
+            r"$T$-state cultivation. (no data)",
+            loc="left",
+            fontsize=panel_title_fs,
+            pad=8,
         )
         axes[1, 0].axis("off")
 
     axes[0, 0].set_ylabel(_YLABEL_QEC_CYCLES, fontsize=_FIG_FONT_SIZE, labelpad=2)
     axes[1, 0].set_ylabel(_YLABEL_QEC_CYCLES, fontsize=_FIG_FONT_SIZE, labelpad=2)
     if _has_profile(t_profiles):
-        _add_y_axis_thousands_offset_label(axes[1, 0])
+        # Place ×10³ inside the axes so it stays clear of the left title / (b) tag.
+        axes[1, 0].text(
+            0.01,
+            0.98,
+            r"$\times 10^{3}$",
+            transform=axes[1, 0].transAxes,
+            ha="left",
+            va="top",
+            fontsize=_FIG_FONT_SIZE - 4,
+            color=_FIG_AXIS_DARK,
+            clip_on=False,
+        )
     for row in range(2):
         axes[row, 0].tick_params(axis="both", which="major", pad=1)
     axes[1, 0].set_xlabel(
-        _XLABEL_N_LOGICAL_QUBITS, fontsize=_FIG_FONT_SIZE, labelpad=0
+        _XLABEL_N_LOGICAL_QUBITS, fontsize=_FIG_FONT_SIZE, labelpad=2
     )
 
-    fig.tight_layout(rect=(0.08, 0.06, 0.72, 0.96), pad=0.10, h_pad=0.35)
-    fig.subplots_adjust(top=0.94, bottom=0.08, left=0.14, right=0.72, hspace=0.28)
+    # Full-width column; leave a short footer for the shared legend.
+    fig.tight_layout(pad=0.30, h_pad=0.65)
+    fig.subplots_adjust(top=0.94, bottom=0.11, left=0.13, right=0.98, hspace=0.40)
+
+    # (a)/(b) centered above each y-axis label (left of the axes frame).
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    for ax, letter in ((axes[0, 0], "a"), (axes[1, 0], "b")):
+        ylabel_bb = ax.yaxis.label.get_window_extent(renderer).transformed(
+            ax.transAxes.inverted()
+        )
+        ax.text(
+            0.5 * (ylabel_bb.x0 + ylabel_bb.x1),
+            1.02,
+            f"({letter})",
+            transform=ax.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=_FIG_FONT_SIZE,
+            fontweight="bold",
+            color=_FIG_AXIS_DARK,
+            clip_on=False,
+            zorder=40,
+        )
+
     seen_labels: set[str] = set()
     legend_handles: list = []
     for _components in (
@@ -3166,21 +3208,34 @@ def _plot_star_t_runtime_profile_figure(
                 Line2D([0], [0], color=color, linewidth=4, label=label)
             )
     legend_handles.extend(_runtime_profile_aod_legend_handles())
+
+    # Park the legend just under the x-axis label (measured after layout).
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    bot = axes[1, 0].get_position()
+    xlabel_bb = (
+        axes[1, 0]
+        .xaxis.label.get_window_extent(renderer)
+        .transformed(fig.transFigure.inverted())
+    )
+    legend_top = float(xlabel_bb.y0) - 0.008
     fig.legend(
         handles=legend_handles,
-        loc="center left",
-        bbox_to_anchor=(0.72, 0.5),
+        loc="upper center",
+        bbox_to_anchor=(0.5 * (bot.x0 + bot.x1) - 0.03, legend_top),
+        ncol=4,
         fontsize=legend_fs,
         frameon=True,
         handlelength=1.0,
         handleheight=0.65,
-        columnspacing=0.8,
+        columnspacing=1.0,
         handletextpad=0.4,
-        labelspacing=0.45,
+        labelspacing=0.28,
+        borderpad=0.28,
     )
 
     out_path = os.path.join(output_dir, f"fig09_runtime_profiles_d{cd}.pdf")
-    fig.savefig(out_path, bbox_inches="tight", pad_inches=0.06)
+    fig.savefig(out_path, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
     if verbose:
         print(f"Saved: {out_path}")
